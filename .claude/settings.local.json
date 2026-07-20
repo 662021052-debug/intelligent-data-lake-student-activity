@@ -77,7 +77,23 @@
       "Bash(find 'C:\\\\Users\\\\nott4/.claude/projects' -name *.jsonl -type f -printf '%T@ %p\\\\n')",
       "Bash(awk '{print $2}')",
       "Read(//tmp/**)",
-      "Bash(xargs -I{} stat -c '%y' {})"
+      "Bash(xargs -I{} stat -c '%y' {})",
+      "Bash(backend/.venv/Scripts/python.exe --version)",
+      "Bash(backend/.venv/Scripts/python.exe -m pip show alembic)",
+      "Bash(.venv/Scripts/python.exe -m pip install \"alembic==1.13.2\")",
+      "Bash(.venv/Scripts/python.exe -m alembic init alembic)",
+      "Bash(DATABASE_URL=\"sqlite:///./_alembic_init.db\" .venv/Scripts/python.exe -m alembic revision --autogenerate -m \"initial schema\")",
+      "Bash(DATABASE_URL=\"sqlite:///./_alembic_verify.db\" .venv/Scripts/python.exe -m alembic upgrade head)",
+      "Bash(.venv/Scripts/python.exe -c \"import sqlite3; c=sqlite3.connect\\('_alembic_verify.db'\\); print\\([r[0] for r in c.execute\\(\\\\\"select name from sqlite_master where type='table'\\\\\"\\)]\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import sqlite3; c=sqlite3.connect\\('_alembic_verify.db'\\); print\\(sorted\\(r[0] for r in c.execute\\(\\\\\"select name from sqlite_master where type='table'\\\\\"\\)\\)\\)\")",
+      "Bash(DATABASE_URL=\"sqlite:///./_alembic_verify.db\" .venv/Scripts/python.exe -m alembic downgrade base)",
+      "Bash(.venv/Scripts/python.exe -m alembic stamp head)",
+      "Bash(.venv/Scripts/python.exe -m alembic check)",
+      "Bash(.venv/Scripts/python.exe -m pytest -q)",
+      "Bash(git --version)",
+      "Bash(git remote add origin https://github.com/662021052-debug/intelligent-data-lake-student-activity.git)",
+      "Bash(git remote -v)",
+      "Bash(git push -u origin master)"
     ]
   }
 }
