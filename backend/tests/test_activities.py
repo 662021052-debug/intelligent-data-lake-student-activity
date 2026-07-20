@@ -2,7 +2,7 @@ def make_activity(client, name="กิจกรรมทดสอบ", activity_
     payload = {
         "name": name,
         "activity_type": activity_type,
-        "hour_category": "เลือกเสรี",
+        "subcategory_id": 1,
         "is_required": False,
         "max_participants": 50,
         "start_at": "2026-08-01T09:00:00",
@@ -88,7 +88,7 @@ def test_admin_created_activity_is_auto_approved(client, tokens):
         json={
             "name": "กิจกรรมของ admin",
             "activity_type": "วิชาการ",
-            "hour_category": "เลือกเสรี",
+            "subcategory_id": 1,
             "is_required": False,
             "max_participants": 50,
             "start_at": "2026-08-01T09:00:00",

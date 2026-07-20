@@ -38,3 +38,16 @@ class HourCategorySummary(BaseModel):
     earned_hours: float
     completed: bool
     subcategories: list[HourSubcategorySummary]
+
+
+class HourSubcategoryRead(BaseModel):
+    id: int
+    name: str
+    required_hours: float
+
+
+class HourCategoryRead(BaseModel):
+    id: int
+    name: str
+    required_hours: float
+    subcategories: list[HourSubcategoryRead]

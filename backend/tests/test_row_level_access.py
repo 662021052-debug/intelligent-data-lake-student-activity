@@ -25,7 +25,6 @@ def _make_activity(session, name, created_by=None):
     activity = Activity(
         name=name,
         activity_type="วิชาการ",
-        hour_category="เลือกเสรี",
         is_required=False,
         max_participants=50,
         start_at=datetime(2026, 8, 1, 9, 0, 0),
@@ -184,7 +183,7 @@ def test_student_cannot_create_activity(client, tokens):
     payload = {
         "name": "กิจกรรมที่นิสิตพยายามสร้าง",
         "activity_type": "วิชาการ",
-        "hour_category": "เลือกเสรี",
+        "subcategory_id": 1,
         "is_required": False,
         "max_participants": 10,
         "start_at": "2026-08-01T09:00:00",
@@ -200,7 +199,7 @@ def test_student_cannot_update_or_delete_activity(client, tokens):
         json={
             "name": "กิจกรรมทดสอบสิทธิ์",
             "activity_type": "วิชาการ",
-            "hour_category": "เลือกเสรี",
+            "subcategory_id": 1,
             "is_required": False,
             "max_participants": 10,
             "start_at": "2026-08-01T09:00:00",

@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../models/activity.dart';
+import '../models/hour_category.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../widgets/dialogs.dart';
 import 'activity_participants_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
-const _hourCategories = ['บังคับ', 'เลือกเสรี', 'จิตอาสา'];
+
+String _subcategoryLabel(List<HourCategory> categories, int? subcategoryId) {
+  if (subcategoryId == null) return '-';
+  for (final category in categories) {
+    for (final sub in category.subcategories) {
+      if (sub.id == subcategoryId) return '${category.name} › ${sub.name}';
+    }
+  }
+  return '-';
+}
 
 String _formatDateTime(DateTime dt) {
   String two(int n) => n.toString().padLeft(2, '0');
@@ -25,6 +35,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   static const int _limit = 10;
 
   List<Activity> _activities = [];
+  List<HourCategory> _categories = [];
   int _total = 0;
   int _skip = 0;
   bool _loading = false;
@@ -37,6 +48,16 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await ApiService.fetchList('/hour-categories', HourCategory.fromJson);
+      if (mounted) setState(() => _categories = categories);
+    } catch (_) {
+      // non-fatal: table falls back to "-" and the form dialog shows an empty picker
+    }
   }
 
   @override
@@ -69,7 +90,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   Future<void> _openForm({Activity? existing}) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => _ActivityFormDialog(existing: existing),
+      builder: (_) => _ActivityFormDialog(existing: existing, categories: _categories),
     );
     if (result == true) _load();
   }
@@ -195,7 +216,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
             .map((a) => DataRow(cells: [
                   DataCell(Text(a.name)),
                   DataCell(Text(a.activityType)),
-                  DataCell(Text(a.hourCategory)),
+                  DataCell(Text(_subcategoryLabel(_categories, a.subcategoryId))),
                   DataCell(Icon(a.isRequired ? Icons.check : Icons.close,
                       size: 18, color: a.isRequired ? Colors.green : Colors.grey)),
                   DataCell(Text('${a.maxParticipants}')),
@@ -301,7 +322,8 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
 
 class _ActivityFormDialog extends StatefulWidget {
   final Activity? existing;
-  const _ActivityFormDialog({this.existing});
+  final List<HourCategory> categories;
+  const _ActivityFormDialog({this.existing, required this.categories});
 
   @override
   State<_ActivityFormDialog> createState() => _ActivityFormDialogState();
@@ -313,7 +335,7 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
   late final TextEditingController _maxParticipantsController;
   late final TextEditingController _locationController;
   String _activityType = _activityTypes.first;
-  String _hourCategory = _hourCategories.first;
+  int? _subcategoryId;
   bool _isRequired = false;
   late DateTime _startAt;
   bool _saving = false;
@@ -328,7 +350,10 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
         TextEditingController(text: e != null ? '${e.maxParticipants}' : '50');
     _locationController = TextEditingController(text: e?.location ?? '');
     _activityType = e?.activityType ?? _activityTypes.first;
-    _hourCategory = e?.hourCategory ?? _hourCategories.first;
+    _subcategoryId = e?.subcategoryId ??
+        (widget.categories.isNotEmpty && widget.categories.first.subcategories.isNotEmpty
+            ? widget.categories.first.subcategories.first.id
+            : null);
     _isRequired = e?.isRequired ?? false;
     _startAt = e?.startAt ?? DateTime.now().add(const Duration(days: 1));
   }
@@ -361,6 +386,10 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_subcategoryId == null) {
+      setState(() => _error = 'กรุณาเลือกหมวดชั่วโมง');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -368,7 +397,7 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
     final body = {
       'name': _nameController.text.trim(),
       'activity_type': _activityType,
-      'hour_category': _hourCategory,
+      'subcategory_id': _subcategoryId,
       'is_required': _isRequired,
       'max_participants': int.parse(_maxParticipantsController.text.trim()),
       'start_at': _startAt.toIso8601String(),
@@ -411,12 +440,19 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
                   items: _activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                   onChanged: (v) => setState(() => _activityType = v ?? _activityTypes.first),
                 ),
-                DropdownButtonFormField<String>(
-                  initialValue: _hourCategory,
+                DropdownButtonFormField<int>(
+                  initialValue: _subcategoryId,
                   decoration: const InputDecoration(labelText: 'หมวดชั่วโมง'),
-                  items:
-                      _hourCategories.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (v) => setState(() => _hourCategory = v ?? _hourCategories.first),
+                  items: [
+                    for (final category in widget.categories)
+                      for (final sub in category.subcategories)
+                        DropdownMenuItem(
+                          value: sub.id,
+                          child: Text('${category.name} › ${sub.name}', overflow: TextOverflow.ellipsis),
+                        ),
+                  ],
+                  onChanged: (v) => setState(() => _subcategoryId = v),
+                  validator: (v) => v == null ? 'กรุณาเลือกหมวดชั่วโมง' : null,
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

@@ -19,7 +19,7 @@ def _make_activity(client, name="กิจกรรมของ owner", headers=
     payload = {
         "name": name,
         "activity_type": "วิชาการ",
-        "hour_category": "เลือกเสรี",
+        "subcategory_id": 1,
         "is_required": False,
         "max_participants": 50,
         "start_at": "2026-08-01T09:00:00",

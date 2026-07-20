@@ -2,7 +2,7 @@ class Activity {
   final int? id;
   final String name;
   final String activityType;
-  final String hourCategory;
+  final int? subcategoryId;
   final bool isRequired;
   final int maxParticipants;
   final DateTime startAt;
@@ -15,7 +15,7 @@ class Activity {
     this.id,
     required this.name,
     required this.activityType,
-    required this.hourCategory,
+    this.subcategoryId,
     this.isRequired = false,
     required this.maxParticipants,
     required this.startAt,
@@ -31,7 +31,7 @@ class Activity {
         id: json['id'] as int?,
         name: json['name'] as String,
         activityType: json['activity_type'] as String,
-        hourCategory: json['hour_category'] as String,
+        subcategoryId: json['subcategory_id'] as int?,
         isRequired: json['is_required'] as bool? ?? false,
         maxParticipants: json['max_participants'] as int,
         startAt: DateTime.parse(json['start_at'] as String),
@@ -44,7 +44,7 @@ class Activity {
   Map<String, dynamic> toJson() => {
         'name': name,
         'activity_type': activityType,
-        'hour_category': hourCategory,
+        'subcategory_id': subcategoryId,
         'is_required': isRequired,
         'max_participants': maxParticipants,
         'start_at': startAt.toIso8601String(),

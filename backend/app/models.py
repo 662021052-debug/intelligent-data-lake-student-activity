@@ -82,7 +82,6 @@ class HourSubcategory(SQLModel, table=True):
 class ActivityBase(SQLModel):
     name: str
     activity_type: str
-    hour_category: str
     is_required: bool = False
     max_participants: int
     start_at: datetime
@@ -101,13 +100,14 @@ class Activity(ActivityBase, table=True):
 
 
 class ActivityCreate(ActivityBase):
-    pass
+    # subcategory_id is the single source of truth for hour-category classification;
+    # required here (unlike the nullable table column) so every new activity is classified.
+    subcategory_id: int
 
 
 class ActivityUpdate(SQLModel):
     name: Optional[str] = None
     activity_type: Optional[str] = None
-    hour_category: Optional[str] = None
     is_required: Optional[bool] = None
     max_participants: Optional[int] = None
     start_at: Optional[datetime] = None

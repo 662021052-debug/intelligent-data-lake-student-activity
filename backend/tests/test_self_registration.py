@@ -47,7 +47,6 @@ def _make_approved_activity(
     activity = Activity(
         name=name,
         activity_type="วิชาการ",
-        hour_category="เลือกเสรี",
         is_required=False,
         max_participants=max_participants,
         start_at=datetime.utcnow() + timedelta(days=start_in_days),
@@ -119,7 +118,6 @@ def test_register_pending_activity_rejected(client, session):
     activity = Activity(
         name="กิจกรรมยังไม่อนุมัติ",
         activity_type="วิชาการ",
-        hour_category="เลือกเสรี",
         is_required=False,
         max_participants=10,
         start_at=datetime.utcnow() + timedelta(days=7),

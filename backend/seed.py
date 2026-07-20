@@ -44,7 +44,6 @@ LAST_NAMES = [
 ]
 
 ACTIVITY_TYPES = ["จิตอาสา", "กีฬา", "วิชาการ", "ศิลปวัฒนธรรม", "อบรม/สัมมนา"]
-HOUR_CATEGORIES = ["บังคับ", "เลือกเสรี", "จิตอาสา"]
 LOCATIONS = ["หอประชุมใหญ่", "ห้อง SC101", "สนามกีฬากลาง", "ลานกิจกรรม", "ห้องประชุมคณะ"]
 
 ACTIVITY_NAMES = [
@@ -164,7 +163,6 @@ def seed() -> None:
             activity = Activity(
                 name=name,
                 activity_type=random.choice(ACTIVITY_TYPES),
-                hour_category=random.choice(HOUR_CATEGORIES),
                 is_required=random.choice([True, False]),
                 max_participants=random.choice([30, 50, 100, 150]),
                 start_at=base_date + timedelta(days=i * 3),

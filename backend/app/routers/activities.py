@@ -57,7 +57,7 @@ def list_activities(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=200),
     activity_type: Optional[str] = None,
-    hour_category: Optional[str] = None,
+    subcategory_id: Optional[int] = None,
     is_required: Optional[bool] = None,
     search: Optional[str] = Query(None, description="ค้นหาจากชื่อกิจกรรม"),
     session: Session = Depends(get_session),
@@ -76,9 +76,9 @@ def list_activities(
     if activity_type:
         query = query.where(Activity.activity_type == activity_type)
         count_query = count_query.where(Activity.activity_type == activity_type)
-    if hour_category:
-        query = query.where(Activity.hour_category == hour_category)
-        count_query = count_query.where(Activity.hour_category == hour_category)
+    if subcategory_id is not None:
+        query = query.where(Activity.subcategory_id == subcategory_id)
+        count_query = count_query.where(Activity.subcategory_id == subcategory_id)
     if is_required is not None:
         query = query.where(Activity.is_required == is_required)
         count_query = count_query.where(Activity.is_required == is_required)

@@ -65,7 +65,6 @@ def _make_activity(session, subcategory_id, admin_id, name="กิจกรร�
     activity = Activity(
         name=name,
         activity_type="วิชาการ",
-        hour_category="เลือกเสรี",
         is_required=False,
         max_participants=50,
         start_at=datetime(2026, 8, 1, 9, 0, 0),
