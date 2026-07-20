@@ -1,0 +1,101 @@
+# Intelligent Data Lake for Student Activity Participation Tracking
+
+ระบบ CRUD จัดการข้อมูลนิสิต / กิจกรรม / การเข้าร่วมกิจกรรม (เฟส ก.ค. — ยังไม่รวม AI / Medallion / OCR / Dashboard)
+
+## Tech stack
+
+- Backend: Python + FastAPI + SQLModel
+- Database: PostgreSQL (dev ใช้ SQLite ได้)
+- Frontend: Flutter Web
+- Auth: JWT + role (student / staff / admin)
+- Deploy: Docker Compose (Postgres + FastAPI)
+
+## รัน Backend ด้วย Docker Compose (แนะนำ)
+
+```bash
+docker compose up --build
+```
+
+- Postgres จะขึ้นที่ port `5432`, backend ที่ `http://localhost:8000`
+- คอนเทนเนอร์ backend จะรัน `seed.py` อัตโนมัติก่อนเปิดเซิร์ฟเวอร์ (รันซ้ำได้ ข้อมูลจะไม่ซ้ำ)
+- เปิด Swagger ได้ที่ `http://localhost:8000/docs`
+- ปรับค่า `JWT_SECRET` ฯลฯ ได้ผ่าน environment variable หรือสร้างไฟล์ `.env` จาก `.env.example` ที่ root แล้ว docker compose จะอ่านมาแทนค่า default อัตโนมัติ
+
+หยุดและลบคอนเทนเนอร์:
+
+```bash
+docker compose down          # เก็บข้อมูลใน volume ไว้
+docker compose down -v       # ลบข้อมูลใน Postgres ด้วย
+```
+
+## รัน Backend แบบ local (dev เร็ว ใช้ SQLite)
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/Scripts/activate   # Windows Git Bash; หรือ .venv\Scripts\Activate.ps1 บน PowerShell
+pip install -r requirements-dev.txt
+python seed.py
+uvicorn app.main:app --reload
+```
+
+ค่าเริ่มต้นใช้ SQLite (`backend/dev.db`) ไม่ต้องตั้งค่าอะไรเพิ่ม
+
+รันเทส:
+
+```bash
+cd backend
+pytest
+```
+
+## ผู้ใช้ที่ seed ไว้ (สำหรับทดสอบ login)
+
+| username | password    | role    |
+|----------|-------------|---------|
+| admin    | admin123    | admin   |
+| staff    | staff123    | staff   |
+| student  | student123  | student |
+
+`role: student` อ่านข้อมูลได้อย่างเดียว, `staff`/`admin` แก้ไขข้อมูลได้ (POST/PUT/DELETE), `admin` เท่านั้นที่สร้าง user ใหม่ได้ผ่าน `POST /auth/register`
+
+## Frontend (Flutter Web)
+
+```bash
+cd frontend
+flutter pub get
+flutter run -d chrome
+```
+
+- ค่าเริ่มต้นแอปจะเรียก backend ที่ `http://localhost:8000` (ตั้งค่าใน `lib/config.dart`)
+- ถ้า backend รันอยู่คนละ URL ให้สั่ง `flutter run -d chrome --dart-define=API_BASE_URL=https://your-api.example.com`
+- Login ด้วย user ที่ seed ไว้ (ตารางด้านบน) แล้วใช้งานเมนู นิสิต / กิจกรรม / การเข้าร่วมกิจกรรม ได้ทันที
+- รันเทส widget:
+
+```bash
+cd frontend
+flutter test
+```
+
+Build สำหรับ deploy จริง:
+
+```bash
+cd frontend
+flutter build web
+```
+
+## โครงสร้างโปรเจกต์
+
+```
+backend/
+  app/
+    models.py       # SQLModel: Student, Activity, Participation, User
+    database.py     # engine + session
+    auth.py          # JWT + password hashing + role guard
+    config.py        # อ่าน env
+    routers/         # students, activities, participations, auth
+  seed.py            # ใส่ข้อมูลสมมุติ
+  tests/             # pytest (CRUD + auth)
+  Dockerfile
+docker-compose.yml
+.env.example
+```
