@@ -62,7 +62,22 @@
       "Bash(timeout 120 bash -c 'until grep -q \"Dart VM Service\\\\|Starting application\" flutter_run.log 2>/dev/null; do sleep 2; done')",
       "Bash(gh pr *)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git config user.name *)",
+      "Bash(git config user.email *)",
+      "Bash(claude doctor *)",
+      "Bash(npm -g config get prefix)",
+      "Read(//c/Users/nott4/.claude/**)",
+      "Read(//c/Users/nott4/.claude/plugins/**)",
+      "Read(//c/Users/nott4/.claude.json)",
+      "Read(//c/ProgramData/ClaudeCode/**)",
+      "Bash(claude --version)",
+      "Bash(npm view @anthropic-ai/claude-code@latest version --registry https://registry.npmjs.org/)",
+      "Bash(find 'C:\\\\Users\\\\nott4/.claude/projects' -name *.jsonl -type f -printf '%T@ %p\\\\n')",
+      "Bash(awk '{print $2}')",
+      "Read(//tmp/**)",
+      "Bash(xargs -I{} stat -c '%y' {})"
     ]
   }
 }
