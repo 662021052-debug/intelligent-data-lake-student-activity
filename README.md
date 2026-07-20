@@ -48,6 +48,27 @@ cd backend
 pytest
 ```
 
+## Database migrations (Alembic)
+
+Schema เปลี่ยน (เพิ่ม/แก้ไข column, table) ให้ใช้ Alembic แทนการลบ `dev.db` ทิ้ง — `SQLModel.metadata.create_all()` (ที่รันตอน startup และใน `seed.py`) สร้างเฉพาะตารางที่ยังไม่มี ไม่ migrate ตารางที่มีอยู่แล้ว
+
+```bash
+cd backend
+
+# หลังแก้ backend/app/models.py แล้ว สร้าง migration ใหม่จาก diff อัตโนมัติ
+alembic revision --autogenerate -m "อธิบายการเปลี่ยนแปลง"
+
+# ตรวจสอบไฟล์ที่ alembic/versions/ ที่ generate ก่อนรัน แล้วค่อย apply
+alembic upgrade head
+
+# ย้อนกลับ 1 migration ถ้าจำเป็น
+alembic downgrade -1
+```
+
+Alembic อ่าน connection URL จาก `app.config.settings.database_url` เดียวกับแอป (ผ่าน env var `DATABASE_URL` หรือ `.env`) ไม่ต้องแก้ `alembic.ini`
+
+**ข้อควรระวัง**: SQLModel autogenerate มักไม่ import `sqlmodel` ให้เองในไฟล์ migration ที่ generate ใหม่ (มี `import sqlmodel` เพิ่มไว้ใน `alembic/script.py.mako` แล้วเพื่อแก้ปัญหานี้ล่วงหน้า) — ถ้าเจอ `NameError: name 'sqlmodel' is not defined` ตอนรัน `alembic upgrade`, ให้เช็คว่าไฟล์ migration มี `import sqlmodel` อยู่บนสุดหรือไม่
+
 ## ผู้ใช้ที่ seed ไว้ (สำหรับทดสอบ login)
 
 | username | password    | role    |
