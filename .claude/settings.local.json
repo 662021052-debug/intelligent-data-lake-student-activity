@@ -93,7 +93,8 @@
       "Bash(git --version)",
       "Bash(git remote add origin https://github.com/662021052-debug/intelligent-data-lake-student-activity.git)",
       "Bash(git remote -v)",
-      "Bash(git push -u origin master)"
+      "Bash(git push -u origin master)",
+      "Bash(git push)"
     ]
   }
 }
