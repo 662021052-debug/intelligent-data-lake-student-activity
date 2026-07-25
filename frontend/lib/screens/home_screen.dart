@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
 import 'activities_screen.dart';
+import 'dashboard_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
 import 'register_activities_screen.dart';
@@ -36,6 +37,16 @@ class HomeScreen extends StatelessWidget {
           final cards = [
             if (authService.isAdmin)
               _MenuCard(
+                icon: Icons.dashboard,
+                title: 'แดชบอร์ดผู้บริหาร',
+                subtitle: 'ภาพรวม KPI กราฟ และกลุ่มเสี่ยง',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                ),
+              ),
+            if (authService.isAdmin)
+              _MenuCard(
                 icon: Icons.people,
                 title: 'นิสิต',
                 subtitle: 'จัดการข้อมูลนิสิต',
@@ -47,7 +58,7 @@ class HomeScreen extends StatelessWidget {
             _MenuCard(
               icon: Icons.event,
               title: 'กิจกรรม',
-              subtitle: 'จัดการข้อมูลกิจกรรม',
+              subtitle: authService.role == 'student' ? 'ดูกิจกรรมทั้งหมด' : 'จัดการข้อมูลกิจกรรม',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ActivitiesScreen()),

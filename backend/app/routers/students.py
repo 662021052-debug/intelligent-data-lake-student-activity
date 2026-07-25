@@ -60,16 +60,8 @@ def list_students(
     return Page(items=items, total=total, skip=skip, limit=limit)
 
 
-@router.get("/me/hours-summary", response_model=list[HourCategorySummary])
-def my_hours_summary(
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    if current_user.role != UserRole.student:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    if current_user.student_id is None:
-        raise HTTPException(status_code=403, detail="This account is not linked to a student record")
-
+def _build_hours_summary(session: Session, student_id: int) -> list[HourCategorySummary]:
+    """Roll up a single student's approved activity hours per hour-category/subcategory."""
     categories = session.exec(select(HourCategory)).all()
     subcategories = session.exec(select(HourSubcategory)).all()
     subs_by_category: dict[int, list[HourSubcategory]] = {}
@@ -80,7 +72,7 @@ def my_hours_summary(
         select(Activity.subcategory_id, func.sum(Participation.hours_earned))
         .join(Activity, Activity.id == Participation.activity_id)
         .where(
-            Participation.student_id == current_user.student_id,
+            Participation.student_id == student_id,
             Participation.evidence_status == EvidenceStatus.approved,
             Activity.subcategory_id.is_not(None),
         )
@@ -115,6 +107,53 @@ def my_hours_summary(
             )
         )
     return result
+
+
+@router.get("/me/hours-summary", response_model=list[HourCategorySummary])
+def my_hours_summary(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != UserRole.student:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if current_user.student_id is None:
+        raise HTTPException(status_code=403, detail="This account is not linked to a student record")
+
+    return _build_hours_summary(session, current_user.student_id)
+
+
+@router.get("/{student_id}/hours-summary", response_model=list[HourCategorySummary])
+def student_hours_summary(
+    student_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """staff/admin view of a single student's accumulated hours.
+
+    - student: may only read their own summary (others -> 403)
+    - staff: may read only students who joined one of their own activities (others -> 403)
+    - admin: any student
+    """
+    if current_user.role == UserRole.student and current_user.student_id != student_id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    if not session.get(Student, student_id):
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if current_user.role == UserRole.staff:
+        joined_owned = session.exec(
+            select(Participation.id)
+            .join(Activity, Activity.id == Participation.activity_id)
+            .where(
+                Participation.student_id == student_id,
+                Activity.created_by == current_user.id,
+            )
+            .limit(1)
+        ).first()
+        if joined_owned is None:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    return _build_hours_summary(session, student_id)
 
 
 @router.get("/{student_id}", response_model=StudentRead)

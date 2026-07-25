@@ -3,6 +3,7 @@ class Activity {
   final String name;
   final String activityType;
   final int? subcategoryId;
+  final double hours;
   final bool isRequired;
   final int maxParticipants;
   final DateTime startAt;
@@ -16,6 +17,7 @@ class Activity {
     required this.name,
     required this.activityType,
     this.subcategoryId,
+    this.hours = 0,
     this.isRequired = false,
     required this.maxParticipants,
     required this.startAt,
@@ -32,6 +34,7 @@ class Activity {
         name: json['name'] as String,
         activityType: json['activity_type'] as String,
         subcategoryId: json['subcategory_id'] as int?,
+        hours: (json['hours'] as num?)?.toDouble() ?? 0,
         isRequired: json['is_required'] as bool? ?? false,
         maxParticipants: json['max_participants'] as int,
         startAt: DateTime.parse(json['start_at'] as String),

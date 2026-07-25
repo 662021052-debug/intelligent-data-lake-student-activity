@@ -11,6 +11,8 @@ String _formatDateTime(DateTime dt) {
   return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
 }
 
+String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
+
 class RegisterActivitiesScreen extends StatefulWidget {
   const RegisterActivitiesScreen({super.key});
 
@@ -57,6 +59,14 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
   }
 
   Future<void> _register(Activity a) async {
+    final confirmed = await confirmAction(
+      context,
+      title: 'ยืนยันการสมัคร',
+      message: 'สมัครเข้าร่วม "${a.name}" ?\n'
+          'จะได้รับ ${_trimHours(a.hours)} ชั่วโมงเมื่อหลักฐานผ่านการอนุมัติ',
+      confirmLabel: 'สมัคร',
+    );
+    if (confirmed != true) return;
     try {
       await ApiService.create(
         '/participations/register',
@@ -69,8 +79,14 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     }
   }
 
-  Future<void> _cancel(Participation p) async {
-    final confirmed = await confirmDelete(context, 'การสมัครนี้');
+  Future<void> _cancel(Participation p, Activity a) async {
+    final confirmed = await confirmAction(
+      context,
+      title: 'ยืนยันการยกเลิก',
+      message: 'ยกเลิกการสมัคร "${a.name}" ?',
+      confirmLabel: 'ยกเลิกการสมัคร',
+      confirmColor: Colors.red,
+    );
     if (confirmed != true) return;
     try {
       await ApiService.delete('/participations/${p.id}');
@@ -104,8 +120,8 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
                           child: ListTile(
                             title: Text(a.name),
                             subtitle: Text(
-                              '${a.activityType} • ${_formatDateTime(a.startAt)} • ${a.location}\n'
-                              'รับ ${a.participantCount}/${a.maxParticipants} คน',
+                              '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${_formatDateTime(a.startAt)}\n'
+                              '${a.location} • รับ ${a.participantCount}/${a.maxParticipants} คน',
                             ),
                             isThreeLine: true,
                             trailing: _buildTrailing(a, participation, closed),
@@ -128,7 +144,7 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
           IconButton(
             icon: const Icon(Icons.cancel, color: Colors.red),
             tooltip: 'ยกเลิกการสมัคร',
-            onPressed: () => _cancel(participation),
+            onPressed: () => _cancel(participation, a),
           ),
         ],
       );

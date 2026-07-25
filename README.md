@@ -6,9 +6,10 @@
 
 - Backend: Python + FastAPI + SQLModel
 - Database: PostgreSQL (dev ใช้ SQLite ได้)
+- Object storage (Bronze layer): MinIO (S3-compatible) เก็บไฟล์หลักฐานดิบ
 - Frontend: Flutter Web
 - Auth: JWT + role (student / staff / admin)
-- Deploy: Docker Compose (Postgres + FastAPI)
+- Deploy: Docker Compose (Postgres + FastAPI + MinIO)
 
 ## รัน Backend ด้วย Docker Compose (แนะนำ)
 
@@ -16,10 +17,19 @@
 docker compose up --build
 ```
 
-- Postgres จะขึ้นที่ port `5432`, backend ที่ `http://localhost:8000`
-- คอนเทนเนอร์ backend จะรัน `seed.py` อัตโนมัติก่อนเปิดเซิร์ฟเวอร์ (รันซ้ำได้ ข้อมูลจะไม่ซ้ำ)
+- Postgres จะขึ้นที่ port `5432`, backend ที่ `http://localhost:8000`, MinIO ที่ `9000` (API) / `9001` (Console)
+- คอนเทนเนอร์ backend จะรัน `seed.py` อัตโนมัติก่อนเปิดเซิร์ฟเวอร์ (รันซ้ำได้ ข้อมูลจะไม่ซ้ำ) และสร้าง bucket `bronze` ให้อัตโนมัติตอน startup
 - เปิด Swagger ได้ที่ `http://localhost:8000/docs`
 - ปรับค่า `JWT_SECRET` ฯลฯ ได้ผ่าน environment variable หรือสร้างไฟล์ `.env` จาก `.env.example` ที่ root แล้ว docker compose จะอ่านมาแทนค่า default อัตโนมัติ
+
+### MinIO Console (Bronze layer)
+
+- เปิดที่ `http://localhost:9001` แล้ว login ด้วย `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` (ค่า default `minioadmin` / `minioadmin`)
+- ไฟล์หลักฐานที่นิสิตอัปโหลดจะเก็บใน bucket `bronze` ภายใต้ path
+  `evidence/year=<YYYY>/month=<MM>/activity_id=<A>/participation_id=<P>/<uuid>_<ชื่อไฟล์เดิม>`
+- Bronze = ชั้นข้อมูลดิบ **immutable**: อัปโหลดใหม่จะเก็บเป็น object ใหม่เสมอ ไม่ทับของเดิม และทุกไฟล์มี metadata ครบ (timestamp + source) ในตาราง `raw_file` (data lineage)
+- bucket ไม่เปิด public — การดูไฟล์ต้องผ่าน backend ที่ตรวจสิทธิ์ก่อน (`GET /participations/{id}/evidence`)
+- รัน backend แบบ local โดยไม่มี MinIO ได้ด้วยการตั้ง `STORAGE_BACKEND=memory` (เก็บไฟล์ในหน่วยความจำ ไม่คงอยู่หลัง restart — สำหรับ dev/test เท่านั้น)
 
 หยุดและลบคอนเทนเนอร์:
 

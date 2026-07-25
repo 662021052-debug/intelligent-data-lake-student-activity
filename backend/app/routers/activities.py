@@ -17,6 +17,12 @@ from app.models import (
     UserRole,
 )
 from app.database import get_session
+from app.routers.participations import (
+    _activity_names,
+    _latest_evidence_map,
+    _latest_ocr_map,
+    _to_read as _participation_to_read,
+)
 from app.schemas import Page
 
 router = APIRouter(prefix="/activities", tags=["activities"], dependencies=[Depends(get_current_user)])
@@ -189,9 +195,18 @@ def list_activity_participations(
     if current_user.role == UserRole.staff and activity.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    return session.exec(
+    parts = session.exec(
         select(Participation).where(Participation.activity_id == activity_id)
     ).all()
+    # Build full reads so has_evidence / has_ocr / ocr_* are populated (returning
+    # raw ORM rows would leave them at their defaults).
+    evidence = _latest_evidence_map(session, [p.id for p in parts])
+    names = _activity_names(session, [p.activity_id for p in parts])
+    ocr = _latest_ocr_map(session, [p.id for p in parts])
+    return [
+        _participation_to_read(p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id))
+        for p in parts
+    ]
 
 
 @router.delete("/{activity_id}", status_code=204)

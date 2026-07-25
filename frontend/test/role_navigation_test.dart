@@ -47,6 +47,16 @@ void main() {
 
     expect(find.text('นิสิต'), findsOneWidget);
     expect(find.text('จัดการผู้ใช้'), findsOneWidget);
+    expect(find.text('แดชบอร์ดผู้บริหาร'), findsOneWidget);
+  });
+
+  testWidgets('non-admin roles do not see the "แดชบอร์ดผู้บริหาร" card', (tester) async {
+    authService.token = 'fake-token';
+    authService.username = 'staff';
+    authService.role = 'staff';
+
+    await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+    expect(find.text('แดชบอร์ดผู้บริหาร'), findsNothing);
   });
 
   testWidgets('StudentsScreen refuses to render its content for a student role', (tester) async {

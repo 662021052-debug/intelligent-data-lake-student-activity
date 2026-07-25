@@ -1,9 +1,13 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import '../config.dart';
+import '../models/ocr_result.dart';
 import '../models/page.dart';
+import '../models/participation.dart';
 import 'auth_service.dart';
 
 class ApiException implements Exception {
@@ -64,6 +68,16 @@ class ApiService {
     return data.map((e) => fromJsonT(e as Map<String, dynamic>)).toList();
   }
 
+  static Future<T> fetchObject<T>(
+    String path,
+    T Function(Map<String, dynamic>) fromJsonT, {
+    Map<String, String>? query,
+  }) async {
+    final response = await http.get(_uri(path, query), headers: _headers());
+    final data = _decode(response) as Map<String, dynamic>;
+    return fromJsonT(data);
+  }
+
   static Future<T> create<T>(
     String path,
     Map<String, dynamic> body,
@@ -96,5 +110,65 @@ class ApiService {
     final response = await http.patch(_uri(path), headers: _headers());
     final data = _decode(response) as Map<String, dynamic>;
     return fromJsonT(data);
+  }
+
+  /// Uploads an evidence file (image/PDF) for a participation via multipart/form-data.
+  static Future<Participation> uploadEvidence(
+    int participationId,
+    Uint8List bytes,
+    String filename,
+    String contentType,
+  ) async {
+    final request =
+        http.MultipartRequest('POST', _uri('/participations/$participationId/evidence'));
+    if (authService.token != null) {
+      request.headers['Authorization'] = 'Bearer ${authService.token}';
+    }
+    request.files.add(http.MultipartFile.fromBytes(
+      'file',
+      bytes,
+      filename: filename,
+      contentType: MediaType.parse(contentType),
+    ));
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    final data = _decode(response) as Map<String, dynamic>;
+    return Participation.fromJson(data);
+  }
+
+  /// Runs (or re-runs) the Silver OCR pipeline for a participation's evidence.
+  static Future<OcrResult> processEvidence(int participationId) async {
+    final response = await http.post(
+      _uri('/participations/$participationId/evidence/process'),
+      headers: _headers(),
+    );
+    final data = _decode(response) as Map<String, dynamic>;
+    return OcrResult.fromJson(data);
+  }
+
+  /// Latest OCR result for a participation, or null if none has been produced.
+  static Future<OcrResult?> fetchOcrResult(int participationId) async {
+    try {
+      return await fetchObject('/participations/$participationId/ocr', OcrResult.fromJson);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  /// Fetches the latest evidence file for a participation as (bytes, contentType).
+  static Future<(Uint8List, String)> fetchEvidence(int participationId) async {
+    final response = await http.get(
+      _uri('/participations/$participationId/evidence'),
+      headers: {
+        if (authService.token != null) 'Authorization': 'Bearer ${authService.token}',
+      },
+    );
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final contentType = response.headers['content-type'] ?? 'application/octet-stream';
+      return (response.bodyBytes, contentType);
+    }
+    _decode(response); // throws ApiException with the server detail
+    throw ApiException(response.statusCode, 'unreachable');
   }
 }

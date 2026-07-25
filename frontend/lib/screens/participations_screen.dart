@@ -9,6 +9,7 @@ import '../services/auth_service.dart';
 import '../utils/evidence_status.dart';
 import '../utils/format.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/evidence_actions.dart';
 
 const _evidenceStatuses = ['pending', 'approved', 'rejected'];
 
@@ -87,6 +88,12 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
       ),
     );
     if (result == true) _load();
+  }
+
+  Future<void> _uploadEvidence(Participation p) async {
+    if (p.id == null) return;
+    final uploaded = await uploadEvidenceFlow(context, p.id!);
+    if (uploaded) _load();
   }
 
   Future<void> _delete(Participation p) async {
@@ -194,9 +201,18 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   }
 
   String _studentLabel(int id) => _studentsById[id]?.fullName ?? '#$id';
-  String _activityLabel(int id) => _activitiesById[id]?.name ?? '#$id';
+
+  // E1: prefer the name the API returns (works even for pending activities that
+  // a student can't list), falling back to the lookup table then "#id".
+  String _activityName(Participation p) =>
+      p.activityName ?? _activitiesById[p.activityId]?.name ?? '#${p.activityId}';
+
+  // E4: only approved participations have counted hours; others show "–".
+  String _hoursDisplay(Participation p) =>
+      p.evidenceStatus == 'approved' ? formatHours(p.hoursEarned) : '–';
 
   Widget _buildTable(bool canWrite) {
+    final isStudent = authService.role == 'student';
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
@@ -211,14 +227,18 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
         rows: _participations
             .map((p) => DataRow(cells: [
                   DataCell(Text(_studentLabel(p.studentId))),
-                  DataCell(Text(_activityLabel(p.activityId))),
+                  DataCell(Text(_activityName(p))),
                   DataCell(Text(p.checkInTime == null ? '-' : p.checkInTime.toString())),
-                  DataCell(Text(formatHours(p.hoursEarned))),
+                  DataCell(Text(_hoursDisplay(p))),
                   DataCell(Chip(
                     label: Text(evidenceLabel(p.evidenceStatus)),
                     backgroundColor: evidenceColor(p.evidenceStatus),
                   )),
-                  DataCell(canWrite ? _actionButtons(p) : const SizedBox.shrink()),
+                  DataCell(canWrite
+                      ? _actionButtons(p)
+                      : isStudent
+                          ? _studentActions(p)
+                          : const SizedBox.shrink()),
                 ]))
             .toList(),
       ),
@@ -226,16 +246,27 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   }
 
   Widget _buildList(bool canWrite) {
+    final isStudent = authService.role == 'student';
     return ListView.builder(
       itemCount: _participations.length,
       itemBuilder: (context, index) {
         final p = _participations[index];
+        final evidenceNote =
+            isStudent && p.evidenceStatus != 'approved' && !p.hasEvidence
+                ? ' • ยังไม่ได้อัปโหลดหลักฐาน'
+                : '';
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: ListTile(
-            title: Text('${_studentLabel(p.studentId)} → ${_activityLabel(p.activityId)}'),
-            subtitle: Text('ชั่วโมง: ${formatHours(p.hoursEarned)} • ${evidenceLabel(p.evidenceStatus)}'),
-            trailing: canWrite ? _actionButtons(p) : null,
+            title: Text('${_studentLabel(p.studentId)} → ${_activityName(p)}'),
+            subtitle: Text(
+              'ชั่วโมง: ${_hoursDisplay(p)} • ${evidenceLabel(p.evidenceStatus)}$evidenceNote',
+            ),
+            trailing: canWrite
+                ? _actionButtons(p)
+                : isStudent
+                    ? _studentActions(p)
+                    : null,
           ),
         );
       },
@@ -250,6 +281,27 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
             icon: const Icon(Icons.delete, size: 20, color: Colors.red),
             onPressed: () => _delete(p),
           ),
+        ],
+      );
+
+  // Students can upload evidence while a participation is still pending, and view
+  // whatever they have already uploaded.
+  Widget _studentActions(Participation p) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (p.hasEvidence)
+            IconButton(
+              icon: const Icon(Icons.image_search, size: 20),
+              tooltip: 'ดูหลักฐาน',
+              onPressed: () => viewEvidenceFlow(context, p.id!),
+            ),
+          // B2: students can (re)upload while pending OR after a rejection
+          if (p.evidenceStatus == 'pending' || p.evidenceStatus == 'rejected')
+            IconButton(
+              icon: const Icon(Icons.upload_file, size: 20),
+              tooltip: p.hasEvidence ? 'อัปโหลดหลักฐานใหม่' : 'อัปโหลดหลักฐาน',
+              onPressed: () => _uploadEvidence(p),
+            ),
         ],
       );
 

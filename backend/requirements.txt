@@ -9,3 +9,7 @@ python-jose[cryptography]==3.3.0
 python-multipart==0.0.9
 psycopg2-binary==2.9.9
 alembic==1.13.2
+minio==7.2.7
+# Silver layer OCR (Thai+English, CPU). Heavy (pulls torch); imported lazily so
+# tests/local runs without it still work when OCR_BACKEND=stub.
+easyocr==1.7.1

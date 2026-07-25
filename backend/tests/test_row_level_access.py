@@ -188,6 +188,7 @@ def test_student_cannot_create_activity(client, tokens):
         "max_participants": 10,
         "start_at": "2026-08-01T09:00:00",
         "location": "ห้อง SC101",
+        "hours": 4,
     }
     response = client.post("/activities", json=payload, headers=headers)
     assert response.status_code == 403
@@ -204,6 +205,7 @@ def test_student_cannot_update_or_delete_activity(client, tokens):
             "max_participants": 10,
             "start_at": "2026-08-01T09:00:00",
             "location": "ห้อง SC101",
+            "hours": 4,
         },
     ).json()
     headers = {"Authorization": f"Bearer {tokens['student']}"}

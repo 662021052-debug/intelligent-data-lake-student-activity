@@ -2,8 +2,11 @@
 
 รัน: python seed.py
 """
+import base64
+import hashlib
 import random
 import sys
+import uuid
 from datetime import datetime, timedelta
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -12,6 +15,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from sqlmodel import Session, select
 
 from app.auth import hash_password
+from app.config import settings
 from app.database import create_db_and_tables, engine
 from app.models import (
     Activity,
@@ -20,10 +24,18 @@ from app.models import (
     HourCategory,
     HourSubcategory,
     Participation,
+    RawFile,
     Student,
     StudentStatus,
     User,
     UserRole,
+)
+from app.storage import get_storage
+
+# A tiny valid 1x1 PNG used as placeholder evidence so seeded approved/rejected
+# participations really have a Bronze object (no "approved without evidence").
+_PLACEHOLDER_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 )
 
 FACULTIES = {
@@ -43,15 +55,7 @@ LAST_NAMES = [
     "พงษ์ไพร", "วงศ์ษา", "ชูเกียรติ",
 ]
 
-ACTIVITY_TYPES = ["จิตอาสา", "กีฬา", "วิชาการ", "ศิลปวัฒนธรรม", "อบรม/สัมมนา"]
 LOCATIONS = ["หอประชุมใหญ่", "ห้อง SC101", "สนามกีฬากลาง", "ลานกิจกรรม", "ห้องประชุมคณะ"]
-
-ACTIVITY_NAMES = [
-    "ปฐมนิเทศนิสิตใหม่", "กีฬาสีมหาวิทยาลัย", "ค่ายอาสาพัฒนาชนบท",
-    "อบรมทักษะดิจิทัล", "งานวันวิทยาศาสตร์", "แข่งขันตอบปัญหาวิชาการ",
-    "จิตอาสาบริจาคโลหิต", "เทศกาลศิลปวัฒนธรรม", "สัมมนาเตรียมความพร้อมสู่การทำงาน",
-    "ค่ายอนุรักษ์สิ่งแวดล้อม",
-]
 
 # เกณฑ์ชั่วโมงกิจกรรม ม.ทักษิณ (โครงสร้าง พ.ศ. 2560–2566, หลักสูตร 4 ปี, รวม 60 ชม. ขั้นต่ำ)
 HOUR_STRUCTURE = [
@@ -80,19 +84,24 @@ HOUR_STRUCTURE = [
     ]),
 ]
 
-# จับคู่กิจกรรมสมมุติแต่ละอันเข้ากับกิจกรรมย่อยที่ใกล้เคียงที่สุด (เพื่อ demo หน้าชั่วโมงสะสม)
-ACTIVITY_SUBCATEGORY_MAP = {
-    "ปฐมนิเทศนิสิตใหม่": "กิจกรรมเตรียมความพร้อมก่อนการใช้ชีวิตในมหาวิทยาลัย (ปฐมนิเทศ)",
-    "กีฬาสีมหาวิทยาลัย": "กิจกรรมเสริมสร้างคุณค่าแห่งตน",
-    "ค่ายอาสาพัฒนาชนบท": "กิจกรรม TSU DO D : สร้างสรรค์สร้างสำนึกรับผิดชอบต่อสังคม",
-    "อบรมทักษะดิจิทัล": "กิจกรรมเรียนรู้และรู้เท่าทันเทคโนโลยีดิจิทัล",
-    "งานวันวิทยาศาสตร์": "กิจกรรม ICT กับการรู้สารสนเทศ 1",
-    "แข่งขันตอบปัญหาวิชาการ": "กิจกรรม ICT กับการรู้สารสนเทศ 2",
-    "จิตอาสาบริจาคโลหิต": "กิจกรรม TSU DO D : สร้างสรรค์สร้างสำนึกรับผิดชอบต่อสังคม",
-    "เทศกาลศิลปวัฒนธรรม": "กิจกรรมเรียนรู้ศิลปวัฒนธรรมอาเซียน",
-    "สัมมนาเตรียมความพร้อมสู่การทำงาน": "กิจกรรมเตรียมความก่อนการใช้ชีวิตนอกมหาวิทยาลัย (ปัจฉิมนิเทศ)",
-    "ค่ายอนุรักษ์สิ่งแวดล้อม": "กิจกรรมบูรณาการ 4",
-}
+# กิจกรรมสมมุติ: ชื่อ / ประเภท / กิจกรรมย่อย(หมวดชั่วโมง) / จำนวนชั่วโมง — ให้สอดคล้องกันตามความหมายจริง (F1)
+# (name, activity_type, subcategory_name, hours)
+ACTIVITY_DEFS = [
+    ("ปฐมนิเทศนิสิตใหม่", "อบรม/สัมมนา",
+     "กิจกรรมเตรียมความพร้อมก่อนการใช้ชีวิตในมหาวิทยาลัย (ปฐมนิเทศ)", 4),
+    ("กีฬาสีมหาวิทยาลัย", "กีฬา", "กิจกรรมเสริมสร้างคุณค่าแห่งตน", 4),
+    ("ค่ายอาสาพัฒนาชนบท", "จิตอาสา",
+     "กิจกรรม TSU DO D : สร้างสรรค์สร้างสำนึกรับผิดชอบต่อสังคม", 6),
+    ("อบรมทักษะดิจิทัล", "อบรม/สัมมนา", "กิจกรรมเรียนรู้และรู้เท่าทันเทคโนโลยีดิจิทัล", 4),
+    ("งานวันวิทยาศาสตร์", "วิชาการ", "กิจกรรม ICT กับการรู้สารสนเทศ 1", 2),
+    ("แข่งขันตอบปัญหาวิชาการ", "วิชาการ", "กิจกรรม ICT กับการรู้สารสนเทศ 2", 2),
+    ("จิตอาสาบริจาคโลหิต", "จิตอาสา",
+     "กิจกรรม TSU DO D : สร้างสรรค์สร้างสำนึกรับผิดชอบต่อสังคม", 3),
+    ("เทศกาลศิลปวัฒนธรรมอาเซียน", "ศิลปวัฒนธรรม", "กิจกรรมเรียนรู้ศิลปวัฒนธรรมอาเซียน", 6),
+    ("สัมมนาเตรียมความพร้อมสู่การทำงาน", "อบรม/สัมมนา",
+     "กิจกรรมเตรียมความก่อนการใช้ชีวิตนอกมหาวิทยาลัย (ปัจฉิมนิเทศ)", 4),
+    ("ค่ายอนุรักษ์สิ่งแวดล้อม", "จิตอาสา", "กิจกรรมบูรณาการ 4", 4),
+]
 
 
 def seed() -> None:
@@ -155,20 +164,24 @@ def seed() -> None:
                 session.refresh(subcategory)
                 subcategory_id_by_name[sub_name] = subcategory.id
 
-        # --- activities (~10), owned by staff; most already approved by admin ---
+        # --- activities: ownership alternates staff/admin so ownership filtering is testable (F3) ---
         activities = []
         base_date = datetime(2026, 7, 1)
-        for i, name in enumerate(ACTIVITY_NAMES):
-            is_pending = i < 2  # a couple left pending so the approval workflow has something to demo
+        for i, (name, activity_type, sub_name, hours) in enumerate(ACTIVITY_DEFS):
+            owner_is_admin = i % 2 == 1  # alternate owners
+            owner_id = admin_user.id if owner_is_admin else staff_user.id
+            # admin-owned auto-approve; keep a couple of staff-owned pending for the approval demo
+            is_pending = (not owner_is_admin) and i < 4
             activity = Activity(
                 name=name,
-                activity_type=random.choice(ACTIVITY_TYPES),
+                activity_type=activity_type,
                 is_required=random.choice([True, False]),
                 max_participants=random.choice([30, 50, 100, 150]),
                 start_at=base_date + timedelta(days=i * 3),
                 location=random.choice(LOCATIONS),
-                subcategory_id=subcategory_id_by_name[ACTIVITY_SUBCATEGORY_MAP[name]],
-                created_by=staff_user.id,
+                hours=hours,
+                subcategory_id=subcategory_id_by_name[sub_name],
+                created_by=owner_id,
                 approval_status=ApprovalStatus.pending if is_pending else ApprovalStatus.approved,
                 approved_by=None if is_pending else admin_user.id,
                 approved_at=None if is_pending else base_date,
@@ -180,23 +193,27 @@ def seed() -> None:
         for obj in activities:
             session.refresh(obj)
 
-        # --- participations (~50), guaranteeing a few for the linked "student" user ---
+        activity_by_id = {a.id: a for a in activities}
+        approved_activities = [a for a in activities if a.approval_status == ApprovalStatus.approved]
+
+        def make_participation(student_id, activity, evidence_status):
+            checked_in = evidence_status != EvidenceStatus.pending
+            # A2: hours are derived from the activity and only counted once approved
+            hours_earned = activity.hours if evidence_status == EvidenceStatus.approved else 0
+            return Participation(
+                student_id=student_id,
+                activity_id=activity.id,
+                check_in_time=activity.start_at if checked_in else None,
+                hours_earned=hours_earned,
+                evidence_status=evidence_status,
+            )
+
+        # --- participations (~50), guaranteeing a spread for the linked "student" user ---
         participations = []
         seen_pairs = set()
-        for activity in activities[:3]:
-            evidence_status = random.choice(
-                [EvidenceStatus.pending, EvidenceStatus.approved, EvidenceStatus.rejected]
-            )
-            checked_in = evidence_status != EvidenceStatus.pending
-            participations.append(
-                Participation(
-                    student_id=students[0].id,
-                    activity_id=activity.id,
-                    check_in_time=activity.start_at if checked_in else None,
-                    hours_earned=round(random.uniform(1, 6), 1) if checked_in else 0,
-                    evidence_status=evidence_status,
-                )
-            )
+        demo_statuses = [EvidenceStatus.approved, EvidenceStatus.pending, EvidenceStatus.rejected]
+        for activity, status in zip(approved_activities[:3], demo_statuses):
+            participations.append(make_participation(students[0].id, activity, status))
             seen_pairs.add((students[0].id, activity.id))
 
         while len(participations) < 50:
@@ -211,23 +228,60 @@ def seed() -> None:
                 [EvidenceStatus.pending, EvidenceStatus.approved, EvidenceStatus.rejected],
                 weights=[3, 6, 1],
             )[0]
-            checked_in = evidence_status != EvidenceStatus.pending
-            participations.append(
-                Participation(
-                    student_id=student.id,
-                    activity_id=activity.id,
-                    check_in_time=activity.start_at if checked_in else None,
-                    hours_earned=round(random.uniform(1, 6), 1) if checked_in else 0,
-                    evidence_status=evidence_status,
+            participations.append(make_participation(student.id, activity, evidence_status))
+        session.add_all(participations)
+        session.commit()
+        for p in participations:
+            session.refresh(p)
+
+        # --- Bronze evidence: every approved/rejected participation must have a real file (F2);
+        #     plus ~half of the pending ones (uploaded, awaiting review) ---
+        storage = get_storage()
+        bucket = settings.minio_bucket_bronze
+        try:
+            storage.ensure_bucket(bucket)
+        except Exception as exc:  # noqa: BLE001
+            print(f"เตือน: เชื่อม MinIO ไม่ได้ ({exc}) — บันทึก raw_file แต่ไม่อัปโหลดไฟล์จริง")
+            storage = None
+
+        checksum = hashlib.sha256(_PLACEHOLDER_PNG).hexdigest()
+        raw_files = []
+        for p in participations:
+            needs_evidence = p.evidence_status in (
+                EvidenceStatus.approved,
+                EvidenceStatus.rejected,
+            ) or (p.evidence_status == EvidenceStatus.pending and random.random() < 0.5)
+            if not needs_evidence:
+                continue
+            now = datetime.utcnow()
+            object_key = (
+                f"evidence/year={now:%Y}/month={now:%m}"
+                f"/activity_id={p.activity_id}/participation_id={p.id}"
+                f"/{uuid.uuid4().hex}_seed.png"
+            )
+            if storage is not None:
+                storage.upload_object(bucket, object_key, _PLACEHOLDER_PNG, "image/png")
+            raw_files.append(
+                RawFile(
+                    bucket=bucket,
+                    object_key=object_key,
+                    original_filename="seed_evidence.png",
+                    content_type="image/png",
+                    size_bytes=len(_PLACEHOLDER_PNG),
+                    checksum=checksum,
+                    source_system="student_upload",
+                    uploaded_by=None,
+                    ingested_at=now,
+                    participation_id=p.id,
                 )
             )
-        session.add_all(participations)
-
+        session.add_all(raw_files)
         session.commit()
 
         print(
             f"seed สำเร็จ: users={len(users)}, students={len(students)}, "
-            f"activities={len(activities)}, participations={len(participations)} "
+            f"activities={len(activities)}, participations={len(participations)}, "
+            f"raw_files={len(raw_files)} "
             f"(user 'student' → student_id={students[0].id}, รหัสนิสิต {students[0].student_id})"
         )
 

@@ -8,6 +8,25 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     cors_origins: str = "*"
 
+    # ---- Object storage (Bronze layer) ----
+    # storage_backend: "minio" (default) or "memory" (tests / no-MinIO local runs)
+    storage_backend: str = "minio"
+    minio_endpoint: str = "localhost:9000"
+    minio_root_user: str = "minioadmin"
+    minio_root_password: str = "minioadmin"
+    minio_secure: bool = False
+    minio_bucket_bronze: str = "bronze"
+
+    # ---- OCR / Silver layer ----
+    # ocr_backend: "easyocr" (real, Thai+English, CPU) or "stub" (no-op, for
+    # local runs / machines without the heavy model installed).
+    ocr_backend: str = "easyocr"
+    ocr_languages: str = "th,en"
+    # Auto-approval thresholds (Phase 14): approve only when OCR is confident AND
+    # the extracted text matches the student/activity well enough.
+    ocr_auto_confidence: float = 0.6
+    ocr_auto_match: float = 0.7
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

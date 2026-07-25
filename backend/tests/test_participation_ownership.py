@@ -24,24 +24,27 @@ def _make_activity(client, name="กิจกรรมของ owner", headers=
         "max_participants": 50,
         "start_at": "2026-08-01T09:00:00",
         "location": "ห้อง SC101",
+        "hours": 4,
     }
     return client.post("/activities", json=payload, headers=headers).json()
 
 
-def test_staff_can_review_evidence_for_own_activity(client):
+def test_staff_can_review_evidence_for_own_activity(client, add_evidence):
     # default `client` fixture is authenticated as staff, and owns the activity it creates
     student = make_student(client, student_id="7001001").json()
     activity = _make_activity(client)
     participation = client.post(
         "/participations", json={"student_id": student["id"], "activity_id": activity["id"]}
     ).json()
+    add_evidence(participation["id"])
 
     response = client.put(
         f"/participations/{participation['id']}",
-        json={"evidence_status": "approved", "hours_earned": 4},
+        json={"evidence_status": "approved"},
     )
     assert response.status_code == 200
     assert response.json()["evidence_status"] == "approved"
+    assert response.json()["hours_earned"] == 4  # derived from activity.hours
 
 
 def test_staff_cannot_review_evidence_for_others_activity(client, tokens):
@@ -105,12 +108,13 @@ def test_staff_list_participations_scoped_to_own_activities(client, tokens):
     assert body["items"][0]["activity_id"] == own_activity["id"]
 
 
-def test_admin_can_review_any_participation(client, tokens):
+def test_admin_can_review_any_participation(client, tokens, add_evidence):
     student = make_student(client, student_id="7001006").json()
     activity = _make_activity(client)
     participation = client.post(
         "/participations", json={"student_id": student["id"], "activity_id": activity["id"]}
     ).json()
+    add_evidence(participation["id"])
 
     response = client.put(
         f"/participations/{participation['id']}",

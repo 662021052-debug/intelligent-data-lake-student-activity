@@ -165,18 +165,20 @@ def test_student_can_cancel_own_pending_registration(client, session):
     assert response.status_code == 204
 
 
-def test_student_cannot_cancel_approved_registration(client, session, tokens):
+def test_student_cannot_cancel_approved_registration(client, session, tokens, add_evidence):
     activity = _make_approved_activity(session, _admin_id(session))
     _, headers = _make_linked_student_user(session, client)
 
     created = client.post(
         "/participations/register", json={"activity_id": activity.id}, headers=headers
     ).json()
-    client.put(
+    add_evidence(created["id"])  # A3: evidence required before approval
+    approve = client.put(
         f"/participations/{created['id']}",
         json={"evidence_status": "approved"},
         headers=_admin_headers(tokens),
     )
+    assert approve.status_code == 200
 
     response = client.delete(f"/participations/{created['id']}", headers=headers)
     assert response.status_code == 400

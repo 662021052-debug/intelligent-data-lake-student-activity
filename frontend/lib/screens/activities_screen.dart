@@ -24,6 +24,8 @@ String _formatDateTime(DateTime dt) {
   return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
 }
 
+String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
+
 class ActivitiesScreen extends StatefulWidget {
   const ActivitiesScreen({super.key});
 
@@ -125,8 +127,9 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   @override
   Widget build(BuildContext context) {
     final canWrite = authService.canWrite;
+    final isStudent = authService.role == 'student';
     return Scaffold(
-      appBar: AppBar(title: const Text('จัดการกิจกรรม')),
+      appBar: AppBar(title: Text(isStudent ? 'กิจกรรม' : 'จัดการกิจกรรม')),
       floatingActionButton: canWrite
           ? FloatingActionButton(onPressed: () => _openForm(), child: const Icon(Icons.add))
           : null,
@@ -205,6 +208,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
           DataColumn(label: Text('ชื่อกิจกรรม')),
           DataColumn(label: Text('ประเภท')),
           DataColumn(label: Text('หมวดชั่วโมง')),
+          DataColumn(label: Text('ชั่วโมง')),
           DataColumn(label: Text('บังคับ')),
           DataColumn(label: Text('รับสูงสุด')),
           DataColumn(label: Text('วันเวลา')),
@@ -217,6 +221,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                   DataCell(Text(a.name)),
                   DataCell(Text(a.activityType)),
                   DataCell(Text(_subcategoryLabel(_categories, a.subcategoryId))),
+                  DataCell(Text(_trimHours(a.hours))),
                   DataCell(Icon(a.isRequired ? Icons.check : Icons.close,
                       size: 18, color: a.isRequired ? Colors.green : Colors.grey)),
                   DataCell(Text('${a.maxParticipants}')),
@@ -248,8 +253,8 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               ],
             ),
             subtitle: Text(
-              '${a.activityType} • ${_formatDateTime(a.startAt)} • ${a.location}\n'
-              'รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}',
+              '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${_formatDateTime(a.startAt)}\n'
+              '${a.location} • รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}',
             ),
             isThreeLine: true,
             trailing: canWrite ? _actionButtons(a) : null,
@@ -334,6 +339,7 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _maxParticipantsController;
   late final TextEditingController _locationController;
+  late final TextEditingController _hoursController;
   String _activityType = _activityTypes.first;
   int? _subcategoryId;
   bool _isRequired = false;
@@ -349,6 +355,9 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
     _maxParticipantsController =
         TextEditingController(text: e != null ? '${e.maxParticipants}' : '50');
     _locationController = TextEditingController(text: e?.location ?? '');
+    _hoursController = TextEditingController(
+      text: e != null && e.hours > 0 ? _trimHours(e.hours) : '3',
+    );
     _activityType = e?.activityType ?? _activityTypes.first;
     _subcategoryId = e?.subcategoryId ??
         (widget.categories.isNotEmpty && widget.categories.first.subcategories.isNotEmpty
@@ -363,6 +372,7 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
     _nameController.dispose();
     _maxParticipantsController.dispose();
     _locationController.dispose();
+    _hoursController.dispose();
     super.dispose();
   }
 
@@ -390,6 +400,11 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
       setState(() => _error = 'กรุณาเลือกหมวดชั่วโมง');
       return;
     }
+    final hours = double.tryParse(_hoursController.text.trim());
+    if (hours == null || hours <= 0) {
+      setState(() => _error = 'กรุณากรอกจำนวนชั่วโมงมากกว่า 0');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -398,6 +413,7 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
       'name': _nameController.text.trim(),
       'activity_type': _activityType,
       'subcategory_id': _subcategoryId,
+      'hours': hours,
       'is_required': _isRequired,
       'max_participants': int.parse(_maxParticipantsController.text.trim()),
       'start_at': _startAt.toIso8601String(),
@@ -442,6 +458,7 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
                 ),
                 DropdownButtonFormField<int>(
                   initialValue: _subcategoryId,
+                  isExpanded: true, // E3: keep long "category › sub" labels inside the dialog
                   decoration: const InputDecoration(labelText: 'หมวดชั่วโมง'),
                   items: [
                     for (final category in widget.categories)
@@ -453,6 +470,18 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
                   ],
                   onChanged: (v) => setState(() => _subcategoryId = v),
                   validator: (v) => v == null ? 'กรุณาเลือกหมวดชั่วโมง' : null,
+                ),
+                TextFormField(
+                  controller: _hoursController,
+                  decoration: const InputDecoration(
+                    labelText: 'ชั่วโมงที่ได้รับเมื่อเข้าร่วม',
+                    hintText: 'เช่น 4',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  validator: (v) {
+                    final n = double.tryParse((v ?? '').trim());
+                    return (n == null || n <= 0) ? 'กรอกจำนวนชั่วโมงมากกว่า 0' : null;
+                  },
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

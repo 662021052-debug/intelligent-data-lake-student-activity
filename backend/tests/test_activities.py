@@ -1,4 +1,4 @@
-def make_activity(client, name="กิจกรรมทดสอบ", activity_type="วิชาการ"):
+def make_activity(client, name="กิจกรรมทดสอบ", activity_type="วิชาการ", hours=4):
     payload = {
         "name": name,
         "activity_type": activity_type,
@@ -7,6 +7,7 @@ def make_activity(client, name="กิจกรรมทดสอบ", activity_
         "max_participants": 50,
         "start_at": "2026-08-01T09:00:00",
         "location": "ห้อง SC101",
+        "hours": hours,
     }
     return client.post("/activities", json=payload)
 
@@ -76,6 +77,29 @@ def _register_staff(client, tokens, username):
     return {"Authorization": f"Bearer {login_response.json()['access_token']}"}
 
 
+def test_staff_cannot_see_admin_created_activity(client, tokens):
+    # C1: ownership filter is real — an activity created by admin is invisible to staff
+    admin_activity = client.post(
+        "/activities",
+        json={
+            "name": "กิจกรรมที่ admin สร้าง",
+            "activity_type": "วิชาการ",
+            "subcategory_id": 1,
+            "is_required": False,
+            "max_participants": 50,
+            "start_at": "2026-08-01T09:00:00",
+            "location": "ห้อง SC101",
+            "hours": 4,
+        },
+        headers=_admin_headers(tokens),
+    ).json()
+
+    # default client is staff
+    listing = client.get("/activities").json()
+    assert all(item["id"] != admin_activity["id"] for item in listing["items"])
+    assert client.get(f"/activities/{admin_activity['id']}").status_code == 403
+
+
 def test_staff_created_activity_is_pending_and_owned(client, tokens):
     created = make_activity(client, name="กิจกรรมของ staff").json()
     assert created["approval_status"] == "pending"
@@ -93,6 +117,7 @@ def test_admin_created_activity_is_auto_approved(client, tokens):
             "max_participants": 50,
             "start_at": "2026-08-01T09:00:00",
             "location": "ห้อง SC101",
+            "hours": 4,
         },
         headers=_admin_headers(tokens),
     )
@@ -143,6 +168,27 @@ def test_staff_edit_resets_approval_to_pending(client, tokens):
     response = client.put(f"/activities/{created['id']}", json={"location": "ที่ใหม่"})
     assert response.status_code == 200
     assert response.json()["approval_status"] == "pending"
+
+
+def test_activity_requires_hours(client):
+    # A1: hours is mandatory and must be > 0
+    payload = {
+        "name": "กิจกรรมไม่มีชั่วโมง",
+        "activity_type": "วิชาการ",
+        "subcategory_id": 1,
+        "is_required": False,
+        "max_participants": 50,
+        "start_at": "2026-08-01T09:00:00",
+        "location": "ห้อง SC101",
+    }
+    assert client.post("/activities", json=payload).status_code == 422
+    assert client.post("/activities", json={**payload, "hours": 0}).status_code == 422
+
+
+def test_activity_read_exposes_hours(client):
+    created = make_activity(client, name="กิจกรรมมีชั่วโมง", hours=6).json()
+    assert created["hours"] == 6
+    assert client.get(f"/activities/{created['id']}").json()["hours"] == 6
 
 
 def test_student_sees_only_approved_activities(client, tokens):
