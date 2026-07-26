@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import '../config.dart';
+import '../models/chat_response.dart';
 import '../models/ocr_result.dart';
 import '../models/page.dart';
 import '../models/participation.dart';
@@ -154,6 +155,11 @@ class ApiService {
       if (e.statusCode == 404) return null;
       rethrow;
     }
+  }
+
+  /// Asks the student chatbot a Thai-language question (Phase 16–18).
+  static Future<ChatResponse> askChatbot(String question) async {
+    return create('/chatbot/ask', {'question': question}, ChatResponse.fromJson);
   }
 
   /// Fetches the latest evidence file for a participation as (bytes, contentType).

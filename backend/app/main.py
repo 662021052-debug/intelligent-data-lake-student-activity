@@ -8,7 +8,16 @@ import logging
 from app.config import settings
 from app.database import create_db_and_tables, engine
 from app.gold import init_gold_layer
-from app.routers import activities, auth, dashboard, gold, hour_categories, participations, students
+from app.routers import (
+    activities,
+    auth,
+    chatbot,
+    dashboard,
+    gold,
+    hour_categories,
+    participations,
+    students,
+)
 from app.storage import get_storage
 
 logger = logging.getLogger("uvicorn.error")
@@ -29,6 +38,17 @@ async def lifespan(app: FastAPI):
         get_storage().ensure_bucket(settings.minio_bucket_bronze)
     except Exception as exc:  # noqa: BLE001 - best effort, keep API available
         logger.warning("Could not ensure bronze bucket on startup: %s", exc)
+    # Ingest the public activity-rules document into the vector store so the
+    # chatbot's RAG path can answer rule questions. Best-effort: a failure here
+    # (e.g. no LLM key, pgvector unavailable) must not stop the API from booting.
+    try:
+        from app import rag
+        from app.llm import get_llm
+        from app.vectorstore import get_vector_store
+
+        rag.ingest_rules(get_llm(), get_vector_store())
+    except Exception as exc:  # noqa: BLE001 - chatbot is non-critical for booting
+        logger.warning("Could not ingest chatbot rules on startup: %s", exc)
     yield
 
 
@@ -55,3 +75,4 @@ app.include_router(participations.router)
 app.include_router(hour_categories.router)
 app.include_router(gold.router)
 app.include_router(dashboard.router)
+app.include_router(chatbot.router)

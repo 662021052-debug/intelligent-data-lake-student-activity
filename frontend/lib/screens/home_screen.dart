@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
 import 'activities_screen.dart';
+import 'chatbot_screen.dart';
 import 'dashboard_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
@@ -101,6 +102,16 @@ class HomeScreen extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const MyHoursScreen()),
+                ),
+              ),
+            if (authService.role == 'student')
+              _MenuCard(
+                icon: Icons.smart_toy,
+                title: 'ผู้ช่วยอัจฉริยะ',
+                subtitle: 'ถามชั่วโมง หมวดที่ยังขาด และขอคำแนะนำกิจกรรม',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ChatbotScreen()),
                 ),
               ),
           ];

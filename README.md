@@ -85,7 +85,9 @@ Alembic อ่าน connection URL จาก `app.config.settings.database_url`
 |----------|-------------|---------|
 | admin    | admin123    | admin   |
 | staff    | staff123    | staff   |
-| student  | student123  | student |
+| *รหัสนิสิต* | *รหัสนิสิต* | student |
+
+นิสิตจะ **ล็อกอินด้วยรหัสนิสิต** (รหัส 9 หลักแบบ ม.ทักษิณ เช่น `662021052`) โดยรหัสผ่านเริ่มต้น = รหัสนิสิต — ไม่มีบัญชีชื่อ `student` อีกต่อไป สคริปต์ `seed.py` จะพิมพ์ตัวอย่างรหัสนิสิตของนิสิตเดโมออกมาให้ตอนรัน
 
 `role: student` อ่านข้อมูลได้อย่างเดียว, `staff`/`admin` แก้ไขข้อมูลได้ (POST/PUT/DELETE), `admin` เท่านั้นที่สร้าง user ใหม่ได้ผ่าน `POST /auth/register`
 

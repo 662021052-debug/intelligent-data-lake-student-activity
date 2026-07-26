@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     ocr_auto_confidence: float = 0.6
     ocr_auto_match: float = 0.7
 
+    # ---- Chatbot (LLM + RAG, Phase 16) ----
+    # llm_backend: "gemini" (real cloud LLM, needs gemini_api_key) or "stub"
+    # (deterministic, offline — used by tests and local runs without a key).
+    # Defaults to stub so the app boots and tests run without any API key.
+    llm_backend: str = "stub"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-latest"
+    gemini_embed_model: str = "models/gemini-embedding-001"
+    # vector_backend: "memory" (portable cosine over an in-process store — used by
+    # SQLite dev + tests) or "pgvector" (Postgres pgvector extension, production).
+    vector_backend: str = "memory"
+    # How many rule chunks to retrieve for a RAG answer.
+    rag_top_k: int = 4
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

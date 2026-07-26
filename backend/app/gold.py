@@ -10,6 +10,7 @@ Instead we expose a set of ``gold_*`` SQL views shaped as a Star Schema:
             gold_dim_subcategory
             gold_dim_date
     ready : gold_student_hours             (per student × category rollup + pass/fail)
+            gold_activity_catalog          (public activity list + registration count)
 
 Only participations with ``evidence_status = 'approved'`` are counted — the same
 rule the operational hours-summary uses (see ``students._build_hours_summary``).
@@ -41,6 +42,7 @@ GOLD_VIEW_NAMES = [
     "gold_dim_subcategory",
     "gold_dim_date",
     "gold_student_hours",
+    "gold_activity_catalog",
 ]
 
 
@@ -179,6 +181,33 @@ def _view_definitions(dialect: str) -> list[tuple[str, str]]:
         ) agg ON agg.student_id = s.id AND agg.category_id = c.id
     """
 
+    # Public activity catalog for the student chatbot: every activity plus its
+    # category/subcategory names, whether it is required, and how many students
+    # have registered (all statuses) so "open for registration" = approved AND
+    # participant_count < max_participants. Activities are public, so this view
+    # carries no per-student data and needs no student filter.
+    activity_catalog = f"""
+        SELECT
+            a.id               AS activity_key,
+            a.name             AS name,
+            a.activity_type    AS activity_type,
+            a.is_required      AS is_required,
+            a.hours            AS hours,
+            a.max_participants AS max_participants,
+            a.approval_status  AS approval_status,
+            a.start_at         AS start_at,
+            {d['date_key']}    AS date_key,
+            sub.id             AS subcategory_key,
+            sub.name           AS subcategory_name,
+            c.id               AS category_key,
+            c.name             AS category_name,
+            (SELECT COUNT(*) FROM participation p WHERE p.activity_id = a.id)
+                               AS participant_count
+        FROM activity a
+        LEFT JOIN hoursubcategory sub ON sub.id = a.subcategory_id
+        LEFT JOIN hourcategory c ON c.id = sub.category_id
+    """
+
     return [
         ("gold_fact_participation", fact),
         ("gold_dim_student", dim_student),
@@ -187,6 +216,7 @@ def _view_definitions(dialect: str) -> list[tuple[str, str]]:
         ("gold_dim_subcategory", dim_subcategory),
         ("gold_dim_date", dim_date),
         ("gold_student_hours", student_hours),
+        ("gold_activity_catalog", activity_catalog),
     ]
 
 

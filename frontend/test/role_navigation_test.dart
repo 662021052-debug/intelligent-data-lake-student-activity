@@ -22,6 +22,7 @@ void main() {
     expect(find.text('การเข้าร่วมกิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsOneWidget);
     expect(find.text('ชั่วโมงสะสมของฉัน'), findsOneWidget);
+    expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
   });
 
   testWidgets('staff does not see "นิสิต" or "จัดการผู้ใช้" cards on Home (admin-only)', (tester) async {
@@ -36,6 +37,7 @@ void main() {
     expect(find.text('กิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsNothing);
     expect(find.text('ชั่วโมงสะสมของฉัน'), findsNothing);
+    expect(find.text('ผู้ช่วยอัจฉริยะ'), findsNothing);
   });
 
   testWidgets('admin sees all cards including "จัดการผู้ใช้" on Home', (tester) async {

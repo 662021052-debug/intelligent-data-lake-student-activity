@@ -49,6 +49,13 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_SECURE: "false"
       MINIO_BUCKET_BRONZE: ${MINIO_BUCKET_BRONZE:-bronze}
+      # ---- Chatbot (LLM + RAG) — read from the project-root .env ----
+      LLM_BACKEND: ${LLM_BACKEND:-stub}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
+      GEMINI_EMBED_MODEL: ${GEMINI_EMBED_MODEL:-models/gemini-embedding-001}
+      VECTOR_BACKEND: ${VECTOR_BACKEND:-memory}
+      RAG_TOP_K: ${RAG_TOP_K:-4}
     depends_on:
       db:
         condition: service_healthy

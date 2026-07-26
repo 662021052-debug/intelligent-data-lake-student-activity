@@ -45,6 +45,28 @@ FACULTIES = {
     "บริหารธุรกิจ": ["การตลาด", "การเงิน", "การจัดการ"],
 }
 
+# รหัสสาขา 4 หลัก (เลียนแบบรหัสนิสิต ม.ทักษิณ) ประกอบเป็นรหัสนิสิต 9 หลัก:
+# {ปีเข้าศึกษา 2 หลัก}{รหัสสาขา 4 หลัก}{ลำดับ 3 หลัก} เช่น 662021052
+MAJOR_PROGRAM_CODE = {
+    "วิศวกรรมคอมพิวเตอร์": "2021",
+    "วิศวกรรมไฟฟ้า": "2022",
+    "วิศวกรรมโยธา": "2023",
+    "วิทยาการคอมพิวเตอร์": "0311",
+    "เคมี": "0312",
+    "ชีววิทยา": "0313",
+    "ภาษาอังกฤษ": "0421",
+    "ภาษาไทย": "0422",
+    "การตลาด": "0531",
+    "การเงิน": "0532",
+    "การจัดการ": "0533",
+}
+
+
+def make_student_code(major: str, year_level: int, seq: int) -> str:
+    """รหัสนิสิต 9 หลัก: ปีเข้าศึกษา + รหัสสาขา + ลำดับ (เช่น 662021052)."""
+    entry_year = 66 - (year_level - 1)  # ปี 1 → 66, ปี 2 → 65, ...
+    return f"{entry_year:02d}{MAJOR_PROGRAM_CODE[major]}{seq:03d}"
+
 FIRST_NAMES = [
     "สมชาย", "สมหญิง", "วิชัย", "วิภา", "ประยุทธ", "นิภา", "อนุชา", "ศิริพร",
     "ธนกร", "กัญญา", "ชัยวัฒน์", "พรทิพย์", "ธีรพงษ์", "อรุณี", "สุรชัย", "มาลี",
@@ -112,17 +134,18 @@ def seed() -> None:
             print("มีข้อมูลอยู่แล้ว ข้ามการ seed")
             return
 
-        # --- students (~20) ---
+        # --- students (~20) with realistic 9-digit TSU codes (e.g. 662021052) ---
         students = []
         for i in range(1, 21):
             faculty = random.choice(list(FACULTIES.keys()))
             major = random.choice(FACULTIES[faculty])
+            year_level = random.randint(1, 4)
             student = Student(
-                student_id=f"6501{i:04d}",
+                student_id=make_student_code(major, year_level, i),
                 full_name=f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}",
                 faculty=faculty,
                 major=major,
-                year_level=random.randint(1, 4),
+                year_level=year_level,
                 status=StudentStatus.active,
             )
             students.append(student)
@@ -132,16 +155,21 @@ def seed() -> None:
         for obj in students:
             session.refresh(obj)
 
-        # --- users (3 role); "student" is linked to the first seeded student ---
+        # --- staff/admin logins ---
         admin_user = User(username="admin", hashed_password=hash_password("admin123"), role=UserRole.admin)
         staff_user = User(username="staff", hashed_password=hash_password("staff123"), role=UserRole.staff)
-        student_user = User(
-            username="student",
-            hashed_password=hash_password("student123"),
-            role=UserRole.student,
-            student_id=students[0].id,
-        )
-        users = [admin_user, staff_user, student_user]
+        # --- นิสิตล็อกอินด้วย "รหัสนิสิต" (ไม่มีบัญชีชื่อ "student" อีกต่อไป);
+        #     รหัสผ่านเริ่มต้น = รหัสนิสิต เพื่อความสะดวกในการเดโม ---
+        student_users = [
+            User(
+                username=s.student_id,
+                hashed_password=hash_password(s.student_id),
+                role=UserRole.student,
+                student_id=s.id,
+            )
+            for s in students
+        ]
+        users = [admin_user, staff_user, *student_users]
         session.add_all(users)
         session.commit()
         for user in users:
@@ -208,7 +236,7 @@ def seed() -> None:
                 evidence_status=evidence_status,
             )
 
-        # --- participations (~50), guaranteeing a spread for the linked "student" user ---
+        # --- participations (~50), guaranteeing a spread for the demo student (students[0]) ---
         participations = []
         seen_pairs = set()
         demo_statuses = [EvidenceStatus.approved, EvidenceStatus.pending, EvidenceStatus.rejected]
@@ -281,8 +309,11 @@ def seed() -> None:
         print(
             f"seed สำเร็จ: users={len(users)}, students={len(students)}, "
             f"activities={len(activities)}, participations={len(participations)}, "
-            f"raw_files={len(raw_files)} "
-            f"(user 'student' → student_id={students[0].id}, รหัสนิสิต {students[0].student_id})"
+            f"raw_files={len(raw_files)}"
+        )
+        print(
+            "ตัวอย่างล็อกอินนิสิต (username = รหัสนิสิต, password = รหัสนิสิต): "
+            f"{students[0].student_id} / {students[0].student_id}"
         )
 
 
