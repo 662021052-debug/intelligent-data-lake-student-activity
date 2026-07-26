@@ -17,12 +17,26 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    expect(find.text('นิสิต'), findsNothing);
+    // ค้นแบบเจาะจง "การ์ดเมนู" เพราะแถบต้อนรับมีป้าย role ที่เขียนว่า "นิสิต" เหมือนกัน
+    expect(find.widgetWithText(Card, 'นิสิต'), findsNothing);
     expect(find.text('กิจกรรม'), findsOneWidget);
     expect(find.text('การเข้าร่วมกิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsOneWidget);
     expect(find.text('ชั่วโมงสะสมของฉัน'), findsOneWidget);
     expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
+  });
+
+  testWidgets('Home shows the welcome header, role badge and a labelled logout button',
+      (tester) async {
+    authService.token = 'fake-token';
+    authService.username = '650811001';
+    authService.role = 'student';
+
+    await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+
+    expect(find.text('สวัสดี, 650811001'), findsOneWidget);
+    expect(find.text('นิสิต'), findsOneWidget); // ป้าย role ในแถบต้อนรับ
+    expect(find.widgetWithText(OutlinedButton, 'ออกจากระบบ'), findsOneWidget);
   });
 
   testWidgets('staff does not see "นิสิต" or "จัดการผู้ใช้" cards on Home (admin-only)', (tester) async {
@@ -32,7 +46,7 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    expect(find.text('นิสิต'), findsNothing);
+    expect(find.widgetWithText(Card, 'นิสิต'), findsNothing);
     expect(find.text('จัดการผู้ใช้'), findsNothing);
     expect(find.text('กิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsNothing);
@@ -47,7 +61,7 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    expect(find.text('นิสิต'), findsOneWidget);
+    expect(find.widgetWithText(Card, 'นิสิต'), findsOneWidget);
     expect(find.text('จัดการผู้ใช้'), findsOneWidget);
     expect(find.text('แดชบอร์ดผู้บริหาร'), findsOneWidget);
   });
