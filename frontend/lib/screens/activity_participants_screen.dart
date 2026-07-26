@@ -5,11 +5,11 @@ import '../models/participation.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
-import '../utils/evidence_status.dart';
 import '../utils/format.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/evidence_actions.dart';
+import '../widgets/status_chip.dart';
 import 'ocr_review_screen.dart';
 
 class ActivityParticipantsScreen extends StatefulWidget {
@@ -190,13 +190,7 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
                                       runSpacing: 4,
                                       crossAxisAlignment: WrapCrossAlignment.center,
                                       children: [
-                                        Chip(
-                                          label: Text(ocrDecisionLabel(p.ocrDecision!)),
-                                          backgroundColor: ocrDecisionColor(p.ocrDecision!),
-                                          visualDensity: VisualDensity.compact,
-                                          materialTapTargetSize:
-                                              MaterialTapTargetSize.shrinkWrap,
-                                        ),
+                                        StatusChip.ocr(p.ocrDecision!, dense: true),
                                         Text(
                                           'ตรง ${asPercent(p.ocrMatchScore ?? 0)} • มั่นใจ ${asPercent(p.ocrConfidence ?? 0)}',
                                           style: Theme.of(context).textTheme.bodySmall,
@@ -216,10 +210,7 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Chip(
-                                  label: Text(evidenceLabel(p.evidenceStatus)),
-                                  backgroundColor: evidenceColor(p.evidenceStatus),
-                                ),
+                                StatusChip.evidence(p.evidenceStatus, dense: true),
                                 // Review OCR + evidence side-by-side (also where staff override lives)
                                 if (p.hasEvidence)
                                   IconButton(

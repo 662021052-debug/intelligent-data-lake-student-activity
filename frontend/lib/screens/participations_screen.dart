@@ -10,6 +10,7 @@ import '../utils/evidence_status.dart';
 import '../utils/format.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/evidence_actions.dart';
+import '../widgets/status_chip.dart';
 
 const _evidenceStatuses = ['pending', 'approved', 'rejected'];
 
@@ -230,10 +231,7 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
                   DataCell(Text(_activityName(p))),
                   DataCell(Text(p.checkInTime == null ? '-' : p.checkInTime.toString())),
                   DataCell(Text(_hoursDisplay(p))),
-                  DataCell(Chip(
-                    label: Text(evidenceLabel(p.evidenceStatus)),
-                    backgroundColor: evidenceColor(p.evidenceStatus),
-                  )),
+                  DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
                   DataCell(canWrite
                       ? _actionButtons(p)
                       : isStudent

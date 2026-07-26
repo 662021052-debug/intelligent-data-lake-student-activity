@@ -5,6 +5,7 @@ import '../models/hour_category.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/status_chip.dart';
 import 'activity_participants_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
@@ -264,11 +265,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     );
   }
 
-  Widget _approvalChip(Activity a) => Chip(
-        label: Text(a.approvalStatus == 'approved' ? 'อนุมัติแล้ว' : 'รออนุมัติ'),
-        backgroundColor:
-            a.approvalStatus == 'approved' ? Colors.green.shade100 : Colors.amber.shade100,
-      );
+  Widget _approvalChip(Activity a) => StatusChip.activityApproval(a.approvalStatus, dense: true);
 
   Widget _actionButtons(Activity a) => Row(
         mainAxisSize: MainAxisSize.min,

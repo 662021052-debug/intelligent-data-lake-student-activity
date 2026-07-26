@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-
+/// ป้ายชื่อสถานะหลักฐาน — สีของสถานะอยู่ที่ `widgets/status_chip.dart` ที่เดียว
 String evidenceLabel(String status) {
   switch (status) {
     case 'approved':
@@ -8,16 +7,5 @@ String evidenceLabel(String status) {
       return 'ไม่อนุมัติ';
     default:
       return 'รอตรวจสอบ';
-  }
-}
-
-Color evidenceColor(String status) {
-  switch (status) {
-    case 'approved':
-      return Colors.green.shade100;
-    case 'rejected':
-      return Colors.red.shade100;
-    default:
-      return Colors.amber.shade100;
   }
 }

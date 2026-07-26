@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
-
 /// Short badge label for an OCR decision (Silver layer).
+/// สีของแต่ละสถานะอยู่ที่ `widgets/status_chip.dart` ที่เดียว
 String ocrDecisionLabel(String decision) {
   switch (decision) {
     case 'auto_approved':
@@ -10,18 +9,6 @@ String ocrDecisionLabel(String decision) {
     case 'needs_review':
     default:
       return '👁️ รอเจ้าหน้าที่ตรวจ';
-  }
-}
-
-Color ocrDecisionColor(String decision) {
-  switch (decision) {
-    case 'auto_approved':
-      return Colors.green.shade100;
-    case 'flagged':
-      return Colors.orange.shade100;
-    case 'needs_review':
-    default:
-      return Colors.blueGrey.shade100;
   }
 }
 

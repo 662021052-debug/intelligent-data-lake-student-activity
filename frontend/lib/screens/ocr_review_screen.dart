@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../models/ocr_result.dart';
 import '../models/participation.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/evidence_preview.dart';
+import '../widgets/status_chip.dart';
 
 /// Phase 15 — staff review screen showing the evidence image next to the OCR
 /// text and scores, so a reviewer can decide quickly. Auto-approval is an assist;
@@ -164,16 +166,14 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Chip(
-                  label: Text(ocrDecisionLabel(ocr.decision)),
-                  backgroundColor: ocrDecisionColor(ocr.decision),
-                ),
+                StatusChip.ocr(ocr.decision),
                 _scorePill('ความตรง', ocr.matchScore),
                 _scorePill('ความมั่นใจ OCR', ocr.ocrConfidence),
                 if (ocr.isDuplicate)
-                  const Chip(
-                    label: Text('ไฟล์ซ้ำ'),
-                    backgroundColor: Color(0xFFFFE0B2),
+                  const StatusChip(
+                    label: 'ไฟล์ซ้ำ',
+                    palette: StatusPalette.rejected,
+                    icon: Icons.copy_all_outlined,
                   ),
               ],
             ),

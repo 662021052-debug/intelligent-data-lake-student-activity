@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import '../models/activity.dart';
 import '../models/participation.dart';
 import '../services/api_service.dart';
-import '../utils/evidence_status.dart';
+import '../theme/app_theme.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/status_chip.dart';
 
 String _formatDateTime(DateTime dt) {
   String two(int n) => n.toString().padLeft(2, '0');
@@ -137,10 +138,7 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Chip(
-            label: Text(evidenceLabel(participation.evidenceStatus)),
-            backgroundColor: evidenceColor(participation.evidenceStatus),
-          ),
+          StatusChip.evidence(participation.evidenceStatus, dense: true),
           IconButton(
             icon: const Icon(Icons.cancel, color: Colors.red),
             tooltip: 'ยกเลิกการสมัคร',
@@ -150,7 +148,12 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       );
     }
     if (a.isFull) {
-      return const Chip(label: Text('เต็มแล้ว'));
+      return const StatusChip(
+        label: 'เต็มแล้ว',
+        palette: StatusPalette.neutral,
+        icon: Icons.group_off_outlined,
+        dense: true,
+      );
     }
     if (closed) {
       return const Chip(label: Text('ปิดรับสมัครแล้ว'));
