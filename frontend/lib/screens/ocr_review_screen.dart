@@ -8,6 +8,7 @@ import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/evidence_preview.dart';
 import '../widgets/status_chip.dart';
 
@@ -30,7 +31,6 @@ class OcrReviewScreen extends StatefulWidget {
 
 class _OcrReviewScreenState extends State<OcrReviewScreen> {
   bool _loading = false;
-  bool _changed = false; // whether the parent list should refresh on pop
   String? _error;
 
   Uint8List? _bytes;
@@ -73,7 +73,6 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
         {'evidence_status': status},
         Participation.fromJson,
       );
-      _changed = true;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(status == 'approved' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติแล้ว')),
@@ -88,7 +87,6 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
   Future<void> _reprocess() async {
     try {
       await ApiService.processEvidence(widget.participationId);
-      _changed = true;
       await _load();
     } catch (e) {
       if (mounted) showErrorSnackbar(context, e);
@@ -97,45 +95,46 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {},
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text('ตรวจหลักฐาน: ${widget.studentName}'),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.pop(context, _changed),
+    return Scaffold(
+      appBar: AppBar(
+        // ไม่ใส่ leading เอง — ใช้ปุ่มย้อนกลับมาตรฐานของ AppBar ปุ่มเดียว
+        // (เดิมสร้าง IconButton ซ้ำกับปุ่มที่ Flutter ใส่ให้ กลายเป็นปุ่มย้อนกลับ 2 อัน)
+        // หน้าที่เรียกจะรีเฟรชรายการเสมอเมื่อกลับมา จึงไม่ต้องส่งค่ากลับทางปุ่มนี้
+        title: Text('ตรวจหลักฐาน: ${widget.studentName}'),
+        actions: [
+          IconButton(
+            onPressed: _load,
+            tooltip: 'โหลดใหม่',
+            icon: const Icon(Icons.refresh),
           ),
-          actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isWide = constraints.maxWidth > 800;
-                      final image = _buildEvidencePane();
-                      final panel = _buildOcrPane();
-                      return isWide
-                          ? Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(child: image),
-                                const VerticalDivider(width: 1),
-                                Expanded(child: panel),
-                              ],
-                            )
-                          : ListView(children: [
-                              SizedBox(height: 320, child: image),
-                              const Divider(height: 1),
-                              panel,
-                            ]);
-                    },
-                  ),
-        bottomNavigationBar: _buildActionBar(),
+        ],
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? ErrorState(message: _error!, onRetry: _load)
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth > 800;
+                    final image = _buildEvidencePane();
+                    final panel = _buildOcrPane();
+                    return isWide
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: image),
+                              const VerticalDivider(width: 1),
+                              Expanded(child: panel),
+                            ],
+                          )
+                        : ListView(children: [
+                            SizedBox(height: 320, child: image),
+                            const Divider(height: 1),
+                            panel,
+                          ]);
+                  },
+                ),
+      bottomNavigationBar: _buildActionBar(),
     );
   }
 

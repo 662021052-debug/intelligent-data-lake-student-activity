@@ -1,47 +1,79 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 Future<bool?> confirmDelete(BuildContext context, String name) {
-  return showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('ยืนยันการลบ'),
-      content: Text('ต้องการลบ "$name" ใช่หรือไม่?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: Colors.red),
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('ลบ'),
-        ),
-      ],
-    ),
+  return confirmAction(
+    context,
+    title: 'ยืนยันการลบ',
+    message: 'ต้องการลบ "$name" ใช่หรือไม่?',
+    detail: 'ลบแล้วไม่สามารถกู้คืนได้',
+    confirmLabel: 'ลบ',
+    icon: Icons.delete_outline,
+    destructive: true,
   );
 }
 
-/// Generic confirmation dialog. Returns true when the user confirms.
+/// Dialog ยืนยันการทำรายการสำคัญ (สมัคร / ยกเลิก / ลบ) — คืนค่า true เมื่อผู้ใช้ยืนยัน
+///
+/// แสดงสรุปสิ่งที่กำลังจะเกิดขึ้นให้ชัดก่อนกด: [message] คือสิ่งที่ทำ,
+/// [detail] คือผลที่ตามมา (เช่น "ลบแล้วกู้คืนไม่ได้")
 Future<bool?> confirmAction(
   BuildContext context, {
   required String title,
   required String message,
+  String? detail,
   String confirmLabel = 'ยืนยัน',
-  Color? confirmColor,
+  IconData? icon,
+  bool destructive = false,
 }) {
   return showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
-      content: Text(message),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        FilledButton(
-          style: confirmColor == null
-              ? null
-              : FilledButton.styleFrom(backgroundColor: confirmColor),
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(confirmLabel),
+    builder: (context) {
+      final theme = Theme.of(context);
+      final accent = destructive ? theme.colorScheme.error : theme.colorScheme.primary;
+
+      return AlertDialog(
+        icon: Icon(icon ?? (destructive ? Icons.warning_amber_rounded : Icons.help_outline),
+            color: accent),
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message, style: theme.textTheme.bodyLarge),
+            if (detail != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                detail,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: destructive ? accent : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
         ),
-      ],
-    ),
+        actionsPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.xl,
+          AppSpacing.sm,
+          AppSpacing.xl,
+          AppSpacing.xl,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
+          FilledButton(
+            style: destructive
+                ? FilledButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: theme.colorScheme.onError,
+                  )
+                : null,
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(confirmLabel),
+          ),
+        ],
+      );
+    },
   );
 }
 

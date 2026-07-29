@@ -5,6 +5,7 @@ import '../models/participation.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
 
 String _formatDateTime(DateTime dt) {
@@ -63,9 +64,11 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     final confirmed = await confirmAction(
       context,
       title: 'ยืนยันการสมัคร',
-      message: 'สมัครเข้าร่วม "${a.name}" ?\n'
-          'จะได้รับ ${_trimHours(a.hours)} ชั่วโมงเมื่อหลักฐานผ่านการอนุมัติ',
+      message: 'สมัครเข้าร่วม "${a.name}"\n'
+          'วันเวลา ${_formatDateTime(a.startAt)} • ${a.location}',
+      detail: 'จะได้รับ ${_trimHours(a.hours)} ชั่วโมง เมื่อหลักฐานผ่านการอนุมัติ',
       confirmLabel: 'สมัคร',
+      icon: Icons.how_to_reg,
     );
     if (confirmed != true) return;
     try {
@@ -84,9 +87,11 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     final confirmed = await confirmAction(
       context,
       title: 'ยืนยันการยกเลิก',
-      message: 'ยกเลิกการสมัคร "${a.name}" ?',
+      message: 'ยกเลิกการสมัคร "${a.name}"',
+      detail: 'รายการนี้จะถูกลบออกจากประวัติการเข้าร่วม ถ้าเปลี่ยนใจต้องสมัครใหม่',
       confirmLabel: 'ยกเลิกการสมัคร',
-      confirmColor: Colors.red,
+      icon: Icons.cancel_outlined,
+      destructive: true,
     );
     if (confirmed != true) return;
     try {
@@ -102,14 +107,24 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('กิจกรรมที่เปิดรับสมัคร'),
-        actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
+        actions: [
+          IconButton(
+            onPressed: _load,
+            tooltip: 'โหลดใหม่',
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
+              ? ErrorState(message: _error!, onRetry: _load)
               : _activities.isEmpty
-                  ? const Center(child: Text('ยังไม่มีกิจกรรมที่เปิดรับสมัคร'))
+                  ? const EmptyState(
+                      icon: Icons.event_available_outlined,
+                      title: 'ยังไม่มีกิจกรรมที่เปิดรับสมัคร',
+                      message: 'ลองกลับมาดูใหม่ภายหลัง หรือกดโหลดใหม่มุมขวาบน',
+                    )
                   : ListView.builder(
                       itemCount: _activities.length,
                       itemBuilder: (context, index) {
@@ -156,7 +171,12 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       );
     }
     if (closed) {
-      return const Chip(label: Text('ปิดรับสมัครแล้ว'));
+      return const StatusChip(
+        label: 'ปิดรับสมัครแล้ว',
+        palette: StatusPalette.neutral,
+        icon: Icons.lock_clock,
+        dense: true,
+      );
     }
     return FilledButton(onPressed: () => _register(a), child: const Text('สมัคร'));
   }

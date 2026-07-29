@@ -4,8 +4,13 @@ import '../models/activity.dart';
 import '../models/hour_category.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_data_table.dart';
+import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
+import '../widgets/subcategory_dropdown.dart';
 import 'activity_participants_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
@@ -173,66 +178,84 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                     _load();
                   },
                 ),
-                IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
+                IconButton(
+                  onPressed: _load,
+                  tooltip: 'โหลดใหม่',
+                  icon: const Icon(Icons.refresh),
+                ),
               ],
             ),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _activities.isEmpty
-                    ? const Center(child: Text('ไม่พบข้อมูล'))
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          return constraints.maxWidth > 800
-                              ? _buildTable(canWrite)
-                              : _buildList(canWrite);
-                        },
-                      ),
+                : _error != null
+                    ? ErrorState(message: _error!, onRetry: _load)
+                    : _activities.isEmpty
+                        ? _emptyState(canWrite)
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              return constraints.maxWidth > 800
+                                  ? _buildTable(canWrite)
+                                  : _buildList(canWrite);
+                            },
+                          ),
           ),
-          _buildPagination(),
+          if (_error == null && _activities.isNotEmpty) _buildPagination(),
         ],
       ),
     );
   }
 
+  /// ไม่มีข้อมูล: แยกกรณี "ค้นหาไม่เจอ" ออกจาก "ยังไม่มีกิจกรรมเลย"
+  Widget _emptyState(bool canWrite) {
+    if (_search.isNotEmpty || _typeFilter != null) return EmptyState.noResults();
+    return EmptyState(
+      icon: Icons.event_busy,
+      title: 'ยังไม่มีกิจกรรม',
+      message: canWrite
+          ? 'กดปุ่ม + มุมขวาล่างเพื่อเพิ่มกิจกรรมแรก'
+          : 'เมื่อเจ้าหน้าที่เพิ่มกิจกรรม รายการจะแสดงที่นี่',
+    );
+  }
+
   Widget _buildTable(bool canWrite) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('ชื่อกิจกรรม')),
-          DataColumn(label: Text('ประเภท')),
-          DataColumn(label: Text('หมวดชั่วโมง')),
-          DataColumn(label: Text('ชั่วโมง')),
-          DataColumn(label: Text('บังคับ')),
-          DataColumn(label: Text('รับสูงสุด')),
-          DataColumn(label: Text('วันเวลา')),
-          DataColumn(label: Text('สถานที่')),
-          DataColumn(label: Text('สถานะอนุมัติ')),
-          DataColumn(label: Text('')),
-        ],
-        rows: _activities
-            .map((a) => DataRow(cells: [
-                  DataCell(Text(a.name)),
-                  DataCell(Text(a.activityType)),
-                  DataCell(Text(_subcategoryLabel(_categories, a.subcategoryId))),
-                  DataCell(Text(_trimHours(a.hours))),
-                  DataCell(Icon(a.isRequired ? Icons.check : Icons.close,
-                      size: 18, color: a.isRequired ? Colors.green : Colors.grey)),
-                  DataCell(Text('${a.maxParticipants}')),
-                  DataCell(Text(_formatDateTime(a.startAt))),
-                  DataCell(Text(a.location)),
-                  DataCell(_approvalChip(a)),
-                  DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
-                ]))
-            .toList(),
-      ),
+    final scheme = Theme.of(context).colorScheme;
+    return AppDataTable(
+      columns: const [
+        DataColumn(label: Text('ชื่อกิจกรรม')),
+        DataColumn(label: Text('ประเภท')),
+        DataColumn(label: Text('หมวดชั่วโมง')),
+        DataColumn(label: Text('ชั่วโมง')),
+        DataColumn(label: Text('บังคับ')),
+        DataColumn(label: Text('รับสูงสุด')),
+        DataColumn(label: Text('วันเวลา')),
+        DataColumn(label: Text('สถานที่')),
+        DataColumn(label: Text('สถานะอนุมัติ')),
+        DataColumn(label: Text('')),
+      ],
+      rows: [
+        for (final a in _activities)
+          [
+            DataCell(Text(a.name)),
+            DataCell(Text(a.activityType)),
+            DataCell(Text(_subcategoryLabel(_categories, a.subcategoryId))),
+            DataCell(Text(_trimHours(a.hours))),
+            DataCell(Tooltip(
+              message: a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ',
+              child: Icon(
+                a.isRequired ? Icons.check : Icons.close,
+                size: 18,
+                color: a.isRequired ? StatusPalette.approved.foreground : scheme.outline,
+              ),
+            )),
+            DataCell(Text('${a.maxParticipants}')),
+            DataCell(Text(_formatDateTime(a.startAt))),
+            DataCell(Text(a.location)),
+            DataCell(_approvalChip(a)),
+            DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
+          ],
+      ],
     );
   }
 
@@ -272,8 +295,9 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
         children: [
           if (authService.isAdmin && a.approvalStatus != 'approved')
             IconButton(
-              icon: const Icon(Icons.check_circle, size: 20, color: Colors.green),
-              tooltip: 'อนุมัติ',
+              icon: Icon(Icons.check_circle,
+                  size: 20, color: StatusPalette.approved.foreground),
+              tooltip: 'อนุมัติกิจกรรม',
               onPressed: () => _approve(a),
             ),
           IconButton(
@@ -281,9 +305,14 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
             tooltip: 'ดูผู้เข้าร่วม',
             onPressed: () => _openParticipants(a),
           ),
-          IconButton(icon: const Icon(Icons.edit, size: 20), onPressed: () => _openForm(existing: a)),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 20),
+            tooltip: 'แก้ไข',
+            onPressed: () => _openForm(existing: a),
+          ),
           IconButton(
             icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+            tooltip: 'ลบ',
             onPressed: () => _delete(a),
           ),
         ],
@@ -432,95 +461,72 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'เพิ่มกิจกรรม' : 'แก้ไขกิจกรรม'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+    return AppFormDialog(
+      title: widget.existing == null ? 'เพิ่มกิจกรรม' : 'แก้ไขกิจกรรม',
+      formKey: _formKey,
+      saving: _saving,
+      error: _error,
+      onSubmit: _submit,
+      fields: [
+        TextFormField(
+          controller: _nameController,
+          decoration: const InputDecoration(labelText: 'ชื่อกิจกรรม'),
+          validator: requiredValidator,
+        ),
+        DropdownButtonFormField<String>(
+          initialValue: _activityType,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'ประเภท'),
+          items: _activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+          onChanged: (v) => setState(() => _activityType = v ?? _activityTypes.first),
+        ),
+        // E3: dropdown หมวดชั่วโมง — ชื่อสั้นในช่อง ชื่อเต็มในรายการ ไม่ล้นกรอบ
+        SubcategoryDropdown(
+          categories: widget.categories,
+          value: _subcategoryId,
+          onChanged: (v) => setState(() => _subcategoryId = v),
+        ),
+        TextFormField(
+          controller: _hoursController,
+          decoration: const InputDecoration(
+            labelText: 'ชั่วโมงที่ได้รับเมื่อเข้าร่วม',
+            hintText: 'เช่น 4',
+          ),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          validator: (v) {
+            final n = double.tryParse((v ?? '').trim());
+            return (n == null || n <= 0) ? 'กรอกจำนวนชั่วโมงมากกว่า 0' : null;
+          },
+        ),
+        TextFormField(
+          controller: _maxParticipantsController,
+          decoration: const InputDecoration(labelText: 'จำนวนที่รับ'),
+          keyboardType: TextInputType.number,
+          validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
+        ),
+        TextFormField(
+          controller: _locationController,
+          decoration: const InputDecoration(labelText: 'สถานที่'),
+          validator: requiredValidator,
+        ),
+        InputDecorator(
+          decoration: const InputDecoration(labelText: 'วันเวลาเริ่มกิจกรรม'),
+          child: InkWell(
+            onTap: _pickDateTime,
+            child: Row(
               children: [
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: 'ชื่อกิจกรรม'),
-                  validator: requiredValidator,
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: _activityType,
-                  decoration: const InputDecoration(labelText: 'ประเภท'),
-                  items: _activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (v) => setState(() => _activityType = v ?? _activityTypes.first),
-                ),
-                DropdownButtonFormField<int>(
-                  initialValue: _subcategoryId,
-                  isExpanded: true, // E3: keep long "category › sub" labels inside the dialog
-                  decoration: const InputDecoration(labelText: 'หมวดชั่วโมง'),
-                  items: [
-                    for (final category in widget.categories)
-                      for (final sub in category.subcategories)
-                        DropdownMenuItem(
-                          value: sub.id,
-                          child: Text('${category.name} › ${sub.name}', overflow: TextOverflow.ellipsis),
-                        ),
-                  ],
-                  onChanged: (v) => setState(() => _subcategoryId = v),
-                  validator: (v) => v == null ? 'กรุณาเลือกหมวดชั่วโมง' : null,
-                ),
-                TextFormField(
-                  controller: _hoursController,
-                  decoration: const InputDecoration(
-                    labelText: 'ชั่วโมงที่ได้รับเมื่อเข้าร่วม',
-                    hintText: 'เช่น 4',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) {
-                    final n = double.tryParse((v ?? '').trim());
-                    return (n == null || n <= 0) ? 'กรอกจำนวนชั่วโมงมากกว่า 0' : null;
-                  },
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('กิจกรรมบังคับ'),
-                  value: _isRequired,
-                  onChanged: (v) => setState(() => _isRequired = v),
-                ),
-                TextFormField(
-                  controller: _maxParticipantsController,
-                  decoration: const InputDecoration(labelText: 'จำนวนที่รับ'),
-                  keyboardType: TextInputType.number,
-                  validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
-                ),
-                TextFormField(
-                  controller: _locationController,
-                  decoration: const InputDecoration(labelText: 'สถานที่'),
-                  validator: requiredValidator,
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('วันเวลาเริ่มกิจกรรม'),
-                  subtitle: Text(_formatDateTime(_startAt)),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: _pickDateTime,
-                ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                  ),
+                Expanded(child: Text(_formatDateTime(_startAt))),
+                const Icon(Icons.calendar_today, size: 18),
               ],
             ),
           ),
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('บันทึก'),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('กิจกรรมบังคับ'),
+          subtitle: const Text('นิสิตทุกคนต้องเข้าร่วม'),
+          value: _isRequired,
+          onChanged: (v) => setState(() => _isRequired = v),
         ),
       ],
     );

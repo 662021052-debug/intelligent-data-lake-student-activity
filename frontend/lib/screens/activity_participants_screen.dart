@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../utils/format.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
 import '../widgets/status_chip.dart';
 import 'ocr_review_screen.dart';
@@ -160,9 +161,18 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
+              ? ErrorState(message: _error!, onRetry: _load)
               : _participations.isEmpty
-                  ? Column(children: [_activityHeader(), const Expanded(child: Center(child: Text('ยังไม่มีผู้เข้าร่วม')))])
+                  ? Column(children: [
+                      _activityHeader(),
+                      const Expanded(
+                        child: EmptyState(
+                          icon: Icons.group_off_outlined,
+                          title: 'ยังไม่มีผู้เข้าร่วม',
+                          message: 'เมื่อมีนิสิตสมัครกิจกรรมนี้ รายชื่อจะแสดงที่นี่',
+                        ),
+                      ),
+                    ])
                   : Column(children: [
                       _activityHeader(),
                       Expanded(

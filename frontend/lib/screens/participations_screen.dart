@@ -8,7 +8,10 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../utils/evidence_status.dart';
 import '../utils/format.dart';
+import '../widgets/app_data_table.dart';
+import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
 import '../widgets/status_chip.dart';
 
@@ -173,29 +176,30 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
                     _load();
                   },
                 ),
-                IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
+                IconButton(
+                  onPressed: _load,
+                  tooltip: 'โหลดใหม่',
+                  icon: const Icon(Icons.refresh),
+                ),
               ],
             ),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _participations.isEmpty
-                    ? const Center(child: Text('ไม่พบข้อมูล'))
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          return constraints.maxWidth > 800
-                              ? _buildTable(canWrite)
-                              : _buildList(canWrite);
-                        },
-                      ),
+                : _error != null
+                    ? ErrorState(message: _error!, onRetry: _load)
+                    : _participations.isEmpty
+                        ? _emptyState(isStudent)
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              return constraints.maxWidth > 800
+                                  ? _buildTable(canWrite)
+                                  : _buildList(canWrite);
+                            },
+                          ),
           ),
-          _buildPagination(),
+          if (_error == null && _participations.isNotEmpty) _buildPagination(),
         ],
       ),
     );
@@ -212,34 +216,44 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   String _hoursDisplay(Participation p) =>
       p.evidenceStatus == 'approved' ? formatHours(p.hoursEarned) : '–';
 
+  Widget _emptyState(bool isStudent) {
+    final filtered = _studentFilter != null || _activityFilter != null || _statusFilter != null;
+    if (filtered) return EmptyState.noResults();
+    return EmptyState(
+      icon: Icons.fact_check_outlined,
+      title: 'ยังไม่มีรายการเข้าร่วม',
+      message: isStudent
+          ? 'เมื่อสมัครกิจกรรมแล้ว รายการจะแสดงที่นี่'
+          : 'กดปุ่ม + มุมขวาล่างเพื่อบันทึกการเข้าร่วมรายการแรก',
+    );
+  }
+
   Widget _buildTable(bool canWrite) {
     final isStudent = authService.role == 'student';
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('นิสิต')),
-          DataColumn(label: Text('กิจกรรม')),
-          DataColumn(label: Text('เช็คอิน')),
-          DataColumn(label: Text('ชั่วโมงที่ได้')),
-          DataColumn(label: Text('สถานะหลักฐาน')),
-          DataColumn(label: Text('')),
-        ],
-        rows: _participations
-            .map((p) => DataRow(cells: [
-                  DataCell(Text(_studentLabel(p.studentId))),
-                  DataCell(Text(_activityName(p))),
-                  DataCell(Text(p.checkInTime == null ? '-' : p.checkInTime.toString())),
-                  DataCell(Text(_hoursDisplay(p))),
-                  DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
-                  DataCell(canWrite
-                      ? _actionButtons(p)
-                      : isStudent
-                          ? _studentActions(p)
-                          : const SizedBox.shrink()),
-                ]))
-            .toList(),
-      ),
+    return AppDataTable(
+      columns: const [
+        DataColumn(label: Text('นิสิต')),
+        DataColumn(label: Text('กิจกรรม')),
+        DataColumn(label: Text('เช็คอิน')),
+        DataColumn(label: Text('ชั่วโมงที่ได้'), numeric: true),
+        DataColumn(label: Text('สถานะหลักฐาน')),
+        DataColumn(label: Text('')),
+      ],
+      rows: [
+        for (final p in _participations)
+          [
+            DataCell(Text(_studentLabel(p.studentId))),
+            DataCell(Text(_activityName(p))),
+            DataCell(Text(p.checkInTime == null ? '-' : p.checkInTime.toString())),
+            DataCell(Text(_hoursDisplay(p))),
+            DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
+            DataCell(canWrite
+                ? _actionButtons(p)
+                : isStudent
+                    ? _studentActions(p)
+                    : const SizedBox.shrink()),
+          ],
+      ],
     );
   }
 
@@ -274,9 +288,14 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   Widget _actionButtons(Participation p) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(icon: const Icon(Icons.edit, size: 20), onPressed: () => _openForm(existing: p)),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 20),
+            tooltip: 'แก้ไข',
+            onPressed: () => _openForm(existing: p),
+          ),
           IconButton(
             icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+            tooltip: 'ลบ',
             onPressed: () => _delete(p),
           ),
         ],
@@ -411,66 +430,54 @@ class _ParticipationFormDialogState extends State<_ParticipationFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'เพิ่มการเข้าร่วม' : 'แก้ไขการเข้าร่วม'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<int>(
-                  initialValue: _studentId,
-                  decoration: const InputDecoration(labelText: 'นิสิต'),
-                  items: widget.students
-                      .map((s) => DropdownMenuItem(value: s.id, child: Text(s.fullName)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _studentId = v),
-                  validator: (v) => v == null ? 'กรุณาเลือกนิสิต' : null,
-                ),
-                DropdownButtonFormField<int>(
-                  initialValue: _activityId,
-                  decoration: const InputDecoration(labelText: 'กิจกรรม'),
-                  items: widget.activities
-                      .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _activityId = v),
-                  validator: (v) => v == null ? 'กรุณาเลือกกิจกรรม' : null,
-                ),
-                TextFormField(
-                  controller: _hoursController,
-                  decoration: const InputDecoration(labelText: 'ชั่วโมงที่ได้'),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกจำนวนเต็ม' : null,
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: _evidenceStatus,
-                  decoration: const InputDecoration(labelText: 'สถานะหลักฐาน'),
-                  items: _evidenceStatuses
-                      .map((s) => DropdownMenuItem(value: s, child: Text(evidenceLabel(s))))
-                      .toList(),
-                  onChanged: (v) => setState(() => _evidenceStatus = v ?? 'pending'),
-                ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                  ),
-              ],
-            ),
-          ),
+    return AppFormDialog(
+      title: widget.existing == null ? 'เพิ่มการเข้าร่วม' : 'แก้ไขการเข้าร่วม',
+      formKey: _formKey,
+      saving: _saving,
+      error: _error,
+      onSubmit: _submit,
+      fields: [
+        DropdownButtonFormField<int>(
+          initialValue: _studentId,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'นิสิต'),
+          items: widget.students
+              .map((s) => DropdownMenuItem(
+                    value: s.id,
+                    child: Text(s.fullName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ))
+              .toList(),
+          onChanged: (v) => setState(() => _studentId = v),
+          validator: (v) => v == null ? 'กรุณาเลือกนิสิต' : null,
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('บันทึก'),
+        DropdownButtonFormField<int>(
+          initialValue: _activityId,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'กิจกรรม'),
+          items: widget.activities
+              .map((a) => DropdownMenuItem(
+                    value: a.id,
+                    child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ))
+              .toList(),
+          onChanged: (v) => setState(() => _activityId = v),
+          validator: (v) => v == null ? 'กรุณาเลือกกิจกรรม' : null,
+        ),
+        TextFormField(
+          controller: _hoursController,
+          decoration: const InputDecoration(labelText: 'ชั่วโมงที่ได้'),
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกจำนวนเต็ม' : null,
+        ),
+        DropdownButtonFormField<String>(
+          initialValue: _evidenceStatus,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'สถานะหลักฐาน'),
+          items: _evidenceStatuses
+              .map((s) => DropdownMenuItem(value: s, child: Text(evidenceLabel(s))))
+              .toList(),
+          onChanged: (v) => setState(() => _evidenceStatus = v ?? 'pending'),
         ),
       ],
     );

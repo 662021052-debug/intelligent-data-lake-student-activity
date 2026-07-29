@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../widgets/app_data_table.dart';
+import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/status_chip.dart';
 
 class StudentsScreen extends StatefulWidget {
   const StudentsScreen({super.key});
@@ -130,59 +134,67 @@ class _StudentsScreenState extends State<StudentsScreen> {
                     _load();
                   },
                 ),
-                IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
+                IconButton(
+                  onPressed: _load,
+                  tooltip: 'โหลดใหม่',
+                  icon: const Icon(Icons.refresh),
+                ),
               ],
             ),
           ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _students.isEmpty
-                    ? const Center(child: Text('ไม่พบข้อมูล'))
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          return constraints.maxWidth > 800
-                              ? _buildTable(canWrite)
-                              : _buildList(canWrite);
-                        },
-                      ),
+                : _error != null
+                    ? ErrorState(message: _error!, onRetry: _load)
+                    : _students.isEmpty
+                        ? _emptyState()
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              return constraints.maxWidth > 800
+                                  ? _buildTable(canWrite)
+                                  : _buildList(canWrite);
+                            },
+                          ),
           ),
-          _buildPagination(),
+          if (_error == null && _students.isNotEmpty) _buildPagination(),
         ],
       ),
     );
   }
 
+  Widget _emptyState() {
+    if (_search.isNotEmpty || _statusFilter != null) return EmptyState.noResults();
+    return const EmptyState(
+      icon: Icons.people_outline,
+      title: 'ยังไม่มีข้อมูลนิสิต',
+      message: 'กดปุ่ม + มุมขวาล่างเพื่อเพิ่มนิสิตคนแรก',
+    );
+  }
+
   Widget _buildTable(bool canWrite) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('รหัสนิสิต')),
-          DataColumn(label: Text('ชื่อ-สกุล')),
-          DataColumn(label: Text('คณะ')),
-          DataColumn(label: Text('สาขา')),
-          DataColumn(label: Text('ชั้นปี')),
-          DataColumn(label: Text('สถานะ')),
-          DataColumn(label: Text('')),
-        ],
-        rows: _students
-            .map((s) => DataRow(cells: [
-                  DataCell(Text(s.studentId)),
-                  DataCell(Text(s.fullName)),
-                  DataCell(Text(s.faculty)),
-                  DataCell(Text(s.major)),
-                  DataCell(Text('${s.yearLevel}')),
-                  DataCell(_statusChip(s.status)),
-                  DataCell(canWrite ? _actionButtons(s) : const SizedBox.shrink()),
-                ]))
-            .toList(),
-      ),
+    return AppDataTable(
+      columns: const [
+        DataColumn(label: Text('รหัสนิสิต')),
+        DataColumn(label: Text('ชื่อ-สกุล')),
+        DataColumn(label: Text('คณะ')),
+        DataColumn(label: Text('สาขา')),
+        DataColumn(label: Text('ชั้นปี'), numeric: true),
+        DataColumn(label: Text('สถานะ')),
+        DataColumn(label: Text('')),
+      ],
+      rows: [
+        for (final s in _students)
+          [
+            DataCell(Text(s.studentId)),
+            DataCell(Text(s.fullName)),
+            DataCell(Text(s.faculty)),
+            DataCell(Text(s.major)),
+            DataCell(Text('${s.yearLevel}')),
+            DataCell(_statusChip(s.status)),
+            DataCell(canWrite ? _actionButtons(s) : const SizedBox.shrink()),
+          ],
+      ],
     );
   }
 
@@ -208,19 +220,21 @@ class _StudentsScreenState extends State<StudentsScreen> {
   Widget _actionButtons(Student s) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(icon: const Icon(Icons.edit, size: 20), onPressed: () => _openForm(existing: s)),
+          IconButton(
+            icon: const Icon(Icons.edit, size: 20),
+            tooltip: 'แก้ไข',
+            onPressed: () => _openForm(existing: s),
+          ),
           if (authService.isAdmin)
             IconButton(
               icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+              tooltip: 'ลบ',
               onPressed: () => _delete(s),
             ),
         ],
       );
 
-  Widget _statusChip(String status) => Chip(
-        label: Text(status == 'active' ? 'กำลังศึกษา' : 'พ้นสภาพ'),
-        backgroundColor: status == 'active' ? Colors.green.shade100 : Colors.grey.shade300,
-      );
+  Widget _statusChip(String status) => StatusChip.studentStatus(status, dense: true);
 
   Widget _buildPagination() {
     final start = _total == 0 ? 0 : _skip + 1;
@@ -326,68 +340,48 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'เพิ่มนิสิต' : 'แก้ไขนิสิต'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _studentIdController,
-                  decoration: const InputDecoration(labelText: 'รหัสนิสิต'),
-                  validator: requiredValidator,
-                ),
-                TextFormField(
-                  controller: _fullNameController,
-                  decoration: const InputDecoration(labelText: 'ชื่อ-สกุล'),
-                  validator: requiredValidator,
-                ),
-                TextFormField(
-                  controller: _facultyController,
-                  decoration: const InputDecoration(labelText: 'คณะ'),
-                  validator: requiredValidator,
-                ),
-                TextFormField(
-                  controller: _majorController,
-                  decoration: const InputDecoration(labelText: 'สาขา'),
-                  validator: requiredValidator,
-                ),
-                TextFormField(
-                  controller: _yearLevelController,
-                  decoration: const InputDecoration(labelText: 'ชั้นปี'),
-                  keyboardType: TextInputType.number,
-                  validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: _status,
-                  decoration: const InputDecoration(labelText: 'สถานะ'),
-                  items: const [
-                    DropdownMenuItem(value: 'active', child: Text('กำลังศึกษา')),
-                    DropdownMenuItem(value: 'inactive', child: Text('พ้นสภาพ')),
-                  ],
-                  onChanged: (v) => setState(() => _status = v ?? 'active'),
-                ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                  ),
-              ],
-            ),
-          ),
+    return AppFormDialog(
+      title: widget.existing == null ? 'เพิ่มนิสิต' : 'แก้ไขนิสิต',
+      formKey: _formKey,
+      saving: _saving,
+      error: _error,
+      onSubmit: _submit,
+      fields: [
+        TextFormField(
+          controller: _studentIdController,
+          decoration: const InputDecoration(labelText: 'รหัสนิสิต'),
+          validator: requiredValidator,
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('บันทึก'),
+        TextFormField(
+          controller: _fullNameController,
+          decoration: const InputDecoration(labelText: 'ชื่อ-สกุล'),
+          validator: requiredValidator,
+        ),
+        TextFormField(
+          controller: _facultyController,
+          decoration: const InputDecoration(labelText: 'คณะ'),
+          validator: requiredValidator,
+        ),
+        TextFormField(
+          controller: _majorController,
+          decoration: const InputDecoration(labelText: 'สาขา'),
+          validator: requiredValidator,
+        ),
+        TextFormField(
+          controller: _yearLevelController,
+          decoration: const InputDecoration(labelText: 'ชั้นปี'),
+          keyboardType: TextInputType.number,
+          validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
+        ),
+        DropdownButtonFormField<String>(
+          initialValue: _status,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'สถานะ'),
+          items: const [
+            DropdownMenuItem(value: 'active', child: Text('กำลังศึกษา')),
+            DropdownMenuItem(value: 'inactive', child: Text('พ้นสภาพ')),
+          ],
+          onChanged: (v) => setState(() => _status = v ?? 'active'),
         ),
       ],
     );

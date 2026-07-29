@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/hour_summary.dart';
 import '../services/api_service.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/hour_summary_view.dart';
 
 class MyHoursScreen extends StatefulWidget {
@@ -45,13 +46,25 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('ชั่วโมงสะสมของฉัน'),
-        actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
+        actions: [
+          IconButton(
+            onPressed: _load,
+            tooltip: 'โหลดใหม่',
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-              : HourSummaryView(categories: _categories),
+              ? ErrorState(message: _error!, onRetry: _load)
+              : _categories.isEmpty
+                  ? const EmptyState(
+                      icon: Icons.timelapse,
+                      title: 'ยังไม่มีข้อมูลชั่วโมง',
+                      message: 'เมื่อหลักฐานการเข้าร่วมได้รับการอนุมัติ ชั่วโมงจะแสดงที่นี่',
+                    )
+                  : HourSummaryView(categories: _categories),
     );
   }
 }

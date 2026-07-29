@@ -4,7 +4,9 @@ import '../models/app_user.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/empty_state.dart';
 
 const _roles = ['student', 'staff', 'admin'];
 
@@ -109,42 +111,48 @@ class _UsersScreenState extends State<UsersScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
-              : ListView.builder(
-                  itemCount: _users.length,
-                  itemBuilder: (context, index) {
-                    final u = _users[index];
-                    final isSelf = u.username == authService.username;
-                    final subtitle = u.role == 'student'
-                        ? '${_roleLabel(u.role)} • ${_studentLabel(u.studentId)}'
-                        : _roleLabel(u.role);
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: ListTile(
-                        leading: const Icon(Icons.person),
-                        title: Text(u.username + (isSelf ? ' (คุณ)' : '')),
-                        subtitle: Text(subtitle),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit, size: 20),
-                              tooltip: 'แก้ไข',
-                              onPressed: () => _openForm(existing: u),
+              ? ErrorState(message: _error!, onRetry: _load)
+              : _users.isEmpty
+                  ? const EmptyState(
+                      icon: Icons.manage_accounts_outlined,
+                      title: 'ยังไม่มีผู้ใช้',
+                      message: 'กดปุ่ม + มุมขวาล่างเพื่อสร้างบัญชีผู้ใช้',
+                    )
+                  : ListView.builder(
+                      itemCount: _users.length,
+                      itemBuilder: (context, index) {
+                        final u = _users[index];
+                        final isSelf = u.username == authService.username;
+                        final subtitle = u.role == 'student'
+                            ? '${_roleLabel(u.role)} • ${_studentLabel(u.studentId)}'
+                            : _roleLabel(u.role);
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          child: ListTile(
+                            leading: const Icon(Icons.person),
+                            title: Text(u.username + (isSelf ? ' (คุณ)' : '')),
+                            subtitle: Text(subtitle),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit, size: 20),
+                                  tooltip: 'แก้ไข',
+                                  onPressed: () => _openForm(existing: u),
+                                ),
+                                // no self-delete (backend also blocks it)
+                                if (!isSelf)
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+                                    tooltip: 'ลบ',
+                                    onPressed: () => _delete(u),
+                                  ),
+                              ],
                             ),
-                            // no self-delete (backend also blocks it)
-                            if (!isSelf)
-                              IconButton(
-                                icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                                tooltip: 'ลบ',
-                                onPressed: () => _delete(u),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }
@@ -221,75 +229,55 @@ class _UserFormDialogState extends State<_UserFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(_isEdit ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้'),
-      content: SizedBox(
-        width: 400,
-        child: Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _usernameController,
-                  enabled: !_isEdit, // username is the identity; not editable
-                  decoration: const InputDecoration(labelText: 'ชื่อผู้ใช้'),
-                  validator: _isEdit ? null : requiredValidator,
-                ),
-                TextFormField(
-                  controller: _passwordController,
-                  decoration: InputDecoration(
-                    labelText: _isEdit ? 'รหัสผ่านใหม่ (เว้นว่างไว้ถ้าไม่เปลี่ยน)' : 'รหัสผ่าน',
-                  ),
-                  obscureText: true,
-                  validator: (v) {
-                    if (_isEdit && (v == null || v.isEmpty)) return null; // keep current
-                    return (v == null || v.length < 6) ? 'รหัสผ่านอย่างน้อย 6 ตัวอักษร' : null;
-                  },
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: _role,
-                  decoration: const InputDecoration(labelText: 'สิทธิ์ (role)'),
-                  items: _roles
-                      .map((r) => DropdownMenuItem(value: r, child: Text(_roleLabel(r))))
-                      .toList(),
-                  onChanged: (v) => setState(() => _role = v ?? 'staff'),
-                ),
-                // D1: a student account must be linked to a student record
-                if (_role == 'student')
-                  DropdownButtonFormField<int>(
-                    initialValue: _studentId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'นิสิตที่ผูกบัญชี'),
-                    items: widget.students
-                        .map((s) => DropdownMenuItem(
-                              value: s.id,
-                              child: Text('${s.studentId} ${s.fullName}',
-                                  overflow: TextOverflow.ellipsis),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() => _studentId = v),
-                    validator: (v) => v == null ? 'กรุณาเลือกนิสิต' : null,
-                  ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                  ),
-              ],
-            ),
+    return AppFormDialog(
+      title: _isEdit ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้',
+      formKey: _formKey,
+      saving: _saving,
+      error: _error,
+      onSubmit: _submit,
+      fields: [
+        TextFormField(
+          controller: _usernameController,
+          enabled: !_isEdit, // username is the identity; not editable
+          decoration: const InputDecoration(labelText: 'ชื่อผู้ใช้'),
+          validator: _isEdit ? null : requiredValidator,
+        ),
+        TextFormField(
+          controller: _passwordController,
+          decoration: InputDecoration(
+            labelText: _isEdit ? 'รหัสผ่านใหม่ (เว้นว่างไว้ถ้าไม่เปลี่ยน)' : 'รหัสผ่าน',
           ),
+          obscureText: true,
+          validator: (v) {
+            if (_isEdit && (v == null || v.isEmpty)) return null; // keep current
+            return (v == null || v.length < 6) ? 'รหัสผ่านอย่างน้อย 6 ตัวอักษร' : null;
+          },
         ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        FilledButton(
-          onPressed: _saving ? null : _submit,
-          child: _saving
-              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('บันทึก'),
+        DropdownButtonFormField<String>(
+          initialValue: _role,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'สิทธิ์ (role)'),
+          items: _roles
+              .map((r) => DropdownMenuItem(value: r, child: Text(_roleLabel(r))))
+              .toList(),
+          onChanged: (v) => setState(() => _role = v ?? 'staff'),
         ),
+        // D1: a student account must be linked to a student record
+        if (_role == 'student')
+          DropdownButtonFormField<int>(
+            initialValue: _studentId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'นิสิตที่ผูกบัญชี'),
+            items: widget.students
+                .map((s) => DropdownMenuItem(
+                      value: s.id,
+                      child: Text('${s.studentId} ${s.fullName}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() => _studentId = v),
+            validator: (v) => v == null ? 'กรุณาเลือกนิสิต' : null,
+          ),
       ],
     );
   }

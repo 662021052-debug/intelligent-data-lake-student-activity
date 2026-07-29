@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../widgets/app_data_table.dart';
+
 /// จุดเดียวที่กำหนดหน้าตาของทั้งแอป — ทุกหน้าดึงค่าจาก `Theme.of(context)`
 /// ห้าม hardcode สี/มุมโค้ง/ระยะห่างในแต่ละหน้า (ยกเว้นค่าที่มาจากที่นี่)
 
@@ -52,6 +54,9 @@ abstract final class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
+      // ระลอกคลื่นตอนกดแบบเดียวกันทุกแพลตฟอร์ม (ค่าเริ่มต้นของ M3 บนบางแพลตฟอร์ม
+      // ใช้ InkSparkle ที่ต้องโหลด shader ทำให้เอฟเฟกต์ไม่เหมือนกันบนเว็บ)
+      splashFactory: InkRipple.splashFactory,
       textTheme: baseText.copyWith(
         titleLarge: baseText.titleLarge?.copyWith(fontWeight: FontWeight.w600),
         titleMedium: baseText.titleMedium?.copyWith(fontWeight: FontWeight.w600),
@@ -141,6 +146,8 @@ abstract final class AppTheme {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.field)),
       ),
+      dataTableTheme: appDataTableTheme(colorScheme, baseText),
+      tooltipTheme: const TooltipThemeData(waitDuration: Duration(milliseconds: 400)),
       dividerTheme: DividerThemeData(color: colorScheme.outlineVariant, space: 1),
     );
   }

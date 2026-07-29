@@ -55,6 +55,17 @@ class StatusChip extends StatelessWidget {
     );
   }
 
+  /// สถานะนิสิต (active / inactive)
+  factory StatusChip.studentStatus(String status, {bool dense = false}) {
+    final active = status == 'active';
+    return StatusChip(
+      label: active ? 'กำลังศึกษา' : 'พ้นสภาพ',
+      palette: active ? StatusPalette.approved : StatusPalette.neutral,
+      icon: active ? Icons.school_outlined : Icons.person_off_outlined,
+      dense: dense,
+    );
+  }
+
   /// ผลตรวจ OCR ชั้น Silver (auto_approved / needs_review / flagged)
   factory StatusChip.ocr(String decision, {bool dense = false}) {
     return StatusChip(
