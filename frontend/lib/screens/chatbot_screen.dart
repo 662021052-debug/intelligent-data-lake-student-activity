@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/typing_indicator.dart';
 import 'register_activities_screen.dart';
 
 /// Student-facing "ผู้ช่วยอัจฉริยะ" chat screen (Phase 19).
@@ -92,17 +94,22 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text('ผู้ช่วยอัจฉริยะ')),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
+          constraints: const BoxConstraints(maxWidth: 760),
           child: Column(
             children: [
               Expanded(
                 child: ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                    vertical: AppSpacing.lg,
+                  ),
                   itemCount: _messages.length + (_sending ? 1 : 0),
                   itemBuilder: (context, index) {
                     if (_sending && index == _messages.length) {
@@ -118,13 +125,41 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                   },
                 ),
               ),
-              _QuickPrompts(onTap: _sending ? null : _send),
-              const Divider(height: 1),
-              _Composer(controller: _controller, sending: _sending, onSend: _send),
+              // แถบล่าง (คำถามลัด + ช่องพิมพ์) อยู่ติดขอบล่างเสมอ พื้นหลังต่างจากพื้นที่แชต
+              // เพื่อไม่ให้หน้าจอกระโดดเวลาคีย์บอร์ดขึ้นหรือข้อความยาวขึ้น
+              Material(
+                color: scheme.surfaceContainerLow,
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Divider(height: 1),
+                      _QuickPrompts(onTap: _sending ? null : _send),
+                      _Composer(controller: _controller, sending: _sending, onSend: _send),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// รูปประจำตัวของบอท วางไว้ซ้ายของฟองข้อความฝั่งบอททุกอัน
+class _BotAvatar extends StatelessWidget {
+  const _BotAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: scheme.primaryContainer,
+      child: Icon(Icons.smart_toy, size: 18, color: scheme.onPrimaryContainer),
     );
   }
 }
@@ -137,61 +172,95 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final fromUser = message.fromUser;
-    final bg = fromUser ? theme.colorScheme.primary : theme.colorScheme.surfaceContainerHighest;
-    final fg = fromUser ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+    final bg = fromUser ? scheme.primary : scheme.surfaceContainerHighest;
+    final fg = fromUser ? scheme.onPrimary : scheme.onSurface;
 
-    return Align(
-      alignment: fromUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: const BoxConstraints(maxWidth: 520),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
+    final bubble = Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      constraints: const BoxConstraints(maxWidth: 520),
+      decoration: BoxDecoration(
+        color: bg,
+        // มุมด้านที่ติดกับผู้พูดโค้งน้อยกว่า ทำให้รู้ทันทีว่าใครพูด
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: Radius.circular(fromUser ? 16 : 4),
+          bottomRight: Radius.circular(fromUser ? 4 : 16),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SelectableText(message.text, style: TextStyle(color: fg)),
-            if (message.referencesActivities) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.tonalIcon(
-                  onPressed: onOpenRegister,
-                  icon: const Icon(Icons.how_to_reg, size: 18),
-                  label: const Text('ไปหน้าสมัครกิจกรรม'),
-                ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(message.text, style: theme.textTheme.bodyMedium?.copyWith(color: fg)),
+          if (message.referencesActivities) ...[
+            const SizedBox(height: AppSpacing.md),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: onOpenRegister,
+                icon: const Icon(Icons.how_to_reg, size: 18),
+                label: const Text('ไปหน้าสมัครกิจกรรม'),
               ),
-            ],
+            ),
           ],
-        ),
+        ],
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Row(
+        mainAxisAlignment: fromUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!fromUser) ...[
+            const _BotAvatar(),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+          Flexible(child: bubble),
+        ],
       ),
     );
   }
 }
 
+/// ฟองข้อความ "กำลังพิมพ์" ของบอท (avatar + จุดสามจุดกระพริบ)
 class _TypingBubble extends StatelessWidget {
   const _TypingBubble();
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          const _BotAvatar(),
+          const SizedBox(width: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+                bottomLeft: Radius.circular(4),
+                bottomRight: Radius.circular(16),
+              ),
+            ),
+            child: const TypingIndicator(),
+          ),
+        ],
       ),
     );
   }
@@ -203,19 +272,43 @@ class _QuickPrompts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final entry in _quickPrompts.entries)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ActionChip(
-                label: Text(entry.key),
-                onPressed: onTap == null ? null : () => onTap!(entry.value),
-              ),
-            ),
+          Text(
+            'คำถามที่ถามบ่อย',
+            style: theme.textTheme.labelMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final entry in _quickPrompts.entries)
+                ActionChip(
+                  label: Text(entry.key),
+                  avatar: Icon(
+                    Icons.bolt,
+                    size: 16,
+                    color: onTap == null
+                        ? theme.disabledColor
+                        : theme.colorScheme.primary,
+                  ),
+                  backgroundColor: theme.colorScheme.surface,
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                  onPressed: onTap == null ? null : () => onTap!(entry.value),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -231,22 +324,24 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: TextField(
               controller: controller,
               textInputAction: TextInputAction.send,
               onSubmitted: sending ? null : onSend,
+              minLines: 1,
+              maxLines: 4,
               decoration: const InputDecoration(
                 hintText: 'พิมพ์คำถามของคุณ...',
-                border: OutlineInputBorder(),
-                isDense: true,
+                prefixIcon: Icon(Icons.chat_bubble_outline, size: 20),
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           IconButton.filled(
             onPressed: sending ? null : () => onSend(controller.text),
             icon: const Icon(Icons.send),
