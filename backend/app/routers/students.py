@@ -56,6 +56,10 @@ def list_students(
         count_query = count_query.where(condition)
 
     total = session.exec(count_query).one()
+    # เรียงตามรหัสนิสิตเสมอ (รหัสขึ้นต้นด้วยปีที่เข้าศึกษา จึงจัดกลุ่มตามชั้นปีให้เอง)
+    # ถ้าไม่ใส่ ORDER BY ฐานข้อมูลจะคืนลำดับตามใจ — แถวที่ถูก UPDATE (เช่น เปลี่ยนสถานะ)
+    # จะย้ายที่และไปแทรกอยู่กับชั้นปีอื่น
+    query = query.order_by(Student.student_id, Student.id)
     items = session.exec(query.offset(skip).limit(limit)).all()
     return Page(items=items, total=total, skip=skip, limit=limit)
 

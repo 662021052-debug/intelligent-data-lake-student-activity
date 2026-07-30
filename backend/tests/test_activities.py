@@ -50,6 +50,42 @@ def test_delete_activity(client):
     assert get_response.status_code == 404
 
 
+def test_list_activities_order_is_stable_after_approval(client, tokens):
+    """อนุมัติกิจกรรมแล้วลำดับในรายการต้องไม่เปลี่ยน (เรียงตามวันจัดกิจกรรมเสมอ)."""
+    # สร้างสลับวันไปมา เพื่อให้ลำดับ insert ไม่ตรงกับลำดับที่ควรแสดง
+    for name, start_at in (
+        ("กิจกรรม ก", "2026-08-03T09:00:00"),
+        ("กิจกรรม ข", "2026-08-01T09:00:00"),
+        ("กิจกรรม ค", "2026-08-02T09:00:00"),
+    ):
+        response = client.post(
+            "/activities",
+            json={
+                "name": name,
+                "activity_type": "วิชาการ",
+                "subcategory_id": 1,
+                "is_required": False,
+                "max_participants": 50,
+                "start_at": start_at,
+                "location": "ห้อง SC101",
+                "hours": 4,
+            },
+        )
+        assert response.status_code == 201
+
+    expected = ["กิจกรรม ก", "กิจกรรม ค", "กิจกรรม ข"]  # start_at ใหม่สุดขึ้นก่อน
+
+    def names():
+        return [a["name"] for a in client.get("/activities").json()["items"]]
+
+    assert names() == expected
+
+    middle = next(a for a in client.get("/activities").json()["items"] if a["name"] == "กิจกรรม ค")
+    approve = client.patch(f"/activities/{middle['id']}/approve", headers=_admin_headers(tokens))
+    assert approve.status_code == 200
+    assert names() == expected
+
+
 def test_get_nonexistent_activity_returns_404(client):
     response = client.get("/activities/9999")
     assert response.status_code == 404

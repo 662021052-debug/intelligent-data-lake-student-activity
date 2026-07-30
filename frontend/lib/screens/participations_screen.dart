@@ -13,6 +13,7 @@ import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
+import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 
 const _evidenceStatuses = ['pending', 'approved', 'rejected'];
@@ -37,11 +38,19 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   int? _studentFilter;
   int? _activityFilter;
   String? _statusFilter;
+  String _search = '';
+  int _requestId = 0;
 
   @override
   void initState() {
     super.initState();
     _loadLookups().then((_) => _load());
+  }
+
+  void _onSearch(String value) {
+    _search = value;
+    _skip = 0;
+    _load();
   }
 
   Future<void> _loadLookups() async {
@@ -60,6 +69,7 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   }
 
   Future<void> _load() async {
+    final requestId = ++_requestId;
     setState(() {
       _loading = true;
       _error = null;
@@ -69,16 +79,20 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
       if (_studentFilter != null) query['student_id'] = '$_studentFilter';
       if (_activityFilter != null) query['activity_id'] = '$_activityFilter';
       if (_statusFilter != null) query['evidence_status'] = _statusFilter!;
+      if (_search.isNotEmpty) query['search'] = _search;
       final page =
           await ApiService.fetchPage('/participations', Participation.fromJson, query: query);
+      // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่
+      if (!mounted || requestId != _requestId) return;
       setState(() {
         _participations = page.items;
         _total = page.total;
       });
     } catch (e) {
+      if (!mounted || requestId != _requestId) return;
       setState(() => _error = e.toString());
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && requestId == _requestId) setState(() => _loading = false);
     }
   }
 
@@ -131,6 +145,11 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
               runSpacing: 12,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                DebouncedSearchField(
+                  label: 'ค้นหาชื่อ/รหัสนิสิต หรือกิจกรรม',
+                  width: 280,
+                  onSearch: _onSearch,
+                ),
                 // นิสิตที่ role student จะเห็นข้อมูลของตัวเองอยู่แล้ว (backend กรองให้)
                 // จึงไม่ต้องมี dropdown ให้เลือกดูของนิสิตคนอื่น
                 if (!isStudent)
@@ -184,8 +203,15 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
               ],
             ),
           ),
+          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
+          SizedBox(
+            height: 2,
+            child: _loading && _participations.isNotEmpty
+                ? const LinearProgressIndicator(minHeight: 2)
+                : null,
+          ),
           Expanded(
-            child: _loading
+            child: _loading && _participations.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
                     ? ErrorState(message: _error!, onRetry: _load)
@@ -217,7 +243,10 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
       p.evidenceStatus == 'approved' ? formatHours(p.hoursEarned) : '–';
 
   Widget _emptyState(bool isStudent) {
-    final filtered = _studentFilter != null || _activityFilter != null || _statusFilter != null;
+    final filtered = _search.isNotEmpty ||
+        _studentFilter != null ||
+        _activityFilter != null ||
+        _statusFilter != null;
     if (filtered) return EmptyState.noResults();
     return EmptyState(
       icon: Icons.fact_check_outlined,

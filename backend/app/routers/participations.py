@@ -129,6 +129,7 @@ def list_participations(
     student_id: Optional[int] = None,
     activity_id: Optional[int] = None,
     evidence_status: Optional[EvidenceStatus] = None,
+    search: Optional[str] = Query(None, description="ค้นหาจากชื่อ/รหัสนิสิต หรือชื่อกิจกรรม"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -157,8 +158,23 @@ def list_participations(
     if evidence_status:
         query = query.where(Participation.evidence_status == evidence_status)
         count_query = count_query.where(Participation.evidence_status == evidence_status)
+    if search:
+        # ตารางนี้แสดงชื่อนิสิตกับชื่อกิจกรรม จึงต้องค้นได้ทั้งสองอย่าง
+        # ใช้ subquery แทน join เพื่อไม่ให้แถวซ้ำและไม่กระทบ count
+        pattern = f"%{search}%"
+        matched_students = select(Student.id).where(
+            Student.full_name.ilike(pattern) | Student.student_id.ilike(pattern)
+        )
+        matched_activities = select(Activity.id).where(Activity.name.ilike(pattern))
+        condition = Participation.student_id.in_(matched_students) | Participation.activity_id.in_(
+            matched_activities
+        )
+        query = query.where(condition)
+        count_query = count_query.where(condition)
 
     total = session.exec(count_query).one()
+    # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (เช่น อนุมัติหลักฐาน) ย้ายตำแหน่งในรายการ
+    query = query.order_by(Participation.id)
     items = session.exec(query.offset(skip).limit(limit)).all()
     evidence = _latest_evidence_map(session, [p.id for p in items])
     names = _activity_names(session, [p.activity_id for p in items])

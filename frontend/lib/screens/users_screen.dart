@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/search_field.dart';
 
 const _roles = ['student', 'staff', 'admin'];
 
@@ -33,37 +34,54 @@ class _UsersScreenState extends State<UsersScreen> {
   List<Student> _students = [];
   bool _loading = false;
   String? _error;
+  String _search = '';
+  int _requestId = 0;
 
   @override
   void initState() {
     super.initState();
+    _loadStudents();
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  void _onSearch(String value) {
+    _search = value;
+    _load();
+  }
+
+  /// รายชื่อนิสิตใช้แค่แปลง student_id เป็นชื่อในรายการ — โหลดครั้งเดียวพอ
+  /// ไม่ต้องดึงใหม่ทุกครั้งที่ค้นหา
+  Future<void> _loadStudents() async {
     try {
-      final page = await ApiService.fetchPage(
-        '/auth/users',
-        AppUser.fromJson,
-        query: {'limit': '200'},
-      );
       final studentsPage = await ApiService.fetchPage(
         '/students',
         Student.fromJson,
         query: {'limit': '500'},
       );
-      setState(() {
-        _users = page.items;
-        _students = studentsPage.items;
-      });
+      if (mounted) setState(() => _students = studentsPage.items);
+    } catch (_) {
+      // ไม่ร้ายแรง: รายการจะแสดงเป็น #id แทนชื่อนิสิต
+    }
+  }
+
+  Future<void> _load() async {
+    final requestId = ++_requestId;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final query = <String, String>{'limit': '200'};
+      if (_search.isNotEmpty) query['search'] = _search;
+      final page = await ApiService.fetchPage('/auth/users', AppUser.fromJson, query: query);
+      // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่
+      if (!mounted || requestId != _requestId) return;
+      setState(() => _users = page.items);
     } catch (e) {
+      if (!mounted || requestId != _requestId) return;
       setState(() => _error = e.toString());
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && requestId == _requestId) setState(() => _loading = false);
     }
   }
 
@@ -108,51 +126,82 @@ class _UsersScreenState extends State<UsersScreen> {
         onPressed: () => _openForm(),
         child: const Icon(Icons.add),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? ErrorState(message: _error!, onRetry: _load)
-              : _users.isEmpty
-                  ? const EmptyState(
-                      icon: Icons.manage_accounts_outlined,
-                      title: 'ยังไม่มีผู้ใช้',
-                      message: 'กดปุ่ม + มุมขวาล่างเพื่อสร้างบัญชีผู้ใช้',
-                    )
-                  : ListView.builder(
-                      itemCount: _users.length,
-                      itemBuilder: (context, index) {
-                        final u = _users[index];
-                        final isSelf = u.username == authService.username;
-                        final subtitle = u.role == 'student'
-                            ? '${_roleLabel(u.role)} • ${_studentLabel(u.studentId)}'
-                            : _roleLabel(u.role);
-                        return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: ListTile(
-                            leading: const Icon(Icons.person),
-                            title: Text(u.username + (isSelf ? ' (คุณ)' : '')),
-                            subtitle: Text(subtitle),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit, size: 20),
-                                  tooltip: 'แก้ไข',
-                                  onPressed: () => _openForm(existing: u),
-                                ),
-                                // no self-delete (backend also blocks it)
-                                if (!isSelf)
-                                  IconButton(
-                                    icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                                    tooltip: 'ลบ',
-                                    onPressed: () => _delete(u),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                DebouncedSearchField(label: 'ค้นหาชื่อผู้ใช้', onSearch: _onSearch),
+                IconButton(
+                  onPressed: _load,
+                  tooltip: 'โหลดใหม่',
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+          ),
+          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างรายการเดิมทิ้ง
+          SizedBox(
+            height: 2,
+            child: _loading && _users.isNotEmpty
+                ? const LinearProgressIndicator(minHeight: 2)
+                : null,
+          ),
+          Expanded(
+            child: _loading && _users.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? ErrorState(message: _error!, onRetry: _load)
+                    : _users.isEmpty
+                        ? _emptyState()
+                        : ListView.builder(
+                            itemCount: _users.length,
+                            itemBuilder: (context, index) {
+                              final u = _users[index];
+                              final isSelf = u.username == authService.username;
+                              final subtitle = u.role == 'student'
+                                  ? '${_roleLabel(u.role)} • ${_studentLabel(u.studentId)}'
+                                  : _roleLabel(u.role);
+                              return Card(
+                                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                child: ListTile(
+                                  leading: const Icon(Icons.person),
+                                  title: Text(u.username + (isSelf ? ' (คุณ)' : '')),
+                                  subtitle: Text(subtitle),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, size: 20),
+                                        tooltip: 'แก้ไข',
+                                        onPressed: () => _openForm(existing: u),
+                                      ),
+                                      // no self-delete (backend also blocks it)
+                                      if (!isSelf)
+                                        IconButton(
+                                          icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+                                          tooltip: 'ลบ',
+                                          onPressed: () => _delete(u),
+                                        ),
+                                    ],
                                   ),
-                              ],
-                            ),
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
-                    ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    if (_search.isNotEmpty) return EmptyState.noResults();
+    return const EmptyState(
+      icon: Icons.manage_accounts_outlined,
+      title: 'ยังไม่มีผู้ใช้',
+      message: 'กดปุ่ม + มุมขวาล่างเพื่อสร้างบัญชีผู้ใช้',
     );
   }
 }

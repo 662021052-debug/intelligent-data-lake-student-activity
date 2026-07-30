@@ -9,6 +9,7 @@ import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/subcategory_dropdown.dart';
 import 'activity_participants_screen.dart';
@@ -50,7 +51,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   String? _error;
   String _search = '';
   String? _typeFilter;
-  final _searchController = TextEditingController();
+  int _requestId = 0;
 
   @override
   void initState() {
@@ -68,13 +69,14 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  void _onSearch(String value) {
+    _search = value;
+    _skip = 0;
+    _load();
   }
 
   Future<void> _load() async {
+    final requestId = ++_requestId;
     setState(() {
       _loading = true;
       _error = null;
@@ -84,14 +86,17 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       if (_search.isNotEmpty) query['search'] = _search;
       if (_typeFilter != null) query['activity_type'] = _typeFilter!;
       final page = await ApiService.fetchPage('/activities', Activity.fromJson, query: query);
+      // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่
+      if (!mounted || requestId != _requestId) return;
       setState(() {
         _activities = page.items;
         _total = page.total;
       });
     } catch (e) {
+      if (!mounted || requestId != _requestId) return;
       setState(() => _error = e.toString());
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && requestId == _requestId) setState(() => _loading = false);
     }
   }
 
@@ -148,22 +153,9 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               runSpacing: 12,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                SizedBox(
-                  width: 260,
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: 'ค้นหาชื่อกิจกรรม',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onSubmitted: (v) {
-                      _search = v.trim();
-                      _skip = 0;
-                      _load();
-                    },
-                  ),
+                DebouncedSearchField(
+                  label: 'ค้นหาชื่อกิจกรรม',
+                  onSearch: _onSearch,
                 ),
                 DropdownButton<String?>(
                   value: _typeFilter,
@@ -186,8 +178,15 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               ],
             ),
           ),
+          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
+          SizedBox(
+            height: 2,
+            child: _loading && _activities.isNotEmpty
+                ? const LinearProgressIndicator(minHeight: 2)
+                : null,
+          ),
           Expanded(
-            child: _loading
+            child: _loading && _activities.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
                     ? ErrorState(message: _error!, onRetry: _load)

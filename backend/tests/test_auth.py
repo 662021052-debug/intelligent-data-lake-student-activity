@@ -97,3 +97,14 @@ def test_list_users_as_admin_succeeds(client, tokens):
     assert body["total"] >= 3
     usernames = {u["username"] for u in body["items"]}
     assert {"admin", "staff", "student"} <= usernames
+
+
+def test_search_users_by_username(client, tokens):
+    headers = {"Authorization": f"Bearer {tokens['admin']}"}
+    body = client.get("/auth/users", params={"search": "adm"}, headers=headers).json()
+    assert [u["username"] for u in body["items"]] == ["admin"]
+    assert body["total"] == 1  # total ต้องนับเฉพาะผลที่ค้นเจอ ไม่ใช่ผู้ใช้ทั้งหมด
+
+    assert client.get(
+        "/auth/users", params={"search": "ไม่มีผู้ใช้ชื่อนี้"}, headers=headers
+    ).json()["total"] == 0

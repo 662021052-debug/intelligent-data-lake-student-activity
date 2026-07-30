@@ -65,6 +65,32 @@ def test_update_student(client):
     assert body["full_name"] == created["full_name"]
 
 
+def test_list_students_order_is_stable_after_status_change(client):
+    """สลับสถานะไป-กลับต้องไม่ทำให้ลำดับในรายการเปลี่ยน (ต้องเรียงตามรหัสนิสิตเสมอ)."""
+    # สร้างสลับปีเข้าศึกษาไปมา เพื่อให้ลำดับ insert ไม่ตรงกับลำดับรหัส
+    for code in ("6801001", "6501001", "6701001", "6601001"):
+        assert make_student(client, student_id=code).status_code == 201
+
+    expected = ["6501001", "6601001", "6701001", "6801001"]
+
+    def codes():
+        return [s["student_id"] for s in client.get("/students").json()["items"]]
+
+    assert codes() == expected
+
+    target = client.get("/students", params={"search": "6601001"}).json()["items"][0]
+    headers = _admin_headers(client)
+    assert client.put(
+        f"/students/{target['id']}", json={"status": "inactive"}, headers=headers
+    ).status_code == 200
+    assert codes() == expected
+
+    assert client.put(
+        f"/students/{target['id']}", json={"status": "active"}, headers=headers
+    ).status_code == 200
+    assert codes() == expected
+
+
 def test_delete_student(client, tokens):
     created = make_student(client, student_id="6501030").json()
     headers = {"Authorization": f"Bearer {tokens['admin']}"}

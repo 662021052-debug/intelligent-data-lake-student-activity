@@ -94,6 +94,8 @@ def list_activities(
         count_query = count_query.where(Activity.name.ilike(pattern))
 
     total = session.exec(count_query).one()
+    # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (เช่น อนุมัติกิจกรรม) ย้ายตำแหน่งในรายการ
+    query = query.order_by(Activity.start_at.desc(), Activity.id.desc())
     activities = session.exec(query.offset(skip).limit(limit)).all()
     counts = _participant_counts(session, [a.id for a in activities])
     items = [_to_read(a, counts.get(a.id, 0)) for a in activities]

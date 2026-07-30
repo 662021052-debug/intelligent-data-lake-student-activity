@@ -61,6 +61,57 @@ def test_filter_participations_by_student_and_status(client, add_evidence):
     assert body["items"][0]["activity_id"] == activity_a["id"]
 
 
+def test_search_participations_by_student_or_activity(client):
+    """ช่องค้นหาในตารางนี้ต้องหาได้ทั้งชื่อ/รหัสนิสิต และชื่อกิจกรรม."""
+    somchai = make_student(client, student_id="6502011", full_name="สมชาย ใจดี").json()
+    somsri = make_student(client, student_id="6502012", full_name="สมศรี มีสุข").json()
+    camp = make_activity(client, name="ค่ายอาสาพัฒนา").json()
+    seminar = make_activity(client, name="อบรมเขียนโปรแกรม").json()
+
+    client.post("/participations", json={"student_id": somchai["id"], "activity_id": camp["id"]})
+    client.post("/participations", json={"student_id": somsri["id"], "activity_id": seminar["id"]})
+
+    def search(term):
+        return client.get("/participations", params={"search": term}).json()
+
+    by_name = search("สมชาย")
+    assert by_name["total"] == 1
+    assert by_name["items"][0]["student_id"] == somchai["id"]
+
+    by_code = search("6502012")
+    assert by_code["total"] == 1
+    assert by_code["items"][0]["student_id"] == somsri["id"]
+
+    by_activity = search("ค่ายอาสา")
+    assert by_activity["total"] == 1
+    assert by_activity["items"][0]["activity_id"] == camp["id"]
+
+    assert search("ไม่มีคำนี้")["total"] == 0
+
+
+def test_list_participations_order_is_stable_after_approval(client, add_evidence):
+    """อนุมัติหลักฐานแล้วลำดับในรายการต้องไม่เปลี่ยน."""
+    student = make_student(client, student_id="6502010").json()
+    ids = []
+    for name in ("กิจกรรม P1", "กิจกรรม P2", "กิจกรรม P3"):
+        activity = make_activity(client, name=name).json()
+        created = client.post(
+            "/participations", json={"student_id": student["id"], "activity_id": activity["id"]}
+        ).json()
+        ids.append(created["id"])
+
+    def listed():
+        return [p["id"] for p in client.get("/participations").json()["items"]]
+
+    assert listed() == ids
+
+    add_evidence(ids[1])
+    assert client.put(
+        f"/participations/{ids[1]}", json={"evidence_status": "approved"}
+    ).status_code == 200
+    assert listed() == ids
+
+
 def test_update_and_delete_participation(client, add_evidence):
     student = make_student(client, student_id="6502004").json()
     activity = make_activity(client, name="กิจกรรม C", hours=5).json()

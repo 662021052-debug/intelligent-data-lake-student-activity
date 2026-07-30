@@ -74,10 +74,19 @@ def register(
 def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    search: Optional[str] = Query(None, description="ค้นหาจากชื่อผู้ใช้"),
     session: Session = Depends(get_session),
 ):
-    total = session.exec(select(func.count()).select_from(User)).one()
-    items = session.exec(select(User).offset(skip).limit(limit)).all()
+    query = select(User)
+    count_query = select(func.count()).select_from(User)
+    if search:
+        condition = User.username.ilike(f"%{search}%")
+        query = query.where(condition)
+        count_query = count_query.where(condition)
+
+    total = session.exec(count_query).one()
+    # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (role/รหัสผ่าน) ย้ายตำแหน่งในรายการ
+    items = session.exec(query.order_by(User.id).offset(skip).limit(limit)).all()
     return Page(items=items, total=total, skip=skip, limit=limit)
 
 
