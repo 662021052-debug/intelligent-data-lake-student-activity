@@ -8,7 +8,6 @@
 - นับเข้าชั่วโมงสะสมเฉพาะ ``evidence_status = approved`` เท่านั้น
 - ทุกแถวที่ approved/rejected ต้องมีหลักฐาน Bronze จริง (กฎ A3)
 """
-import base64
 import hashlib
 import random
 import sys
@@ -38,15 +37,17 @@ from app.models import (
     UserRole,
 )
 from app.storage import get_storage
+from seed_evidence import (
+    VARIANT_FULL,
+    VARIANT_LOW_QUALITY,
+    VARIANT_NO_NAME,
+    find_thai_font,
+    pick_variant,
+    render_certificate,
+)
 
 # ตั้ง seed ให้ข้อมูลเดโมออกมาเหมือนเดิมทุกครั้ง (ตัวเลขในเล่ม/สไลด์จะได้ตรงกัน)
 RANDOM_SEED = 20260726
-
-# A tiny valid 1x1 PNG used as placeholder evidence so seeded approved/rejected
-# participations really have a Bronze object (no "approved without evidence").
-_PLACEHOLDER_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-)
 
 FACULTIES = {
     "วิศวกรรมศาสตร์": ["วิศวกรรมคอมพิวเตอร์", "วิศวกรรมไฟฟ้า", "วิศวกรรมโยธา"],
@@ -324,6 +325,7 @@ def seed() -> None:
         # --- hour categories/subcategories (เกณฑ์ชั่วโมงกิจกรรม) ---
         subcategory_id_by_name: dict[str, int] = {}
         category_id_by_subcategory_id: dict[int, int] = {}
+        category_path_by_subcategory_id: dict[int, str] = {}
         total_required_hours = 0.0
         for category_name, category_hours, subs in HOUR_STRUCTURE:
             total_required_hours += category_hours
@@ -341,6 +343,8 @@ def seed() -> None:
                 session.refresh(subcategory)
                 subcategory_id_by_name[sub_name] = subcategory.id
                 category_id_by_subcategory_id[subcategory.id] = category.id
+                # ชื่อหมวดเต็มไว้พิมพ์ลงใบประกาศ ("หมวดแม่ › หมวดย่อย")
+                category_path_by_subcategory_id[subcategory.id] = f"{category_name} › {sub_name}"
 
         # --- activities: กระจายวันตลอดปีการศึกษา, สลับเจ้าของ staff/admin (F3),
         #     บางรายการยังรออนุมัติ ---
@@ -483,8 +487,19 @@ def seed() -> None:
             print(f"เตือน: เชื่อม MinIO ไม่ได้ ({exc}) — บันทึก raw_file แต่ไม่อัปโหลดไฟล์จริง")
             storage = None
 
-        checksum = hashlib.sha256(_PLACEHOLDER_PNG).hexdigest()
+        # ใบประกาศวาดด้วยฟอนต์ไทย ถ้าเครื่องไม่มีฟอนต์ OCR จะอ่านไม่ออก (ตัวอักษรกลายเป็นกล่อง)
+        font_path = find_thai_font()
+        if font_path is None:
+            print(
+                "เตือน: ไม่พบฟอนต์ไทยในเครื่อง — ใบประกาศจะวาดด้วยฟอนต์ default และ OCR จะอ่านภาษาไทยไม่ออก\n"
+                "       (ใน docker ติดตั้งผ่าน fonts-thai-tlwg ให้แล้ว)"
+            )
+
+        students_by_id = {s.id: s for s in students}
+        activities_by_id = {a.id: a for a in activities}
+
         raw_files = []
+        variant_counts: dict[str, int] = defaultdict(int)
         for p in participations:
             needs_evidence = p.evidence_status in (
                 EvidenceStatus.approved,
@@ -492,6 +507,24 @@ def seed() -> None:
             ) or (p.evidence_status == EvidenceStatus.pending and rng.random() < 0.5)
             if not needs_evidence:
                 continue
+
+            student = students_by_id[p.student_id]
+            activity = activities_by_id[p.activity_id]
+            variant = pick_variant(rng)
+            variant_counts[variant] += 1
+            reference = f"TSU-{activity.id:03d}-{p.id:05d}-{uuid.uuid4().hex[:6].upper()}"
+            # เลขอ้างอิงไม่ซ้ำ = ทุกไฟล์ checksum ต่างกัน ตัวตรวจไฟล์ซ้ำจึงไม่ติดธงผิด
+            image_bytes = render_certificate(
+                student_name=student.full_name,
+                activity_name=activity.name,
+                activity_date=activity.start_at,
+                category_path=category_path_by_subcategory_id.get(activity.subcategory_id, "-"),
+                reference=reference,
+                variant=variant,
+                font_path=font_path,
+            )
+            checksum = hashlib.sha256(image_bytes).hexdigest()
+
             now = datetime.utcnow()
             object_key = (
                 f"evidence/year={now:%Y}/month={now:%m}"
@@ -499,14 +532,14 @@ def seed() -> None:
                 f"/{uuid.uuid4().hex}_seed.png"
             )
             if storage is not None:
-                storage.upload_object(bucket, object_key, _PLACEHOLDER_PNG, "image/png")
+                storage.upload_object(bucket, object_key, image_bytes, "image/png")
             raw_files.append(
                 RawFile(
                     bucket=bucket,
                     object_key=object_key,
-                    original_filename="seed_evidence.png",
+                    original_filename=f"certificate_{reference}.png",
                     content_type="image/png",
-                    size_bytes=len(_PLACEHOLDER_PNG),
+                    size_bytes=len(image_bytes),
                     checksum=checksum,
                     source_system="student_upload",
                     uploaded_by=None,
@@ -516,6 +549,14 @@ def seed() -> None:
             )
         session.add_all(raw_files)
         session.commit()
+        print(
+            "หลักฐาน: ใบประกาศสมบูรณ์ {full} ใบ, ไม่มีชื่อผู้เข้าร่วม {no_name} ใบ, "
+            "ภาพเบลอ/ความละเอียดต่ำ {low} ใบ".format(
+                full=variant_counts[VARIANT_FULL],
+                no_name=variant_counts[VARIANT_NO_NAME],
+                low=variant_counts[VARIANT_LOW_QUALITY],
+            )
+        )
 
         _print_summary(
             students=students,

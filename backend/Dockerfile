@@ -2,6 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# ฟอนต์ไทย: seed วาดใบประกาศตัวอย่างด้วยฟอนต์นี้ ถ้าไม่มี ตัวอักษรไทยจะกลายเป็นกล่อง
+# และ OCR จะอ่านไม่ออก (fonts-thai-tlwg เป็นฟอนต์เสรีของ TLWG)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-thai-tlwg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -13,6 +19,7 @@ RUN python -c "import easyocr; easyocr.Reader(['th','en'], gpu=False)" || \
 
 COPY app ./app
 COPY seed.py .
+COPY seed_evidence.py .
 COPY alembic.ini .
 COPY alembic ./alembic
 

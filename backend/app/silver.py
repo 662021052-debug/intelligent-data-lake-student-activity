@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Optional
 
 from sqlmodel import Session, select
@@ -77,10 +78,47 @@ _W_DATE = 0.2
 
 _NAME_PREFIXES = ("นางสาว", "เด็กชาย", "เด็กหญิง", "นาย", "นาง")
 
+# OCR ภาษาไทยมักอ่านเพี้ยนไม่กี่ตัว (เช่น โภชนาการ -> โกชนาการ) การเทียบแบบ substring
+# ตรง ๆ จะได้ 0 ทันที ซึ่งรุนแรงเกินไปโดยเฉพาะ "ชื่อกิจกรรม" ที่ภาษาไทยเขียนติดกัน
+# ไม่มีช่องว่างให้ตัดเป็นคำ — ผิดตัวเดียวก็หล่นทั้งก้อน จึงเทียบแบบคล้ายกัน (fuzzy) แทน
+#
+# ต่ำกว่าเกณฑ์นี้ถือว่า "คนละคำ" ไม่ใช่แค่พิมพ์เพี้ยน — กันไม่ให้ข้อความสุ่ม ๆ
+# ได้คะแนนติดมือไปฟรี ๆ (0.8 ≈ ยอมให้ผิดได้ราว 1-2 ตัวในคำยาว 10-20 ตัวอักษร)
+_FUZZY_FLOOR = 0.8
+
 
 def _norm(text: str) -> str:
     """Whitespace-insensitive, case-folded form for substring matching."""
     return re.sub(r"\s+", "", text or "").lower()
+
+
+def _best_partial_ratio(needle: str, haystack: str) -> float:
+    """ความคล้ายสูงสุดของ [needle] กับ "ท่อน" ใด ๆ ที่ยาวเท่ากันใน [haystack] (0-1)
+
+    ใช้แทน ``needle in haystack`` เพื่อให้ทน OCR อ่านเพี้ยนไม่กี่ตัว
+    """
+    if not needle or not haystack:
+        return 0.0
+    if needle in haystack:
+        return 1.0
+    if len(haystack) <= len(needle):
+        return SequenceMatcher(None, needle, haystack).ratio()
+
+    best = 0.0
+    window = len(needle)
+    for start in range(len(haystack) - window + 1):
+        ratio = SequenceMatcher(None, needle, haystack[start : start + window]).ratio()
+        if ratio > best:
+            best = ratio
+            if best == 1.0:
+                break
+    return best
+
+
+def _fuzzy_hit(needle: str, haystack: str) -> float:
+    """คะแนนความตรงกัน 0-1 โดยตัดค่าที่ต่ำกว่าเกณฑ์ทิ้งเป็น 0"""
+    ratio = _best_partial_ratio(_norm(needle), haystack)
+    return ratio if ratio >= _FUZZY_FLOOR else 0.0
 
 
 def _name_tokens(full_name: str) -> list[str]:
@@ -98,16 +136,18 @@ def _name_tokens(full_name: str) -> list[str]:
 
 
 def _fraction_found(tokens: list[str], norm_text: str) -> float:
+    """สัดส่วนของ token ที่เจอในข้อความ — แต่ละ token ให้คะแนนตามความคล้าย (fuzzy)"""
     if not tokens:
         return 0.0
-    found = sum(1 for t in tokens if _norm(t) and _norm(t) in norm_text)
-    return found / len(tokens)
+    total = sum(_fuzzy_hit(t, norm_text) for t in tokens if _norm(t))
+    return total / len(tokens)
 
 
 def _activity_score(activity_name: str, norm_text: str) -> float:
-    name_norm = _norm(activity_name)
-    if name_norm and name_norm in norm_text:
-        return 1.0
+    """ชื่อกิจกรรมไทยเขียนติดกัน จึงเทียบทั้งก้อนแบบ fuzzy ก่อน แล้วค่อยลองแยกคำ"""
+    whole = _fuzzy_hit(activity_name, norm_text)
+    if whole > 0:
+        return whole
     tokens = [t for t in (activity_name or "").split() if len(t) >= 3]
     return _fraction_found(tokens, norm_text)
 

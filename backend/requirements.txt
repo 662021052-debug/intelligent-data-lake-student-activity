@@ -10,6 +10,9 @@ python-multipart==0.0.9
 psycopg2-binary==2.9.9
 alembic==1.13.2
 minio==7.2.7
+# วาดใบประกาศตัวอย่างใน seed (easyocr ก็ดึง Pillow มาอยู่แล้ว แต่ระบุไว้ให้ชัด
+# เพราะ seed ต้องใช้แม้ตอน OCR_BACKEND=stub)
+Pillow==10.4.0
 # Silver layer OCR (Thai+English, CPU). Heavy (pulls torch); imported lazily so
 # tests/local runs without it still work when OCR_BACKEND=stub.
 easyocr==1.7.1
