@@ -5,6 +5,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import 'activities_screen.dart';
+import 'activity_calendar_screen.dart';
 import 'chatbot_screen.dart';
 import 'dashboard_screen.dart';
 import 'my_hours_screen.dart';
@@ -111,6 +112,12 @@ class HomeScreen extends StatelessWidget {
         title: 'กิจกรรม',
         subtitle: isStudent ? 'ดูกิจกรรมทั้งหมด' : 'จัดการข้อมูลกิจกรรม',
         onTap: () => open(const ActivitiesScreen()),
+      ),
+      _MenuCard(
+        icon: Icons.calendar_month,
+        title: 'ปฏิทินกิจกรรม',
+        subtitle: 'ดูว่าวันไหนมีกิจกรรมอะไรบ้าง',
+        onTap: () => open(const ActivityCalendarScreen()),
       ),
       _MenuCard(
         icon: Icons.fact_check,
