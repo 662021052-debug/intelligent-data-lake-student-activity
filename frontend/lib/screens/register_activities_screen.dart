@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 
 String _formatDateTime(DateTime dt) {
@@ -32,6 +33,19 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
   Map<int, Participation> _ownParticipationByActivity = {};
   bool _loading = false;
   String? _error;
+  String _search = '';
+
+  /// กิจกรรมที่ผ่านช่องค้นหา — กรองในเครื่องเพราะโหลดรายการมาครบแล้ว
+  List<Activity> get _visible {
+    if (_search.isEmpty) return _activities;
+    final needle = _search.toLowerCase();
+    return _activities.where((a) {
+      final haystack = '${a.name} ${a.activityType} ${a.location} '
+              '${subcategoryPath(_categories, a.subcategoryId)}'
+          .toLowerCase();
+      return haystack.contains(needle);
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -158,10 +172,22 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
                       title: 'ยังไม่มีกิจกรรมที่เปิดรับสมัคร',
                       message: 'ลองกลับมาดูใหม่ภายหลัง หรือกดโหลดใหม่มุมขวาบน',
                     )
-                  : ListView.builder(
-                      itemCount: _activities.length,
+                  : Column(children: [
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: DebouncedSearchField(
+                          label: 'ค้นหากิจกรรม/หมวด/สถานที่',
+                          onSearch: (value) => setState(() => _search = value),
+                        ),
+                      ),
+                      if (_visible.isEmpty)
+                        Expanded(child: EmptyState.noResults())
+                      else
+                      Expanded(
+                        child: ListView.builder(
+                      itemCount: _visible.length,
                       itemBuilder: (context, index) {
-                        final a = _activities[index];
+                        final a = _visible[index];
                         final participation = _ownParticipationByActivity[a.id];
                         final closed = a.startAt.isBefore(DateTime.now());
                         return Card(
@@ -183,7 +209,9 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
                           ),
                         );
                       },
-                    ),
+                        ),
+                      ),
+                    ]),
     );
   }
 

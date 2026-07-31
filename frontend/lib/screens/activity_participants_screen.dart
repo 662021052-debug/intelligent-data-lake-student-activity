@@ -11,6 +11,7 @@ import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
+import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 import 'ocr_review_screen.dart';
 
@@ -28,6 +29,18 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
   bool _loading = false;
   bool _processingBatch = false;
   String? _error;
+  String _search = '';
+
+  /// รายชื่อที่ผ่านช่องค้นหา — กรองในเครื่องเพราะโหลดผู้เข้าร่วมของกิจกรรมนี้มาครบแล้ว
+  List<Participation> get _visible {
+    if (_search.isEmpty) return _participations;
+    final needle = _search.toLowerCase();
+    return _participations.where((p) {
+      final student = _studentsById[p.studentId];
+      final haystack = '${student?.fullName ?? ''} ${student?.studentId ?? ''}'.toLowerCase();
+      return haystack.contains(needle);
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -175,11 +188,21 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
                     ])
                   : Column(children: [
                       _activityHeader(),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: DebouncedSearchField(
+                          label: 'ค้นหาชื่อ/รหัสนิสิต',
+                          onSearch: (value) => setState(() => _search = value),
+                        ),
+                      ),
+                      if (_visible.isEmpty)
+                        Expanded(child: EmptyState.noResults())
+                      else
                       Expanded(
                         child: ListView.builder(
-                      itemCount: _participations.length,
+                      itemCount: _visible.length,
                       itemBuilder: (context, index) {
-                        final p = _participations[index];
+                        final p = _visible[index];
                         return Card(
                           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           child: ListTile(
