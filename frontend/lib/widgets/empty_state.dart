@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../utils/api_error.dart';
 
 /// หน้าจอ/ส่วนที่ "ยังไม่มีข้อมูล" — ใช้ไอคอน + ข้อความแทนพื้นที่ว่างเปล่า
 ///
@@ -84,7 +85,7 @@ class ErrorState extends StatelessWidget {
     return EmptyState(
       icon: Icons.error_outline,
       title: 'โหลดข้อมูลไม่สำเร็จ',
-      message: message.replaceFirst('Exception: ', ''),
+      message: friendlyError(message),
       action: onRetry == null
           ? null
           : OutlinedButton.icon(

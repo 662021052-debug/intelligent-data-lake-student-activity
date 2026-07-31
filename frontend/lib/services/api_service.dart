@@ -9,6 +9,7 @@ import '../models/chat_response.dart';
 import '../models/ocr_result.dart';
 import '../models/page.dart';
 import '../models/participation.dart';
+import '../utils/api_error.dart';
 import 'auth_service.dart';
 
 class ApiException implements Exception {
@@ -37,16 +38,14 @@ class ApiService {
       if (response.body.isEmpty) return null;
       return jsonDecode(utf8.decode(response.bodyBytes));
     }
-    String message = 'เกิดข้อผิดพลาด (${response.statusCode})';
+    Object? body;
     try {
-      final body = jsonDecode(utf8.decode(response.bodyBytes));
-      if (body is Map && body['detail'] != null) {
-        message = body['detail'].toString();
-      }
+      body = jsonDecode(utf8.decode(response.bodyBytes));
     } catch (_) {
-      // ignore, keep default message
+      // body ไม่ใช่ JSON (เช่น HTML ของ proxy) — ปล่อยให้ตัวแปลงใช้รหัสสถานะแทน
     }
-    throw ApiException(response.statusCode, message);
+    // แปลงเป็นข้อความไทยที่ตรงนี้ที่เดียว ทุกหน้าจึงไม่เห็น JSON ดิบของ Pydantic
+    throw ApiException(response.statusCode, apiErrorMessage(response.statusCode, body));
   }
 
   static Future<Page<T>> fetchPage<T>(
@@ -57,6 +56,34 @@ class ApiService {
     final response = await http.get(_uri(path, query), headers: _headers());
     final data = _decode(response) as Map<String, dynamic>;
     return Page<T>.fromJson(data, fromJsonT);
+  }
+
+  /// ดึงทุกหน้าของ endpoint แบบแบ่งหน้า จนครบ `total`
+  ///
+  /// ใช้กับข้อมูลที่ต้องมี "ครบทุกรายการ" จริง ๆ เช่น dropdown เลือกนิสิต/กิจกรรม
+  /// (เดิมยิงขอ `limit=500` ครั้งเดียวซึ่งเกินเพดาน 200 ของ backend แล้วได้ 422)
+  /// [maxItems] กันไม่ให้ไล่ดึงไม่รู้จบถ้าข้อมูลโตมาก
+  static Future<List<T>> fetchAll<T>(
+    String path,
+    T Function(Map<String, dynamic>) fromJsonT, {
+    Map<String, String>? query,
+    int pageSize = 200,
+    int maxItems = 2000,
+  }) async {
+    final items = <T>[];
+    var skip = 0;
+    while (true) {
+      final page = await fetchPage<T>(
+        path,
+        fromJsonT,
+        query: {...?query, 'skip': '$skip', 'limit': '$pageSize'},
+      );
+      items.addAll(page.items);
+      skip += pageSize;
+      if (page.items.isEmpty || items.length >= page.total || items.length >= maxItems) {
+        return items;
+      }
+    }
   }
 
   static Future<List<T>> fetchList<T>(

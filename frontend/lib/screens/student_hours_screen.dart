@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/hour_summary.dart';
 import '../services/api_service.dart';
+import '../utils/api_error.dart';
 import '../widgets/hour_summary_view.dart';
 
 /// Read-only view of a single student's accumulated hours, opened from the
@@ -43,7 +44,7 @@ class _StudentHoursScreenState extends State<StudentHoursScreen> {
       );
       setState(() => _categories = categories);
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -4,9 +4,11 @@ import '../models/app_user.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../utils/api_error.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 
 const _roles = ['student', 'staff', 'admin'];
@@ -30,10 +32,15 @@ class UsersScreen extends StatefulWidget {
 }
 
 class _UsersScreenState extends State<UsersScreen> {
+  static const int _limit = 50;
+
   List<AppUser> _users = [];
   List<Student> _students = [];
+  int _total = 0;
+  int _skip = 0;
   bool _loading = false;
   String? _error;
+  String? _studentsError;
   String _search = '';
   int _requestId = 0;
 
@@ -46,21 +53,20 @@ class _UsersScreenState extends State<UsersScreen> {
 
   void _onSearch(String value) {
     _search = value;
+    _skip = 0;
     _load();
   }
 
-  /// รายชื่อนิสิตใช้แค่แปลง student_id เป็นชื่อในรายการ — โหลดครั้งเดียวพอ
-  /// ไม่ต้องดึงใหม่ทุกครั้งที่ค้นหา
+  /// รายชื่อนิสิตใช้แค่แปลง student_id เป็นชื่อและเป็นตัวเลือกใน dropdown
+  /// — ต้องได้ครบทุกคน จึงไล่ดึงทีละหน้าแทนการขอ limit ก้อนใหญ่ครั้งเดียว
+  /// (ขอเกินเพดาน 200 ของ backend จะได้ 422 แล้ว dropdown ว่างจนสร้างบัญชีนิสิตไม่ได้)
   Future<void> _loadStudents() async {
     try {
-      final studentsPage = await ApiService.fetchPage(
-        '/students',
-        Student.fromJson,
-        query: {'limit': '500'},
-      );
-      if (mounted) setState(() => _students = studentsPage.items);
-    } catch (_) {
-      // ไม่ร้ายแรง: รายการจะแสดงเป็น #id แทนชื่อนิสิต
+      final students = await ApiService.fetchAll('/students', Student.fromJson);
+      if (mounted) setState(() => _students = students);
+    } catch (e) {
+      // ไม่ร้ายแรงพอจะบล็อกทั้งหน้า แต่ต้องเตือน ไม่งั้นฟอร์มพังเงียบ ๆ
+      if (mounted) setState(() => _studentsError = friendlyError(e));
     }
   }
 
@@ -71,15 +77,18 @@ class _UsersScreenState extends State<UsersScreen> {
       _error = null;
     });
     try {
-      final query = <String, String>{'limit': '200'};
+      final query = <String, String>{'skip': '$_skip', 'limit': '$_limit'};
       if (_search.isNotEmpty) query['search'] = _search;
       final page = await ApiService.fetchPage('/auth/users', AppUser.fromJson, query: query);
       // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่
       if (!mounted || requestId != _requestId) return;
-      setState(() => _users = page.items);
+      setState(() {
+        _users = page.items;
+        _total = page.total;
+      });
     } catch (e) {
       if (!mounted || requestId != _requestId) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted && requestId == _requestId) setState(() => _loading = false);
     }
@@ -96,7 +105,11 @@ class _UsersScreenState extends State<UsersScreen> {
   Future<void> _openForm({AppUser? existing}) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => _UserFormDialog(existing: existing, students: _students),
+      builder: (_) => _UserFormDialog(
+        existing: existing,
+        students: _students,
+        studentsError: _studentsError,
+      ),
     );
     if (result == true) _load();
   }
@@ -191,6 +204,16 @@ class _UsersScreenState extends State<UsersScreen> {
                             },
                           ),
           ),
+          if (_error == null && _users.isNotEmpty)
+            PaginationBar(
+              skip: _skip,
+              limit: _limit,
+              total: _total,
+              onChanged: (skip) {
+                setState(() => _skip = skip);
+                _load();
+              },
+            ),
         ],
       ),
     );
@@ -209,7 +232,8 @@ class _UsersScreenState extends State<UsersScreen> {
 class _UserFormDialog extends StatefulWidget {
   final AppUser? existing;
   final List<Student> students;
-  const _UserFormDialog({this.existing, required this.students});
+  final String? studentsError;
+  const _UserFormDialog({this.existing, required this.students, this.studentsError});
 
   @override
   State<_UserFormDialog> createState() => _UserFormDialogState();
@@ -270,7 +294,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -312,7 +336,14 @@ class _UserFormDialogState extends State<_UserFormDialog> {
           onChanged: (v) => setState(() => _role = v ?? 'staff'),
         ),
         // D1: a student account must be linked to a student record
-        if (_role == 'student')
+        if (_role == 'student' && widget.students.isEmpty)
+          Text(
+            widget.studentsError == null
+                ? 'ยังไม่มีข้อมูลนิสิตให้ผูกบัญชี'
+                : 'โหลดรายชื่อนิสิตไม่สำเร็จ: ${widget.studentsError}',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        if (_role == 'student' && widget.students.isNotEmpty)
           DropdownButtonFormField<int>(
             initialValue: _studentId,
             isExpanded: true,

@@ -88,6 +88,65 @@ def test_admin_can_change_role_and_reset_password(client, tokens):
     assert client.post("/auth/login", data={"username": "promote_me", "password": "newpass1"}).status_code == 200
 
 
+def test_admin_can_relink_student_user_to_another_student(client, tokens):
+    """หน้าจัดการผู้ใช้ต้องเปลี่ยน "นิสิตที่ผูกบัญชี" ได้จริง"""
+    first = make_student(client, student_id="7701101").json()
+    second = make_student(client, student_id="7701102").json()
+    created = client.post(
+        "/auth/register",
+        json={
+            "username": "relink_me",
+            "password": "pw123456",
+            "role": "student",
+            "student_id": first["id"],
+        },
+        headers=_admin_headers(tokens),
+    ).json()
+
+    response = client.put(
+        f"/auth/users/{created['id']}",
+        json={"role": "student", "student_id": second["id"]},
+        headers=_admin_headers(tokens),
+    )
+    assert response.status_code == 200
+    assert response.json()["student_id"] == second["id"]
+
+
+def test_users_list_paginates_without_hitting_the_limit_cap(client, tokens):
+    """หน้าจัดการผู้ใช้ต้องแบ่งหน้าได้ ไม่ใช่ขอทั้งหมดทีเดียวจนชนเพดาน limit"""
+    for i in range(5):
+        client.post(
+            "/auth/register",
+            json={"username": f"paged{i}", "password": "pw123456", "role": "staff"},
+            headers=_admin_headers(tokens),
+        )
+
+    first_page = client.get(
+        "/auth/users", params={"skip": 0, "limit": 2}, headers=_admin_headers(tokens)
+    ).json()
+    second_page = client.get(
+        "/auth/users", params={"skip": 2, "limit": 2}, headers=_admin_headers(tokens)
+    ).json()
+
+    # total คือจำนวนทั้งหมด ไม่ใช่จำนวนในหน้านี้ — แถบ "1-2 จาก N" ต้องอาศัยค่านี้
+    assert first_page["total"] == second_page["total"] >= 7
+    assert len(first_page["items"]) == 2
+    assert len(second_page["items"]) == 2
+    first_ids = [u["id"] for u in first_page["items"]]
+    second_ids = [u["id"] for u in second_page["items"]]
+    assert set(first_ids).isdisjoint(second_ids), "หน้าถัดไปต้องไม่ซ้ำกับหน้าก่อน"
+    # เรียงตาม id คงที่ แถวจึงไม่ย้ายที่ระหว่างเปลี่ยนหน้า
+    assert first_ids + second_ids == sorted(first_ids + second_ids)
+
+
+def test_users_limit_above_cap_is_rejected(client, tokens):
+    """frontend เคยส่ง limit=500 แล้วได้ 422 — ยืนยันว่าเพดานยังอยู่ที่ 200"""
+    response = client.get(
+        "/auth/users", params={"limit": 500}, headers=_admin_headers(tokens)
+    )
+    assert response.status_code == 422
+
+
 def test_admin_can_delete_other_user(client, tokens):
     client.post(
         "/auth/register",

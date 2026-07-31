@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../utils/api_error.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 
@@ -60,7 +62,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       });
     } catch (e) {
       if (!mounted || requestId != _requestId) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted && requestId == _requestId) setState(() => _loading = false);
     }
@@ -235,37 +237,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
   Widget _statusChip(String status) => StatusChip.studentStatus(status, dense: true);
 
-  Widget _buildPagination() {
-    final start = _total == 0 ? 0 : _skip + 1;
-    final end = (_skip + _limit) > _total ? _total : (_skip + _limit);
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('$start-$end จาก $_total'),
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: _skip > 0
-                ? () {
-                    setState(() => _skip = (_skip - _limit).clamp(0, _total));
-                    _load();
-                  }
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: (_skip + _limit) < _total
-                ? () {
-                    setState(() => _skip += _limit);
-                    _load();
-                  }
-                : null,
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildPagination() => PaginationBar(
+        skip: _skip,
+        limit: _limit,
+        total: _total,
+        onChanged: (skip) {
+          setState(() => _skip = skip);
+          _load();
+        },
+      );
 }
 
 class _StudentFormDialog extends StatefulWidget {
@@ -331,7 +311,7 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

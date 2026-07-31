@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/hour_summary.dart';
 import '../services/api_service.dart';
+import '../utils/api_error.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/hour_summary_view.dart';
 
@@ -35,7 +36,7 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
       );
       setState(() => _categories = categories);
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

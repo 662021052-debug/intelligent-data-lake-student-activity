@@ -4,6 +4,7 @@ import '../models/activity.dart';
 import '../models/participation.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/api_error.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
@@ -40,21 +41,17 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       _error = null;
     });
     try {
-      final activitiesPage =
-          await ApiService.fetchPage('/activities', Activity.fromJson, query: {'limit': '200'});
-      final participationsPage = await ApiService.fetchPage(
-        '/participations',
-        Participation.fromJson,
-        query: {'limit': '200'},
-      );
+      // นิสิตต้องเห็นกิจกรรมที่เปิดรับ "ทั้งหมด" และรู้ว่าตัวเองสมัครอันไหนไปแล้ว
+      final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
+      final participations = await ApiService.fetchAll('/participations', Participation.fromJson);
       setState(() {
-        _activities = activitiesPage.items..sort((a, b) => a.startAt.compareTo(b.startAt));
+        _activities = activities..sort((a, b) => a.startAt.compareTo(b.startAt));
         _ownParticipationByActivity = {
-          for (final p in participationsPage.items) p.activityId: p,
+          for (final p in participations) p.activityId: p,
         };
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/chart_style.dart';
+import '../utils/api_error.dart';
 import '../utils/format.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/empty_state.dart';
@@ -100,7 +101,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _trend = results[4] as List<TrendPoint>;
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

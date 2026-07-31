@@ -5,6 +5,7 @@ import '../models/participation.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../utils/api_error.dart';
 import '../utils/format.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
@@ -40,8 +41,7 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
       _error = null;
     });
     try {
-      final studentsPage =
-          await ApiService.fetchPage('/students', Student.fromJson, query: {'limit': '200'});
+      final students = await ApiService.fetchAll('/students', Student.fromJson);
       // The OCR summary (decision/scores) is folded into each participation, so
       // no per-row OCR request is needed.
       final participations = await ApiService.fetchList(
@@ -50,11 +50,11 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
       );
 
       setState(() {
-        _studentsById = {for (final s in studentsPage.items) s.id!: s};
+        _studentsById = {for (final s in students) s.id!: s};
         _participations = participations;
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

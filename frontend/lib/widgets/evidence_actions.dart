@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
+import '../utils/api_error.dart';
 import '../utils/evidence_io.dart';
 import 'evidence_preview.dart';
 
@@ -42,7 +43,7 @@ Future<bool> uploadEvidenceFlow(BuildContext context, int participationId) async
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(friendlyError(e))),
       );
     }
     return false;
@@ -81,7 +82,7 @@ Future<void> viewEvidenceFlow(BuildContext context, int participationId) async {
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(friendlyError(e))),
       );
     }
   }

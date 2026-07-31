@@ -6,6 +6,7 @@ import '../models/participation.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../utils/api_error.dart';
 import '../utils/evidence_status.dart';
 import '../utils/format.dart';
 import '../widgets/app_data_table.dart';
@@ -13,6 +14,7 @@ import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
+import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 
@@ -55,16 +57,15 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
 
   Future<void> _loadLookups() async {
     try {
-      final studentsPage =
-          await ApiService.fetchPage('/students', Student.fromJson, query: {'limit': '200'});
-      final activitiesPage =
-          await ApiService.fetchPage('/activities', Activity.fromJson, query: {'limit': '200'});
+      // ตารางนี้ต้องแปลง id → ชื่อของ "ทุก" แถวที่แสดง จึงต้องได้ข้อมูลครบทุกหน้า
+      final students = await ApiService.fetchAll('/students', Student.fromJson);
+      final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
       setState(() {
-        _studentsById = {for (final s in studentsPage.items) s.id!: s};
-        _activitiesById = {for (final a in activitiesPage.items) a.id!: a};
+        _studentsById = {for (final s in students) s.id!: s};
+        _activitiesById = {for (final a in activities) a.id!: a};
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     }
   }
 
@@ -90,7 +91,7 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
       });
     } catch (e) {
       if (!mounted || requestId != _requestId) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted && requestId == _requestId) setState(() => _loading = false);
     }
@@ -351,37 +352,15 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
         ],
       );
 
-  Widget _buildPagination() {
-    final start = _total == 0 ? 0 : _skip + 1;
-    final end = (_skip + _limit) > _total ? _total : (_skip + _limit);
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('$start-$end จาก $_total'),
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: _skip > 0
-                ? () {
-                    setState(() => _skip = (_skip - _limit).clamp(0, _total));
-                    _load();
-                  }
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: (_skip + _limit) < _total
-                ? () {
-                    setState(() => _skip += _limit);
-                    _load();
-                  }
-                : null,
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildPagination() => PaginationBar(
+        skip: _skip,
+        limit: _limit,
+        total: _total,
+        onChanged: (skip) {
+          setState(() => _skip = skip);
+          _load();
+        },
+      );
 }
 
 class _ParticipationFormDialog extends StatefulWidget {
@@ -451,7 +430,7 @@ class _ParticipationFormDialogState extends State<_ParticipationFormDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

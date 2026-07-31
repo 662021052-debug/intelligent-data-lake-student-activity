@@ -1,3 +1,4 @@
+import '../utils/api_error.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -60,7 +61,7 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
         _ocr = results[1] as OcrResult?;
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

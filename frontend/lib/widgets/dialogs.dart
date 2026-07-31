@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../utils/api_error.dart';
 
 Future<bool?> confirmDelete(BuildContext context, String name) {
   return confirmAction(
@@ -80,7 +81,7 @@ Future<bool?> confirmAction(
 void showErrorSnackbar(BuildContext context, Object error) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(error.toString().replaceFirst('Exception: ', '')),
+      content: Text(friendlyError(error)),
       backgroundColor: Colors.red,
     ),
   );
