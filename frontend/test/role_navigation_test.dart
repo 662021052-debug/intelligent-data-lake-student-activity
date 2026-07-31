@@ -22,7 +22,7 @@ void main() {
     expect(find.text('กิจกรรม'), findsOneWidget);
     expect(find.text('การเข้าร่วมกิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsOneWidget);
-    expect(find.text('ชั่วโมงสะสมของฉัน'), findsOneWidget);
+    expect(find.text('แดชบอร์ดชั่วโมงของฉัน'), findsOneWidget);
     expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
   });
 
@@ -50,7 +50,7 @@ void main() {
     expect(find.text('จัดการผู้ใช้'), findsNothing);
     expect(find.text('กิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsNothing);
-    expect(find.text('ชั่วโมงสะสมของฉัน'), findsNothing);
+    expect(find.text('แดชบอร์ดชั่วโมงของฉัน'), findsNothing);
     expect(find.text('ผู้ช่วยอัจฉริยะ'), findsNothing);
   });
 

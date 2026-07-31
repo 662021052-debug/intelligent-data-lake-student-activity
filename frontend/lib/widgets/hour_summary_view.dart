@@ -10,10 +10,15 @@ class HourSummaryView extends StatelessWidget {
   final List<HourCategorySummary> categories;
   final bool showSubcategories;
 
+  /// วางอยู่ในหน้าที่เลื่อนได้อยู่แล้ว (เช่นแดชบอร์ดของนิสิต) — ไม่เลื่อนซ้อนกันเอง
+  /// และไม่แสดงการ์ดสรุปรวมซ้ำกับ KPI ด้านบน
+  final bool embedded;
+
   const HourSummaryView({
     super.key,
     required this.categories,
     this.showSubcategories = true,
+    this.embedded = false,
   });
 
   @override
@@ -23,6 +28,13 @@ class HourSummaryView extends StatelessWidget {
       0,
       (sum, c) => sum + (c.earnedHours > c.requiredHours ? c.requiredHours : c.earnedHours),
     );
+
+    if (embedded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [...categories.map((c) => _categoryCard(context, c))],
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(12),

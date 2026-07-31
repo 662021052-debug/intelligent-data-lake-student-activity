@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/api_error.dart';
 import '../widgets/typing_indicator.dart';
 import 'register_activities_screen.dart';
 
@@ -11,7 +12,11 @@ import 'register_activities_screen.dart';
 /// categories, open/required activities, and recommendations. Answers that list
 /// activities offer a shortcut to the registration screen.
 class ChatbotScreen extends StatefulWidget {
-  const ChatbotScreen({super.key});
+  /// คำถามที่ให้ถามทันทีที่เปิดหน้า (เช่นมาจากปุ่ม "แนะนำกิจกรรมที่ยังขาด"
+  /// บนแดชบอร์ดของนิสิต) — ปล่อยว่างไว้เมื่อเปิดจากเมนูปกติ
+  final String? initialQuestion;
+
+  const ChatbotScreen({super.key, this.initialQuestion});
 
   @override
   State<ChatbotScreen> createState() => _ChatbotScreenState();
@@ -42,6 +47,15 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     ),
   ];
   bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final question = widget.initialQuestion;
+    if (question != null && question.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _send(question));
+    }
+  }
 
   @override
   void dispose() {
@@ -84,7 +98,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       });
     } catch (e) {
       setState(() {
-        _messages.add(_ChatMessage('ขออภัย เกิดข้อผิดพลาด: $e', fromUser: false));
+        _messages.add(_ChatMessage('ขออภัย เกิดข้อผิดพลาด: ${friendlyError(e)}', fromUser: false));
       });
     } finally {
       setState(() => _sending = false);

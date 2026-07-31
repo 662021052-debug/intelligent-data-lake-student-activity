@@ -137,8 +137,8 @@ class HomeScreen extends StatelessWidget {
       if (isStudent)
         _MenuCard(
           icon: Icons.emoji_events,
-          title: 'ชั่วโมงสะสมของฉัน',
-          subtitle: 'ดูความคืบหน้าชั่วโมงกิจกรรมแต่ละหมวด',
+          title: 'แดชบอร์ดชั่วโมงของฉัน',
+          subtitle: 'สรุปชั่วโมงรวม กราฟรายหมวด และสิ่งที่ยังขาด',
           onTap: () => open(const MyHoursScreen()),
         ),
       if (isStudent)
