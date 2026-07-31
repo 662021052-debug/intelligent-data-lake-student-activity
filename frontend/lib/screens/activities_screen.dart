@@ -18,16 +18,6 @@ import 'activity_participants_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
 
-String _subcategoryLabel(List<HourCategory> categories, int? subcategoryId) {
-  if (subcategoryId == null) return '-';
-  for (final category in categories) {
-    for (final sub in category.subcategories) {
-      if (sub.id == subcategoryId) return '${category.name} › ${sub.name}';
-    }
-  }
-  return '-';
-}
-
 String _formatDateTime(DateTime dt) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
@@ -240,7 +230,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
           [
             DataCell(Text(a.name)),
             DataCell(Text(a.activityType)),
-            DataCell(Text(_subcategoryLabel(_categories, a.subcategoryId))),
+            DataCell(Text(subcategoryPath(_categories, a.subcategoryId))),
             DataCell(Text(_trimHours(a.hours))),
             DataCell(Tooltip(
               message: a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ',

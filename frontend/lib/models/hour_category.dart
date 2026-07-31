@@ -1,3 +1,28 @@
+/// ชื่อเต็มของหมวดชั่วโมงในรูป "หมวดแม่ › หมวดย่อย" เช่น "ใฝ่เรียนรู้ตลอดชีวิต › กิจกรรม ICT 1"
+///
+/// ใช้ร่วมกันทุกหน้าที่ต้องบอกว่ากิจกรรมนับชั่วโมงเข้าหมวดไหน
+/// (ตารางกิจกรรมของเจ้าหน้าที่ และการ์ด/ดialog สมัครของนิสิต)
+String subcategoryPath(List<HourCategory> categories, int? subcategoryId) {
+  if (subcategoryId == null) return '-';
+  for (final category in categories) {
+    for (final sub in category.subcategories) {
+      if (sub.id == subcategoryId) return '${category.name} › ${sub.name}';
+    }
+  }
+  return '-';
+}
+
+/// หมวดแม่ของหมวดย่อยนี้ (null ถ้าไม่พบ) — ใช้เทียบกับสรุปชั่วโมงของนิสิต
+HourCategory? parentCategoryOf(List<HourCategory> categories, int? subcategoryId) {
+  if (subcategoryId == null) return null;
+  for (final category in categories) {
+    for (final sub in category.subcategories) {
+      if (sub.id == subcategoryId) return category;
+    }
+  }
+  return null;
+}
+
 class HourSubcategory {
   final int id;
   final String name;

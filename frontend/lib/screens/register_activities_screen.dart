@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/activity.dart';
+import '../models/hour_category.dart';
+import '../models/hour_summary.dart';
 import '../models/participation.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
@@ -25,6 +27,8 @@ class RegisterActivitiesScreen extends StatefulWidget {
 
 class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
   List<Activity> _activities = [];
+  List<HourCategory> _categories = [];
+  List<HourCategorySummary> _myHours = [];
   Map<int, Participation> _ownParticipationByActivity = {};
   bool _loading = false;
   String? _error;
@@ -44,8 +48,16 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       // นิสิตต้องเห็นกิจกรรมที่เปิดรับ "ทั้งหมด" และรู้ว่าตัวเองสมัครอันไหนไปแล้ว
       final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
       final participations = await ApiService.fetchAll('/participations', Participation.fromJson);
+      // ชื่อหมวดชั่วโมง + ชั่วโมงสะสมของตัวเอง ใช้บอกว่า "สมัครแล้วได้อะไร เข้าหมวดที่ยังขาดไหม"
+      final categories = await ApiService.fetchList('/hour-categories', HourCategory.fromJson);
+      final myHours = await ApiService.fetchList(
+        '/students/me/hours-summary',
+        HourCategorySummary.fromJson,
+      );
       setState(() {
         _activities = activities..sort((a, b) => a.startAt.compareTo(b.startAt));
+        _categories = categories;
+        _myHours = myHours;
         _ownParticipationByActivity = {
           for (final p in participations) p.activityId: p,
         };
@@ -57,13 +69,37 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     }
   }
 
+  /// สรุปสถานะหมวดของกิจกรรมนี้เทียบกับชั่วโมงที่นิสิตมีอยู่ (null ถ้าไม่รู้จักหมวด)
+  String? _categoryProgress(Activity a) {
+    final parent = parentCategoryOf(_categories, a.subcategoryId);
+    if (parent == null) return null;
+    for (final summary in _myHours) {
+      if (summary.id != parent.id) continue;
+      if (summary.completed) {
+        return 'หมวดนี้คุณครบแล้ว (${_trimHours(summary.earnedHours)}/'
+            '${_trimHours(summary.requiredHours)} ชม.)';
+      }
+      final remaining = summary.requiredHours - summary.earnedHours;
+      return 'หมวดนี้คุณมี ${_trimHours(summary.earnedHours)}/'
+          '${_trimHours(summary.requiredHours)} ชม. — ยังขาดอีก ${_trimHours(remaining)} ชม.';
+    }
+    return null;
+  }
+
   Future<void> _register(Activity a) async {
+    final categoryPath = subcategoryPath(_categories, a.subcategoryId);
+    final progress = _categoryProgress(a);
     final confirmed = await confirmAction(
       context,
       title: 'ยืนยันการสมัคร',
       message: 'สมัครเข้าร่วม "${a.name}"\n'
-          'วันเวลา ${_formatDateTime(a.startAt)} • ${a.location}',
-      detail: 'จะได้รับ ${_trimHours(a.hours)} ชั่วโมง เมื่อหลักฐานผ่านการอนุมัติ',
+          'วันเวลา ${_formatDateTime(a.startAt)} • ${a.location}\n\n'
+          'ได้ ${_trimHours(a.hours)} ชั่วโมง\n'
+          'เข้าหมวด $categoryPath',
+      detail: [
+        'ชั่วโมงจะถูกนับเมื่อหลักฐานผ่านการอนุมัติ',
+        ?progress,
+      ].join('\n'),
       confirmLabel: 'สมัคร',
       icon: Icons.how_to_reg,
     );
@@ -132,9 +168,15 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
                           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           child: ListTile(
                             title: Text(a.name),
-                            subtitle: Text(
-                              '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${_formatDateTime(a.startAt)}\n'
-                              '${a.location} • รับ ${a.participantCount}/${a.maxParticipants} คน',
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${a.activityType} • ${_formatDateTime(a.startAt)}'),
+                                Text('${a.location} • รับ ${a.participantCount}/'
+                                    '${a.maxParticipants} คน'),
+                                // นิสิตต้องรู้ก่อนกดสมัครว่าได้กี่ชั่วโมงและเข้าหมวดไหน
+                                _buildHoursAndCategory(a),
+                              ],
                             ),
                             isThreeLine: true,
                             trailing: _buildTrailing(a, participation, closed),
@@ -142,6 +184,32 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
                         );
                       },
                     ),
+    );
+  }
+
+  /// บรรทัด "ได้ X ชม. • หมวด › หมวดย่อย" — เน้นสีให้อ่านง่ายกว่าข้อความรายละเอียดอื่น
+  Widget _buildHoursAndCategory(Activity a) {
+    final theme = Theme.of(context);
+    final path = subcategoryPath(_categories, a.subcategoryId);
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              'ได้ ${_trimHours(a.hours)} ชม. • $path',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
