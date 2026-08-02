@@ -187,6 +187,14 @@ class ApiService {
     return Participation.fromJson(data);
   }
 
+  /// เช็กอินหน้างานด้วย token ที่สแกนได้จาก QR ของกิจกรรม
+  ///
+  /// ตัวตนผู้เช็กอินมาจาก JWT ล้วน ๆ — ฝั่งแอปส่งได้แค่ token เท่านั้น
+  /// รับค่าที่สแกนมาดิบ ๆ ได้เลย (backend ตัด prefix "TSU-CHECKIN:" ให้เอง)
+  static Future<Participation> checkin(String token) async {
+    return create('/participations/checkin', {'token': token}, Participation.fromJson);
+  }
+
   /// Runs (or re-runs) the Silver OCR pipeline for a participation's evidence.
   static Future<OcrResult> processEvidence(int participationId) async {
     final response = await http.post(

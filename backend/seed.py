@@ -2,6 +2,7 @@
 การเข้าร่วมกว่า 1,000 แถว พร้อมกระจายชั่วโมงสะสมให้เห็นทุกกลุ่มในแดชบอร์ด
 
 รัน: python seed.py
+     python seed.py --refresh-live   # เลื่อนกิจกรรมเดโมเช็กอิน QR ให้กำลังจัดตอนนี้อีกครั้ง
 
 หลักการที่ยึด (ห้ามแก้):
 - ชั่วโมงมาจาก ``activity.hours`` เท่านั้น ไม่ hardcode ต่อแถว (กฎ A2)
@@ -192,6 +193,20 @@ PENDING_ACTIVITY_NAMES = {
     "อบรมรู้เท่าทันภัยไซเบอร์",
     "อาสาสอนน้องโรงเรียนตำรวจตระเวนชายแดน",
 }
+# กิจกรรม "กำลังจัดอยู่ตอนนี้" — มีไว้เดโมการเช็กอินหน้างานด้วย QR โดยเฉพาะ
+# กิจกรรมอื่นทั้งหมดอยู่ในอดีต จึงอยู่นอกช่วงเช็กอินและสแกนไม่ผ่านสักอัน
+# เริ่มไปแล้ว 30 นาที ยาว 3 ชม. → อยู่กลางหน้าต่างเช็กอินพอดีตอนรัน seed
+LIVE_ACTIVITY = {
+    "name": "จิตอาสาพัฒนามหาวิทยาลัย (กำลังจัดอยู่ตอนนี้)",
+    "activity_type": "จิตอาสา",
+    "subcategory_name": "กิจกรรม TSU DO D : สร้างสรรค์สร้างสำนึกรับผิดชอบต่อสังคม",
+    "hours": 3,
+    "max_participants": 200,
+    "started_minutes_ago": 30,
+}
+# จำนวนนิสิตที่ "สมัครล่วงหน้า" ไว้กับกิจกรรม live — คนอื่นสแกนเข้ามาเป็น walk-up
+LIVE_ACTIVITY_PREREGISTERED = 8
+
 # กิจกรรมที่ตั้งใจให้ "เต็ม/ปิดรับสมัคร" เพื่อเดโมการแนะนำกิจกรรมทดแทน (Phase 18):
 # ความจุจะถูกตั้งเท่ากับจำนวนผู้ลงทะเบียนจริงหลังสุ่มเสร็จ
 FULL_ACTIVITY_NAMES = {"TSU Startup Camp", "แข่งขันตอบปัญหาวิชาการ"}
@@ -265,6 +280,89 @@ def _interleave_by_category(by_category, rng):
             if pools[key]:
                 ordered.append(pools[key].pop())
     return ordered
+
+
+def _upsert_live_activity(
+    session,
+    *,
+    location: str,
+    subcategory_id: int,
+    staff_user_id: int,
+    admin_user_id: int,
+) -> Activity:
+    """สร้าง (หรือเลื่อนเวลา) กิจกรรมเดโมให้ "กำลังจัดอยู่ตอนนี้"
+
+    หน้าต่างเช็กอินผูกกับ ``start_at`` กิจกรรมที่ seed ไว้เมื่อวานจึงหลุดช่วงไปแล้ว
+    — ฟังก์ชันนี้ทำให้เรียกซ้ำเพื่อเดโมใหม่ได้โดยไม่ต้อง seed ทั้งฐานข้อมูล
+    """
+    started_at = datetime.utcnow() - timedelta(minutes=LIVE_ACTIVITY["started_minutes_ago"])
+    activity = session.exec(
+        select(Activity).where(Activity.name == LIVE_ACTIVITY["name"])
+    ).first()
+
+    if activity is None:
+        activity = Activity(
+            name=LIVE_ACTIVITY["name"],
+            activity_type=LIVE_ACTIVITY["activity_type"],
+            is_required=False,
+            max_participants=LIVE_ACTIVITY["max_participants"],
+            location=location,
+            hours=LIVE_ACTIVITY["hours"],
+            subcategory_id=subcategory_id,
+            created_by=staff_user_id,  # staff เจ้าของ → เดโมปุ่ม "แสดง QR เช็กอิน" ได้
+        )
+    activity.start_at = started_at
+    activity.approval_status = ApprovalStatus.approved
+    activity.approved_by = admin_user_id
+    activity.approved_at = datetime.utcnow()
+    session.add(activity)
+    session.commit()
+    session.refresh(activity)
+    return activity
+
+
+def refresh_live_activity() -> None:
+    """เลื่อนกิจกรรมเดโมเช็กอินให้กลับมา "กำลังจัดอยู่ตอนนี้" แล้วล้างการเช็กอินเดิม
+
+    ใช้ตอนอยากเดโมซ้ำในฐานข้อมูลที่ seed ไว้แล้ว (`python seed.py --refresh-live`)
+    แตะเฉพาะกิจกรรมเดโมตัวนี้ตัวเดียว ไม่ยุ่งกับข้อมูลอื่น
+    """
+    with Session(engine) as session:
+        staff_user = session.exec(select(User).where(User.role == UserRole.staff)).first()
+        admin_user = session.exec(select(User).where(User.role == UserRole.admin)).first()
+        subcategory = session.exec(
+            select(HourSubcategory).where(
+                HourSubcategory.name == LIVE_ACTIVITY["subcategory_name"]
+            )
+        ).first()
+        if staff_user is None or admin_user is None or subcategory is None:
+            print("ยังไม่มีข้อมูลพื้นฐานในฐานข้อมูล — รัน `python seed.py` ก่อน")
+            return
+
+        activity = _upsert_live_activity(
+            session,
+            location=LOCATIONS[0],
+            subcategory_id=subcategory.id,
+            staff_user_id=staff_user.id,
+            admin_user_id=admin_user.id,
+        )
+
+        # ล้างเวลาเช็กอินของกิจกรรมนี้ เพื่อให้คนเดิมสแกนเดโมได้อีกรอบ
+        already = session.exec(
+            select(Participation).where(
+                Participation.activity_id == activity.id,
+                Participation.check_in_time.is_not(None),
+            )
+        ).all()
+        for participation in already:
+            participation.check_in_time = None
+            session.add(participation)
+        session.commit()
+
+        print(
+            f"กิจกรรมเดโมเช็กอิน QR: \"{activity.name}\" (id={activity.id}) "
+            f"เริ่ม {activity.start_at:%Y-%m-%d %H:%M} UTC — ล้างการเช็กอินเดิม {len(already)} รายการ"
+        )
 
 
 def seed() -> None:
@@ -558,6 +656,42 @@ def seed() -> None:
             )
         )
 
+        # --- กิจกรรม "กำลังจัดอยู่ตอนนี้" สำหรับเดโมเช็กอินด้วย QR ---
+        #
+        # สร้างท้ายสุดโดยตั้งใจ: ไม่ให้เข้าไปอยู่ใน by_category ที่สุ่มการเข้าร่วม
+        # ย้อนหลัง และไม่ให้เข้าลูปสร้างใบประกาศ Bronze — กิจกรรมที่เพิ่งเริ่ม
+        # 30 นาทีย่อมยังไม่มีใครได้ใบประกาศหรือได้รับอนุมัติชั่วโมง
+        live_activity = _upsert_live_activity(
+            session,
+            location=rng.choice(LOCATIONS),
+            subcategory_id=subcategory_id_by_name[LIVE_ACTIVITY["subcategory_name"]],
+            staff_user_id=staff_user.id,
+            admin_user_id=admin_user.id,
+        )
+        activities.append(live_activity)
+
+        # นิสิตกลุ่มแรกสมัครล่วงหน้าไว้ (ยังไม่เช็กอิน) — สแกนแล้วจะได้เส้นทาง
+        # "อัปเดต participation เดิม" ส่วนคนอื่นที่ไม่ได้สมัครจะเป็น walk-up
+        live_participations = [
+            Participation(
+                student_id=student.id,
+                activity_id=live_activity.id,
+                check_in_time=None,
+                hours_earned=0,
+                evidence_status=EvidenceStatus.pending,
+            )
+            for student in students[:LIVE_ACTIVITY_PREREGISTERED]
+        ]
+        session.add_all(live_participations)
+        session.commit()
+        participations.extend(live_participations)
+        registered_count[live_activity.id] = len(live_participations)
+        print(
+            f"\nกิจกรรมเดโมเช็กอิน QR: \"{live_activity.name}\" "
+            f"เริ่ม {live_activity.start_at:%Y-%m-%d %H:%M} UTC ({LIVE_ACTIVITY['hours']:g} ชม.) "
+            f"— สมัครล่วงหน้าแล้ว {len(live_participations)} คน ที่เหลือสแกนเป็น walk-up ได้"
+        )
+
         _print_summary(
             students=students,
             users=users,
@@ -643,4 +777,7 @@ def _print_summary(
 
 
 if __name__ == "__main__":
-    seed()
+    if "--refresh-live" in sys.argv:
+        refresh_live_activity()
+    else:
+        seed()

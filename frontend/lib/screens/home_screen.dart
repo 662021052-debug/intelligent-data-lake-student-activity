@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'chatbot_screen.dart';
+import 'checkin_scan_screen.dart';
 import 'dashboard_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
@@ -133,6 +134,13 @@ class HomeScreen extends StatelessWidget {
           title: 'จัดการผู้ใช้',
           subtitle: 'สร้างผู้ใช้และกำหนดสิทธิ์',
           onTap: () => open(const UsersScreen()),
+        ),
+      if (isStudent)
+        _MenuCard(
+          icon: Icons.qr_code_scanner,
+          title: 'เช็กอินหน้างาน',
+          subtitle: 'สแกน QR ของกิจกรรมเพื่อบันทึกว่ามาร่วมงาน',
+          onTap: () => open(const CheckinScanScreen()),
         ),
       if (isStudent)
         _MenuCard(
