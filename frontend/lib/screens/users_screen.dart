@@ -4,6 +4,7 @@ import '../models/app_user.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
@@ -11,7 +12,11 @@ import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 
-const _roles = ['student', 'staff', 'admin'];
+/// สิทธิ์ที่สร้างได้จากหน้านี้ — ไม่มี "นิสิต"
+///
+/// บัญชีนิสิตต้องมาคู่กับข้อมูลนิสิตเสมอ จึงสร้างได้ทางเดียวคือฟอร์มเพิ่มนิสิต
+/// ที่หน้าจัดการนิสิต (backend ก็ปฏิเสธ role=student ที่ endpoint นี้อยู่แล้ว)
+const creatableRoles = ['staff', 'admin'];
 
 String _roleLabel(String role) {
   switch (role) {
@@ -106,11 +111,7 @@ class _UsersScreenState extends State<UsersScreen> {
   Future<void> _openForm({AppUser? existing}) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => _UserFormDialog(
-        existing: existing,
-        students: _students,
-        studentsError: _studentsError,
-      ),
+      builder: (_) => UserFormDialog(existing: existing),
     );
     if (result == true) _load();
   }
@@ -155,6 +156,27 @@ class _UsersScreenState extends State<UsersScreen> {
               ],
             ),
           ),
+          // รายชื่อนิสิตใช้แปลง student_id เป็นชื่อในรายการเท่านั้น โหลดไม่ได้ก็ยัง
+          // ใช้หน้านี้ได้ แต่ต้องบอก ไม่ใช่ปล่อยให้ขึ้นเป็นรหัสภายในเงียบ ๆ
+          if (_studentsError != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      size: 18, color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'โหลดรายชื่อนิสิตไม่สำเร็จ ($_studentsError) — '
+                      'ช่องนิสิตของบัญชีนิสิตจะแสดงเป็นรหัสภายในแทนชื่อ',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างรายการเดิมทิ้ง
           SizedBox(
             height: 2,
@@ -230,33 +252,33 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 }
 
-class _UserFormDialog extends StatefulWidget {
+class UserFormDialog extends StatefulWidget {
   final AppUser? existing;
-  final List<Student> students;
-  final String? studentsError;
-  const _UserFormDialog({this.existing, required this.students, this.studentsError});
+  const UserFormDialog({super.key, this.existing});
 
   @override
-  State<_UserFormDialog> createState() => _UserFormDialogState();
+  State<UserFormDialog> createState() => _UserFormDialogState();
 }
 
-class _UserFormDialogState extends State<_UserFormDialog> {
+class _UserFormDialogState extends State<UserFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _usernameController;
   final _passwordController = TextEditingController();
   late String _role;
-  int? _studentId;
   bool _saving = false;
   String? _error;
 
   bool get _isEdit => widget.existing != null;
+
+  /// บัญชีนิสิตที่มีอยู่แล้ว — แก้ได้แค่รหัสผ่าน สิทธิ์กับการผูกข้อมูลนิสิต
+  /// ต้องไปจัดการที่หน้าจัดการนิสิต
+  bool get _isStudentAccount => widget.existing?.role == 'student';
 
   @override
   void initState() {
     super.initState();
     _usernameController = TextEditingController(text: widget.existing?.username ?? '');
     _role = widget.existing?.role ?? 'staff';
-    _studentId = widget.existing?.studentId;
   }
 
   @override
@@ -274,9 +296,11 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     });
     try {
       if (_isEdit) {
+        // ไม่ส่ง student_id อีกแล้ว — backend ตัดฟิลด์นี้ออกจาก UserUpdate และ
+        // ตอบ 422 ถ้าส่งมา การผูกบัญชีกับนิสิตเกิดที่เดียวคือตอนสร้างนิสิต
         final body = <String, dynamic>{
-          'role': _role,
-          'student_id': _role == 'student' ? _studentId : null,
+          // บัญชีนิสิตเปลี่ยนสิทธิ์จากหน้านี้ไม่ได้ จึงไม่ส่ง role ไปด้วยซ้ำ
+          if (!_isStudentAccount) 'role': _role,
         };
         if (_passwordController.text.isNotEmpty) body['password'] = _passwordController.text;
         await ApiService.update('/auth/users/${widget.existing!.id}', body, (json) => json);
@@ -285,7 +309,6 @@ class _UserFormDialogState extends State<_UserFormDialog> {
           'username': _usernameController.text.trim(),
           'password': _passwordController.text,
           'role': _role,
-          if (_role == 'student') 'student_id': _studentId,
         };
         await ApiService.create('/auth/register', body, (json) => json);
       }
@@ -323,42 +346,43 @@ class _UserFormDialogState extends State<_UserFormDialog> {
             return (v == null || v.length < 6) ? 'รหัสผ่านอย่างน้อย 6 ตัวอักษร' : null;
           },
         ),
-        DropdownButtonFormField<String>(
-          initialValue: _role,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'สิทธิ์ (role)'),
-          items: _roles
-              .map((r) => DropdownMenuItem(value: r, child: Text(_roleLabel(r))))
-              .toList(),
-          onChanged: (v) => setState(() => _role = v ?? 'staff'),
-        ),
-        // การผูกข้อมูลนิสิตไม่บังคับ — สร้างบัญชีไว้ก่อนแล้วค่อยผูกทีหลังได้
-        // (บัญชีที่ยังไม่ผูกจะเห็นรายการเป็นค่าว่างจนกว่าจะผูก)
-        if (_role == 'student' && widget.studentsError != null)
-          Text(
-            'โหลดรายชื่อนิสิตไม่สำเร็จ: ${widget.studentsError}',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        if (_role == 'student')
-          DropdownButtonFormField<int?>(
-            initialValue: _studentId,
-            isExpanded: true,
+        // บัญชีนิสิตเดิม: แสดงสิทธิ์แบบอ่านอย่างเดียว เปลี่ยนจากหน้านี้ไม่ได้
+        if (_isStudentAccount)
+          TextFormField(
+            initialValue: _roleLabel('student'),
+            enabled: false,
             decoration: const InputDecoration(
-              labelText: 'นิสิตที่ผูกบัญชี (ไม่บังคับ)',
-              helperText: 'เว้นว่างไว้ได้ แล้วค่อยผูกภายหลัง',
+              labelText: 'สิทธิ์ (role)',
+              helperText: 'บัญชีนิสิตแก้ได้เฉพาะรหัสผ่าน — ข้อมูลนิสิตแก้ที่หน้าจัดการนิสิต',
             ),
-            items: [
-              const DropdownMenuItem<int?>(
-                value: null,
-                child: Text('— ยังไม่ผูกข้อมูลนิสิต —'),
-              ),
-              ...widget.students.map((s) => DropdownMenuItem<int?>(
-                    value: s.id,
-                    child: Text('${s.studentId} ${s.fullName}',
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
-                  )),
-            ],
-            onChanged: (v) => setState(() => _studentId = v),
+          )
+        else
+          DropdownButtonFormField<String>(
+            initialValue: creatableRoles.contains(_role) ? _role : creatableRoles.first,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'สิทธิ์ (role)'),
+            items: creatableRoles
+                .map((r) => DropdownMenuItem(value: r, child: Text(_roleLabel(r))))
+                .toList(),
+            onChanged: (v) => setState(() => _role = v ?? creatableRoles.first),
+          ),
+        // บอกทางแทน dropdown "นิสิตที่ผูกบัญชี" ที่ถูกตัดออกไป
+        if (!_isEdit)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpacing.xs),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, size: 18),
+                SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'ต้องการเพิ่มนิสิต? ไปที่หน้าจัดการนิสิต → เพิ่มนิสิต '
+                    '(ระบบจะสร้างบัญชีเข้าใช้งานให้พร้อมข้อมูลนิสิตในขั้นตอนเดียว)',
+                  ),
+                ),
+              ],
+            ),
           ),
       ],
     );
