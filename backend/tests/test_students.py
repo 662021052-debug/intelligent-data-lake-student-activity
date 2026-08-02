@@ -38,7 +38,15 @@ def test_create_duplicate_student_id_rejected(client):
 
 # ---- สร้างนิสิต + บัญชีเข้าใช้งานพร้อมกันในขั้นเดียว ----
 
-def _make_student_with_account(client, student_id="6509001", full_name="นิสิต ใหม่"):
+def _make_student_with_account(
+    client,
+    student_id="6509001",
+    full_name="นิสิต ใหม่",
+    username=None,
+    password=None,
+    headers=None,
+    extra=None,
+):
     payload = {
         "student_id": student_id,
         "full_name": full_name,
@@ -48,7 +56,15 @@ def _make_student_with_account(client, student_id="6509001", full_name="นิ�
         "status": "active",
         "create_user": True,
     }
-    return client.post("/students", json=payload, headers=_admin_headers(client))
+    if username is not None:
+        payload["username"] = username
+    if password is not None:
+        payload["password"] = password
+    if extra:
+        payload.update(extra)
+    return client.post(
+        "/students", json=payload, headers=headers if headers is not None else _admin_headers(client)
+    )
 
 
 def test_create_student_with_account_creates_both(client):
@@ -117,6 +133,103 @@ def test_create_student_without_account_stays_the_default(client):
     make_student(client, student_id="6509005")
     users = client.get("/auth/users", params={"search": "6509005"}, headers=_admin_headers(client))
     assert users.json()["total"] == 0
+
+
+def test_response_reports_the_username_that_was_created(client):
+    """ผู้ดูแลต้องรู้จากคำตอบเลยว่านิสิตจะล็อกอินด้วยชื่อผู้ใช้อะไร"""
+    body = _make_student_with_account(client, student_id="6509010").json()
+    assert body["username"] == "6509010"
+    # ต้องไม่คืนรหัสผ่านหรือ hash กลับไปเด็ดขาด
+    assert "password" not in body
+    assert "hashed_password" not in body
+
+
+def test_response_username_is_null_when_no_account_requested(client):
+    assert make_student(client, student_id="6509011").json()["username"] is None
+
+
+def test_custom_username_and_password_are_used(client):
+    """กรอกเองได้ — ต้องล็อกอินด้วยค่าที่กรอก ไม่ใช่ค่าดีฟอลต์"""
+    body = _make_student_with_account(
+        client, student_id="6509012", username="somchai.j", password="secret-pw-1"
+    ).json()
+    assert body["username"] == "somchai.j"
+
+    ok = client.post("/auth/login", data={"username": "somchai.j", "password": "secret-pw-1"})
+    assert ok.status_code == 200
+
+    # ค่าดีฟอลต์ต้องใช้ไม่ได้ เพราะถูกแทนที่ด้วยค่าที่กรอกไปแล้ว
+    assert client.post(
+        "/auth/login", data={"username": "6509012", "password": "6509012"}
+    ).status_code == 401
+
+
+def test_custom_username_still_links_to_the_new_student(client):
+    student = _make_student_with_account(
+        client, student_id="6509013", username="malee.k"
+    ).json()
+    users = client.get("/auth/users", params={"search": "malee.k"}, headers=_admin_headers(client))
+    item = users.json()["items"][0]
+    assert item["role"] == "student"
+    assert item["student_id"] == student["id"]
+
+
+def test_blank_username_and_password_fall_back_to_student_id(client):
+    """ช่องว่าง ๆ ต้องถือว่า "ไม่ได้กรอก" ไม่ใช่สร้างบัญชีชื่อว่าง"""
+    body = _make_student_with_account(
+        client, student_id="6509014", username="   ", password=""
+    ).json()
+    assert body["username"] == "6509014"
+    assert client.post(
+        "/auth/login", data={"username": "6509014", "password": "6509014"}
+    ).status_code == 200
+
+
+def test_duplicate_custom_username_rolls_back_student_too(client):
+    """ชื่อผู้ใช้ที่กรอกเองซ้ำ ก็ต้องไม่เหลือข้อมูลนิสิตค้างเหมือนกัน"""
+    client.post(
+        "/auth/register",
+        json={"username": "taken.name", "password": "pw123456", "role": "staff"},
+        headers=_admin_headers(client),
+    )
+
+    response = _make_student_with_account(
+        client, student_id="6509015", username="taken.name"
+    )
+    assert response.status_code == 400
+    assert "taken.name" in response.json()["detail"]
+
+    found = client.get("/students", params={"search": "6509015"}, headers=_admin_headers(client))
+    assert found.json()["total"] == 0
+
+
+def test_extra_fields_are_rejected(client):
+    """ยัดฟิลด์ที่ระบบเป็นเจ้าของต้องถูกปฏิเสธ ไม่ใช่ถูกกลืนเงียบ ๆ"""
+    response = _make_student_with_account(
+        client, student_id="6509016", extra={"hashed_password": "ปลอม"}
+    )
+    assert response.status_code == 422
+
+    # และต้องไม่เหลืออะไรค้างจากคำขอที่ถูกปฏิเสธ
+    found = client.get("/students", params={"search": "6509016"}, headers=_admin_headers(client))
+    assert found.json()["total"] == 0
+
+
+def test_role_cannot_be_escalated_through_the_form(client):
+    """กันไม่ให้กรอก role มาเองเพื่อสร้างบัญชี admin"""
+    response = _make_student_with_account(
+        client, student_id="6509017", extra={"role": "admin"}
+    )
+    assert response.status_code == 422
+
+
+def test_staff_cannot_create_student_with_account(client):
+    """เจ้าหน้าที่สร้างบัญชีนิสิตทางลัดนี้ไม่ได้ (client ดีฟอลต์ล็อกอินเป็น staff)"""
+    response = _make_student_with_account(client, student_id="6509018", headers={})
+    assert response.status_code == 403
+
+    found = client.get("/students", params={"search": "6509018"}, headers=_admin_headers(client))
+    assert found.json()["total"] == 0
 
 
 def test_list_students_with_pagination_and_filter(client):

@@ -17,6 +17,7 @@ from app.models import (
     StudentRead,
     StudentStatus,
     StudentUpdate,
+    StudentWithAccountRead,
     User,
     UserRole,
 )
@@ -175,24 +176,38 @@ def get_student(
     return student
 
 
-@router.post("", response_model=StudentRead, status_code=201, dependencies=[Depends(require_admin)])
+@router.post(
+    "",
+    response_model=StudentWithAccountRead,
+    status_code=201,
+    dependencies=[Depends(require_admin)],
+)
 def create_student(payload: StudentCreateWithAccount, session: Session = Depends(get_session)):
     """สร้างข้อมูลนิสิต และ (ถ้า create_user) บัญชีเข้าใช้งานที่ผูกกันไว้เลย
 
     ทั้งสองอย่างอยู่ในทรานแซกชันเดียว — ถ้าชื่อผู้ใช้ซ้ำ ต้องไม่เหลือข้อมูลนิสิต
     ค้างไว้ให้ผู้ดูแลตามลบเอง จึงตรวจความซ้ำ "ทั้งคู่ก่อน" แล้วค่อยเขียนลงฐาน
+
+    username/password เว้นว่างได้ — ดีฟอลต์เป็น "รหัสนิสิต" ทั้งคู่ ตรงกับ
+    convention ที่ seed.py ใช้ นิสิตใหม่จึงล็อกอินได้ทันทีโดยไม่ต้องจำอะไรเพิ่ม
     """
     existing = session.exec(select(Student).where(Student.student_id == payload.student_id)).first()
     if existing:
         raise HTTPException(status_code=400, detail="รหัสนิสิตนี้มีอยู่ในระบบแล้ว")
 
-    # ตรวจชื่อผู้ใช้ซ้ำก่อนเขียนอะไรลงฐาน ไม่ใช่ปล่อยให้ล้มตอน insert
+    username: Optional[str] = None
+    password: Optional[str] = None
     if payload.create_user:
-        taken = session.exec(select(User).where(User.username == payload.student_id)).first()
+        # เว้นว่าง (หรือมีแต่ช่องว่าง) = ใช้รหัสนิสิตแทน
+        username = (payload.username or "").strip() or payload.student_id
+        password = payload.password or payload.student_id
+
+        # ตรวจชื่อผู้ใช้ซ้ำก่อนเขียนอะไรลงฐาน ไม่ใช่ปล่อยให้ล้มตอน insert
+        taken = session.exec(select(User).where(User.username == username)).first()
         if taken:
             raise HTTPException(
                 status_code=400,
-                detail=f"มีบัญชีผู้ใช้ชื่อ {payload.student_id} อยู่แล้ว",
+                detail=f"มีบัญชีผู้ใช้ชื่อ {username} อยู่แล้ว",
             )
 
     student = Student.model_validate(payload)
@@ -203,8 +218,8 @@ def create_student(payload: StudentCreateWithAccount, session: Session = Depends
             session.flush()
             session.add(
                 User(
-                    username=payload.student_id,
-                    hashed_password=hash_password(payload.student_id),
+                    username=username,
+                    hashed_password=hash_password(password),
                     role=UserRole.student,
                     student_id=student.id,
                 )
@@ -215,7 +230,7 @@ def create_student(payload: StudentCreateWithAccount, session: Session = Depends
         session.rollback()
         raise HTTPException(status_code=400, detail="ข้อมูลซ้ำกับที่มีอยู่แล้ว กรุณาตรวจสอบอีกครั้ง")
     session.refresh(student)
-    return student
+    return StudentWithAccountRead(**student.model_dump(), username=username)
 
 
 @router.put("/{student_id}", response_model=StudentRead, dependencies=[Depends(require_admin)])

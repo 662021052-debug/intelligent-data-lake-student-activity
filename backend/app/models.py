@@ -67,13 +67,21 @@ class StudentCreateWithAccount(StudentCreate):
     สร้างบัญชีอีกหน้าหนึ่งเพื่อผูกกัน ถ้าลืมขั้นที่สองก็ได้นิสิตที่ล็อกอินไม่ได้
 
     บัญชีที่สร้างให้ใช้รูปแบบเดียวกับ seed.py คือ username และรหัสผ่านเริ่มต้น
-    เป็น "รหัสนิสิต" ทั้งคู่
+    เป็น "รหัสนิสิต" ทั้งคู่ — แต่ผู้ดูแลกำหนดเองได้ผ่าน username/password
 
     ดีฟอลต์เป็น False เพื่อไม่ให้ผู้เรียก `POST /students` เดิมได้บัญชีเพิ่มมา
     โดยไม่ได้ขอ — ฝั่งแอปเป็นคนส่ง create_user=true มาเอง (ช่องติ๊กถูกติ๊กไว้ให้แล้ว)
     """
 
+    # extra="forbid" กันการยัดฟิลด์ที่ระบบเป็นเจ้าของ (id, hashed_password) และ
+    # ทำให้พิมพ์ชื่อฟิลด์ผิดกลายเป็น 422 แทนที่จะถูกกลืนไปเงียบ ๆ
+    model_config = ConfigDict(extra="forbid")
+
     create_user: bool = False
+    # เว้นว่างได้ทั้งคู่ = ใช้รหัสนิสิตเป็นทั้งชื่อผู้ใช้และรหัสผ่านเริ่มต้น
+    # มีผลเฉพาะเมื่อ create_user=True เท่านั้น
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 
 class StudentUpdate(SQLModel):
@@ -87,6 +95,18 @@ class StudentUpdate(SQLModel):
 
 class StudentRead(StudentBase):
     id: int
+
+
+class StudentWithAccountRead(StudentRead):
+    """ผลลัพธ์ของการสร้างนิสิต — แนบชื่อผู้ใช้ที่ระบบสร้างให้มาด้วย
+
+    ผู้ดูแลจะได้บอกนิสิตได้ทันทีว่าล็อกอินด้วยชื่อผู้ใช้อะไร โดยไม่ต้องเดาว่า
+    ระบบใช้ดีฟอลต์หรือค่าที่กรอกมา เป็น None เมื่อไม่ได้ขอสร้างบัญชี
+
+    ไม่มีรหัสผ่านและ hash อยู่ในนี้โดยตั้งใจ
+    """
+
+    username: Optional[str] = None
 
 
 # ---------- Hour category / subcategory (เกณฑ์ชั่วโมงกิจกรรม) ----------
