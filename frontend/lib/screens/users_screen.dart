@@ -95,7 +95,8 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   String _studentLabel(int? studentId) {
-    if (studentId == null) return '';
+    // บัญชีนิสิตที่ยังไม่ผูกต้องอ่านออกว่า "ยังไม่ผูก" ไม่ใช่ปล่อยว่างจนเหลือ "นิสิต • "
+    if (studentId == null) return 'ยังไม่ผูกข้อมูลนิสิต';
     for (final s in _students) {
       if (s.id == studentId) return '${s.studentId} ${s.fullName}';
     }
@@ -267,10 +268,6 @@ class _UserFormDialogState extends State<_UserFormDialog> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_role == 'student' && _studentId == null) {
-      setState(() => _error = 'บัญชีนิสิตต้องเลือกนิสิตที่ผูก');
-      return;
-    }
     setState(() {
       _saving = true;
       _error = null;
@@ -335,28 +332,33 @@ class _UserFormDialogState extends State<_UserFormDialog> {
               .toList(),
           onChanged: (v) => setState(() => _role = v ?? 'staff'),
         ),
-        // D1: a student account must be linked to a student record
-        if (_role == 'student' && widget.students.isEmpty)
+        // การผูกข้อมูลนิสิตไม่บังคับ — สร้างบัญชีไว้ก่อนแล้วค่อยผูกทีหลังได้
+        // (บัญชีที่ยังไม่ผูกจะเห็นรายการเป็นค่าว่างจนกว่าจะผูก)
+        if (_role == 'student' && widget.studentsError != null)
           Text(
-            widget.studentsError == null
-                ? 'ยังไม่มีข้อมูลนิสิตให้ผูกบัญชี'
-                : 'โหลดรายชื่อนิสิตไม่สำเร็จ: ${widget.studentsError}',
+            'โหลดรายชื่อนิสิตไม่สำเร็จ: ${widget.studentsError}',
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
-        if (_role == 'student' && widget.students.isNotEmpty)
-          DropdownButtonFormField<int>(
+        if (_role == 'student')
+          DropdownButtonFormField<int?>(
             initialValue: _studentId,
             isExpanded: true,
-            decoration: const InputDecoration(labelText: 'นิสิตที่ผูกบัญชี'),
-            items: widget.students
-                .map((s) => DropdownMenuItem(
-                      value: s.id,
-                      child: Text('${s.studentId} ${s.fullName}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ))
-                .toList(),
+            decoration: const InputDecoration(
+              labelText: 'นิสิตที่ผูกบัญชี (ไม่บังคับ)',
+              helperText: 'เว้นว่างไว้ได้ แล้วค่อยผูกภายหลัง',
+            ),
+            items: [
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('— ยังไม่ผูกข้อมูลนิสิต —'),
+              ),
+              ...widget.students.map((s) => DropdownMenuItem<int?>(
+                    value: s.id,
+                    child: Text('${s.studentId} ${s.fullName}',
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  )),
+            ],
             onChanged: (v) => setState(() => _studentId = v),
-            validator: (v) => v == null ? 'กรุณาเลือกนิสิต' : null,
           ),
       ],
     );

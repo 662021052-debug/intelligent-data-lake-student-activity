@@ -19,12 +19,18 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _validate_student_link(session: Session, role: UserRole, student_id: Optional[int]) -> Optional[int]:
-    """A student account must be linked to an existing student; staff/admin never are."""
+    """A student account *may* be linked to an existing student, but need not be.
+
+    การผูกไม่บังคับ เพื่อให้ผู้ดูแลสร้างบัญชีไว้ก่อนแล้วค่อยผูกทีหลังได้ (เช่น นิสิต
+    เข้าใหม่ที่ยังไม่มีข้อมูลในระบบ) บัญชีที่ยังไม่ผูกจะเห็นรายการเป็นค่าว่างและ
+    เรียก endpoint แบบ /me ไม่ได้ ซึ่งเป็นพฤติกรรมที่ตั้งใจและมีเทสต์คุมอยู่แล้ว
+    (test_unlinked_student_gets_empty_lists_not_error)
+
+    ถ้าระบุ student_id มา ยังต้องมีอยู่จริง — กันพิมพ์ผิดแล้วผูกไปหา record ที่ไม่มี
+    """
     if role == UserRole.student:
         if student_id is None:
-            raise HTTPException(
-                status_code=400, detail="บัญชีนิสิตต้องผูกกับข้อมูลนิสิต (student_id)"
-            )
+            return None
         if not session.get(Student, student_id):
             raise HTTPException(status_code=400, detail="student_id does not exist")
         return student_id

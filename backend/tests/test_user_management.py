@@ -11,15 +11,53 @@ def _admin_id(client, tokens):
     return next(u["id"] for u in users if u["username"] == "admin")
 
 
-# ---- D1: student accounts must be linked to a student ----
+# ---- D1: การผูกข้อมูลนิสิตไม่บังคับ แต่ถ้าระบุมาต้องมีอยู่จริง ----
 
-def test_create_student_user_without_student_id_rejected(client, tokens):
+def test_create_student_user_without_student_id_allowed(client, tokens):
+    """สร้างบัญชีนิสิตไว้ก่อนโดยยังไม่ผูกข้อมูลนิสิตได้ แล้วค่อยผูกทีหลัง"""
     response = client.post(
         "/auth/register",
         json={"username": "loner", "password": "pw123456", "role": "student"},
         headers=_admin_headers(tokens),
     )
-    assert response.status_code == 400
+    assert response.status_code == 201
+    assert response.json()["student_id"] is None
+
+
+def test_unlinked_student_user_can_login_and_gets_empty_lists(client, tokens):
+    """บัญชีที่ยังไม่ผูกต้อง login ได้และเห็นรายการว่าง ไม่ใช่พังทั้งแอป"""
+    client.post(
+        "/auth/register",
+        json={"username": "loner2", "password": "pw123456", "role": "student"},
+        headers=_admin_headers(tokens),
+    )
+    login = client.post("/auth/login", data={"username": "loner2", "password": "pw123456"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    assert client.get("/students", headers=headers).json()["total"] == 0
+    assert client.get("/participations", headers=headers).json()["total"] == 0
+    # endpoint แบบ /me ยังต้องบอกเหตุผลชัดเจน ไม่ใช่คืนค่าว่างให้งง
+    assert client.get("/students/me/hours-summary", headers=headers).status_code == 403
+
+
+def test_admin_can_link_student_later(client, tokens):
+    """สร้างแบบไม่ผูกไว้ก่อน แล้วผูกภายหลังผ่านหน้าจัดการผู้ใช้ได้"""
+    created = client.post(
+        "/auth/register",
+        json={"username": "link_later", "password": "pw123456", "role": "student"},
+        headers=_admin_headers(tokens),
+    ).json()
+    assert created["student_id"] is None
+
+    student = make_student(client, student_id="7701201").json()
+    response = client.put(
+        f"/auth/users/{created['id']}",
+        json={"role": "student", "student_id": student["id"]},
+        headers=_admin_headers(tokens),
+    )
+    assert response.status_code == 200
+    assert response.json()["student_id"] == student["id"]
 
 
 def test_create_student_user_with_invalid_student_id_rejected(client, tokens):
