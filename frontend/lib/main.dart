@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'screens/checkin_confirm_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/auth_service.dart';
+import 'services/pending_checkin.dart';
 import 'theme/app_theme.dart';
 
 /// เปิด semantics tree ตั้งแต่เริ่ม เพื่อให้เครื่องมืออัตโนมัติอ่านหน้าเว็บได้
@@ -20,6 +22,12 @@ const bool _enableSemantics = bool.fromEnvironment('ENABLE_SEMANTICS');
 void main() {
   final binding = WidgetsFlutterBinding.ensureInitialized();
   if (_enableSemantics) binding.ensureSemantics();
+  // deep link จากการสแกน QR ด้วยกล้องมือถือปกติ — ต้องอ่านตั้งแต่ตอนเปิดแอป
+  // ก่อนที่หน้าไหนจะวาด (ส่งทั้ง route และ URL เต็มไปให้ ดูเหตุผลใน PendingCheckin)
+  pendingCheckin.readFromAppStart(
+    route: binding.platformDispatcher.defaultRouteName,
+    url: Uri.base,
+  );
   runApp(const MyApp());
 }
 
@@ -42,9 +50,17 @@ class MyApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       home: ListenableBuilder(
-        listenable: authService,
+        // ฟังทั้งสองอย่าง: สถานะล็อกอิน และ token เช็กอินที่ค้างอยู่ — พอนิสิต
+        // ล็อกอินเสร็จ ตัว builder นี้จะพาไปหน้ายืนยันเช็กอินต่อเอง token
+        // จึงไม่หายระหว่างทางไปหน้า login (F4b)
+        listenable: Listenable.merge([authService, pendingCheckin]),
         builder: (context, _) {
-          return authService.isLoggedIn ? const HomeScreen() : const LoginScreen();
+          if (!authService.isLoggedIn) return const LoginScreen();
+          final token = pendingCheckin.token;
+          if (token != null) {
+            return CheckinConfirmScreen(token: token, onDone: pendingCheckin.clear);
+          }
+          return const HomeScreen();
         },
       ),
     );

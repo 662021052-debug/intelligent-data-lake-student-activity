@@ -15,7 +15,7 @@ Map<String, dynamic> _payload() => {
       'activity_id': 29,
       'activity_name': 'จิตอาสาพัฒนามหาวิทยาลัย (กำลังจัดอยู่ตอนนี้)',
       'token': 'b97e85b0dd544be29d3b73063bfb5883',
-      'qr_payload': 'TSU-CHECKIN:b97e85b0dd544be29d3b73063bfb5883',
+      'qr_payload': 'https://activity.tsu.ac.th/#/checkin?c=b97e85b0dd544be29d3b73063bfb5883',
       'start_at': '2026-08-02T08:47:00',
       'checkin_opens_at': '2026-08-02T07:47:00',
       'checkin_closes_at': '2026-08-02T14:47:00',
@@ -38,7 +38,8 @@ void main() {
       final qr = CheckinQr.fromJson(_payload());
       expect(qr.activityId, 29);
       expect(qr.token, 'b97e85b0dd544be29d3b73063bfb5883');
-      expect(qr.qrPayload, 'TSU-CHECKIN:${qr.token}');
+      // QR เก็บ URL เต็ม กล้องมือถือปกติจึงขึ้นปุ่มเปิดลิงก์ให้ (F4/B3)
+      expect(qr.qrPayload, 'https://activity.tsu.ac.th/#/checkin?c=${qr.token}');
     });
 
     test('ช่วงเวลาเช็กอินคิดเป็น UTC ตรงกับที่ backend บังคับ', () {
@@ -65,7 +66,8 @@ void main() {
     expect(find.byType(QrImageView), findsOneWidget);
     // QrImageView ไม่เปิด data ให้อ่าน จึงผูก payload ไว้เป็น key ของภาพ
     expect(
-      find.byKey(const ValueKey('TSU-CHECKIN:b97e85b0dd544be29d3b73063bfb5883')),
+      find.byKey(const ValueKey(
+          'https://activity.tsu.ac.th/#/checkin?c=b97e85b0dd544be29d3b73063bfb5883')),
       findsOneWidget,
     );
   });

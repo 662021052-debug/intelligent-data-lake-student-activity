@@ -196,7 +196,9 @@ class ApiService {
   /// เช็กอินหน้างานด้วย token ที่สแกนได้จาก QR ของกิจกรรม
   ///
   /// ตัวตนผู้เช็กอินมาจาก JWT ล้วน ๆ — ฝั่งแอปส่งได้แค่ token เท่านั้น
-  /// รับค่าที่สแกนมาดิบ ๆ ได้เลย (backend ตัด prefix "TSU-CHECKIN:" ให้เอง)
+  ///
+  /// ส่งค่าที่สแกน/กรอกมาดิบ ๆ ได้เลย backend รับได้ทั้ง URL เต็มจาก QR
+  /// (`.../#/checkin?c=<token>`), รูปแบบเก่า `TSU-CHECKIN:<token>` และ token เปล่า
   static Future<Participation> checkin(String token) async {
     return create('/participations/checkin', {'token': token}, Participation.fromJson);
   }

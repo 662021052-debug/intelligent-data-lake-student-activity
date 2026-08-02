@@ -6,7 +6,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
-import '../utils/format.dart';
+import '../widgets/checkin_result.dart';
 
 /// F1 — นิสิตสแกน QR ของกิจกรรมที่หน้างานเพื่อเช็กอินตัวเอง
 ///
@@ -138,11 +138,11 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (_result != null) ...[
-                  _CheckinSuccessCard(participation: _result!),
+                  CheckinSuccessCard(participation: _result!),
                   const SizedBox(height: AppSpacing.lg),
                 ],
                 if (_error != null) ...[
-                  _ErrorBanner(message: _error!),
+                  CheckinErrorBanner(message: _error!),
                   const SizedBox(height: AppSpacing.lg),
                 ],
                 switch (_mode) {
@@ -184,7 +184,7 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: AppSpacing.lg),
-            const _HoursNotice(),
+            const CheckinHoursNotice(),
             const SizedBox(height: AppSpacing.xl),
             FilledButton.icon(
               icon: const Icon(Icons.photo_camera),
@@ -298,7 +298,7 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
               onSubmitted: (value) => _submitManualInput(value),
             ),
             const SizedBox(height: AppSpacing.lg),
-            const _HoursNotice(),
+            const CheckinHoursNotice(),
             const SizedBox(height: AppSpacing.xl),
             FilledButton.icon(
               icon: _submitting
@@ -340,133 +340,6 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
               'localhost) — ใช้วิธีกรอกรหัสกิจกรรมแทนได้',
         _ => 'เปิดกล้องไม่สำเร็จ — ใช้วิธีกรอกรหัสกิจกรรมแทนได้',
       };
-}
-
-/// ย้ำกฎ D2 ให้นิสิตไม่เข้าใจผิดว่าสแกนแล้วได้ชั่วโมงเลย
-class _HoursNotice extends StatelessWidget {
-  const _HoursNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: StatusPalette.info.background,
-        borderRadius: BorderRadius.circular(AppRadius.field),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline, size: 20, color: StatusPalette.info.foreground),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'การเช็กอินเป็นการบันทึกว่าคุณมาร่วมงานเท่านั้น '
-              'ชั่วโมงกิจกรรมจะนับให้เมื่อส่งหลักฐานและเจ้าหน้าที่อนุมัติแล้ว',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: StatusPalette.info.foreground),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CheckinSuccessCard extends StatelessWidget {
-  final Participation participation;
-
-  const _CheckinSuccessCard({required this.participation});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final checkedInAt = participation.checkInTime;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      decoration: BoxDecoration(
-        color: StatusPalette.approved.background,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: StatusPalette.approved.foreground.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.check_circle, size: 40, color: StatusPalette.approved.foreground),
-          const SizedBox(width: AppSpacing.lg),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'เช็กอินสำเร็จ',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: StatusPalette.approved.foreground,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  participation.activityName ?? 'กิจกรรม #${participation.activityId}',
-                  style: theme.textTheme.titleMedium,
-                ),
-                if (checkedInAt != null) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    'เวลาเช็กอิน ${formatDateTime(serverTimeToLocal(checkedInAt))} น.',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  'อย่าลืมส่งหลักฐานการเข้าร่วมเพื่อให้ได้ชั่วโมง',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  final String message;
-
-  const _ErrorBanner({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: StatusPalette.rejected.background,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.error_outline, color: StatusPalette.rejected.foreground),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              message,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: StatusPalette.rejected.foreground),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// แสดงแทนภาพกล้องเมื่อเปิดกล้องไม่ได้ (ไม่อนุญาต / ไม่ใช่ HTTPS / เบราว์เซอร์ไม่รองรับ)

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
+import '../services/pending_checkin.dart';
+import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -62,6 +64,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text('ระบบจัดการข้อมูลกิจกรรมนิสิต', textAlign: TextAlign.center),
+                  // มาจากการสแกน QR แล้วยังไม่ได้ล็อกอิน — บอกให้รู้ว่าทำไมต้อง
+                  // ล็อกอินก่อน และย้ำว่าลิงก์ที่สแกนมาไม่หาย (F4b)
+                  if (pendingCheckin.hasPending) ...[
+                    const SizedBox(height: 16),
+                    const _PendingCheckinBanner(),
+                  ],
                   const SizedBox(height: 24),
                   TextFormField(
                     controller: _usernameController,
@@ -104,6 +112,38 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PendingCheckinBanner extends StatelessWidget {
+  const _PendingCheckinBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: StatusPalette.info.background,
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.qr_code_scanner, size: 20, color: StatusPalette.info.foreground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'เข้าสู่ระบบด้วยบัญชีนิสิตเพื่อเช็กอินกิจกรรมที่สแกนมา '
+              'ระบบจะพาไปหน้ายืนยันให้เองหลังเข้าสู่ระบบ',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: StatusPalette.info.foreground),
+            ),
+          ),
+        ],
       ),
     );
   }
