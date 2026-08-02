@@ -1,3 +1,6 @@
+from datetime import datetime
+
+
 def _admin_headers(client):
     response = client.post("/auth/login", data={"username": "admin", "password": "admin123"})
     token = response.json()["access_token"]
@@ -355,11 +358,69 @@ def test_delete_student_keeps_other_students_accounts(client):
     ).status_code == 200
 
 
+def test_delete_student_with_history_is_blocked(client, session, tokens):
+    """นิสิตที่เคยเข้าร่วมกิจกรรมลบไม่ได้ — ลบทิ้งจะพา lineage หายไปด้วย"""
+    from app.models import Activity, ApprovalStatus, Participation
+
+    created = _make_student_with_account(client, student_id="6509030").json()
+    activity = Activity(
+        name="อบรมความปลอดภัย",
+        activity_type="อบรม",
+        max_participants=30,
+        start_at=datetime(2026, 6, 1, 9, 0),
+        location="หอประชุม",
+        hours=3,
+        approval_status=ApprovalStatus.approved,
+    )
+    session.add(activity)
+    session.commit()
+    session.add(Participation(student_id=created["id"], activity_id=activity.id))
+    session.commit()
+
+    headers = _admin_headers(client)
+    response = client.delete(f"/students/{created['id']}", headers=headers)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "ลบไม่ได้: นิสิตมีประวัติเข้าร่วม 1 รายการ"
+
+    # ห้ามลบอะไรทิ้งไปแล้วค่อยเด้ง — ทั้งนิสิต บัญชี และประวัติต้องอยู่ครบ
+    assert client.get(f"/students/{created['id']}", headers=headers).status_code == 200
+    users = client.get("/auth/users", params={"search": "6509030"}, headers=headers)
+    assert users.json()["total"] == 1
+    assert client.post(
+        "/auth/login", data={"username": "6509030", "password": "6509030"}
+    ).status_code == 200
+
+
+def test_delete_student_error_reports_the_real_number_of_records(client, session):
+    """ข้อความต้องบอกจำนวนจริง ผู้ดูแลจะได้รู้ว่ากำลังจะทำลายอะไรไปบ้าง"""
+    from app.models import Activity, ApprovalStatus, Participation
+
+    created = _make_student_with_account(client, student_id="6509031").json()
+    for index in range(3):
+        activity = Activity(
+            name=f"กิจกรรมที่ {index}",
+            activity_type="อบรม",
+            max_participants=30,
+            start_at=datetime(2026, 6, 1, 9, 0),
+            location="หอประชุม",
+            hours=3,
+            approval_status=ApprovalStatus.approved,
+        )
+        session.add(activity)
+        session.commit()
+        session.add(Participation(student_id=created["id"], activity_id=activity.id))
+    session.commit()
+
+    response = client.delete(f"/students/{created['id']}", headers=_admin_headers(client))
+    assert response.status_code == 400
+    assert response.json()["detail"] == "ลบไม่ได้: นิสิตมีประวัติเข้าร่วม 3 รายการ"
+
+
 def test_delete_student_unlinks_staff_account_instead_of_deleting_it(client, session):
     """บัญชีที่ไม่ใช่ role=student ต้องถูกปลดการผูก ไม่ใช่ถูกลบทิ้ง
 
-    API ปกติสร้างสถานะนี้ไม่ได้ (`_validate_student_link` ล้าง student_id ของ
-    staff/admin ทิ้งเสมอ) จึงต้องยัดผ่าน session ตรง ๆ เพื่อทดสอบด่านสุดท้าย
+    API ปกติสร้างสถานะนี้ไม่ได้ (staff/admin ถูกบังคับให้ student_id เป็น None
+    เสมอ) จึงต้องยัดผ่าน session ตรง ๆ เพื่อทดสอบด่านสุดท้าย
     """
     from app.auth import hash_password
     from app.models import User, UserRole

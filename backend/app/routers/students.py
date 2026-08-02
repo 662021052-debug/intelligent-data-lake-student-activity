@@ -264,16 +264,29 @@ def delete_student(student_id: int, session: Session = Depends(get_session)):
     แล้วก็ค้างอยู่ (บน Postgres จะเป็น FK violation ตอน commit)
 
     บัญชี staff/admin ที่บังเอิญผูกไว้จะถูก "ปลดการผูก" ไม่ใช่ถูกลบ — การลบนิสิต
-    หนึ่งคนต้องไม่ทำให้ผู้ดูแลระบบหายไปด้วย (ปกติ `_validate_student_link` กัน
-    ไม่ให้เกิดสถานะนี้ผ่าน API อยู่แล้ว ตรงนี้กันข้อมูลที่มาจากทางอื่น)
+    หนึ่งคนต้องไม่ทำให้ผู้ดูแลระบบหายไปด้วย (ปกติ API สร้างสถานะนี้ไม่ได้อยู่แล้ว
+    เพราะ staff/admin ถูกบังคับให้ student_id เป็น None ตรงนี้กันข้อมูลจากทางอื่น)
+
+    ลบได้เฉพาะนิสิตที่ยังไม่มีประวัติเข้าร่วม — มีประวัติเมื่อไหร่ตอบ 400
     """
     student = session.get(Student, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    related = session.exec(select(Participation).where(Participation.student_id == student_id)).all()
-    for row in related:
-        session.delete(row)
+    # นิสิตที่เคยเข้าร่วมกิจกรรมแล้วลบไม่ได้ — ลบทิ้งจะพา lineage หายไปด้วย
+    # (participation → raw_file → object ใน MinIO → silver_evidence_ocr) และ
+    # FK ที่ชี้มายัง participation เป็น NO ACTION ทั้งหมด บน Postgres จึงล้ม
+    # กลางคันอยู่ดี ให้ปิดสถานะนิสิตเป็น inactive แทนการลบ
+    participation_count = session.exec(
+        select(func.count())
+        .select_from(Participation)
+        .where(Participation.student_id == student_id)
+    ).one()
+    if participation_count:
+        raise HTTPException(
+            status_code=400,
+            detail=f"ลบไม่ได้: นิสิตมีประวัติเข้าร่วม {participation_count} รายการ",
+        )
 
     linked_users = session.exec(select(User).where(User.student_id == student_id)).all()
     for user in linked_users:

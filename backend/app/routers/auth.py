@@ -18,24 +18,15 @@ from app.schemas import Page, Token
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _validate_student_link(session: Session, role: UserRole, student_id: Optional[int]) -> Optional[int]:
-    """A student account *may* be linked to an existing student, but need not be.
-
-    การผูกไม่บังคับ เพื่อให้ผู้ดูแลสร้างบัญชีไว้ก่อนแล้วค่อยผูกทีหลังได้ (เช่น นิสิต
-    เข้าใหม่ที่ยังไม่มีข้อมูลในระบบ) บัญชีที่ยังไม่ผูกจะเห็นรายการเป็นค่าว่างและ
-    เรียก endpoint แบบ /me ไม่ได้ ซึ่งเป็นพฤติกรรมที่ตั้งใจและมีเทสต์คุมอยู่แล้ว
-    (test_unlinked_student_gets_empty_lists_not_error)
-
-    ถ้าระบุ student_id มา ยังต้องมีอยู่จริง — กันพิมพ์ผิดแล้วผูกไปหา record ที่ไม่มี
-    """
-    if role == UserRole.student:
-        if student_id is None:
-            return None
-        if not session.get(Student, student_id):
-            raise HTTPException(status_code=400, detail="student_id does not exist")
-        return student_id
-    # staff / admin are never tied to a student record
-    return None
+# บัญชีนิสิตต้องมาคู่กับข้อมูลนิสิตเสมอ จึงสร้างได้ทางเดียวคือฟอร์มเพิ่มนิสิต
+# (`POST /students` โหมด create_user) — endpoint นี้สร้าง staff/admin เท่านั้น
+#
+# เดิมสร้างบัญชี role=student แบบยังไม่ผูก (student_id = null) ได้ แล้วค่อยผูก
+# ทีหลัง ผลคือมีบัญชีที่ล็อกอินได้แต่ใช้อะไรไม่ได้เลย เพราะแดชบอร์ดชั่วโมง /
+# การสมัคร / การอัปโหลดหลักฐาน / row-level filter ล้วนอ้าง student_id
+STUDENT_ACCOUNT_NEEDS_STUDENT_FORM = (
+    "การสร้างบัญชีนิสิตต้องใช้ฟอร์มเพิ่มนิสิต (กรอกข้อมูลนิสิตให้ครบ)"
+)
 
 
 @router.post("/login", response_model=Token)
@@ -59,16 +50,19 @@ def register(
     session: Session = Depends(get_session),
     _: User = Depends(require_admin),
 ):
+    if payload.role == UserRole.student:
+        raise HTTPException(status_code=400, detail=STUDENT_ACCOUNT_NEEDS_STUDENT_FORM)
+
     existing = session.exec(select(User).where(User.username == payload.username)).first()
     if existing:
         raise HTTPException(status_code=400, detail="username already exists")
 
-    student_id = _validate_student_link(session, payload.role, payload.student_id)
     user = User(
         username=payload.username,
         hashed_password=hash_password(payload.password),
         role=payload.role,
-        student_id=student_id,
+        # staff/admin ไม่เคยผูกกับข้อมูลนิสิต — student_id ที่ส่งมาจึงถูกทิ้งเสมอ
+        student_id=None,
     )
     session.add(user)
     session.commit()
@@ -108,9 +102,15 @@ def update_user(
 
     data = payload.model_dump(exclude_unset=True)
     new_role = data.get("role", user.role)
-    # student_id is only meaningful for the (possibly new) role
-    new_student_id = data.get("student_id", user.student_id)
-    user.student_id = _validate_student_link(session, new_role, new_student_id)
+
+    # เลื่อนบัญชี staff/admin มาเป็นนิสิตไม่ได้ — จะได้บัญชีนิสิตที่ไม่มีข้อมูล
+    # นิสิตอยู่เบื้องหลัง ซึ่งเป็นสภาพเดียวกับที่ตัด flow ผูกทีหลังทิ้งไป
+    if new_role == UserRole.student and user.role != UserRole.student:
+        raise HTTPException(status_code=400, detail=STUDENT_ACCOUNT_NEEDS_STUDENT_FORM)
+    # บัญชีนิสิตเดิมคงการผูกไว้เท่าเดิม (แก้ได้แค่รหัสผ่าน) ส่วน staff/admin
+    # ไม่ผูกกับใครเสมอ
+    if new_role != UserRole.student:
+        user.student_id = None
     user.role = new_role
     if "password" in data and data["password"]:
         user.hashed_password = hash_password(data["password"])

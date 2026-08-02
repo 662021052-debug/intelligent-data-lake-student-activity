@@ -313,9 +313,20 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(SQLModel):
+    """แก้ไขบัญชีผู้ใช้ — เปลี่ยนได้แค่สิทธิ์กับรหัสผ่าน
+
+    `student_id` ถูกตัดออกโดยตั้งใจ: การผูกบัญชีกับข้อมูลนิสิตเกิดขึ้นที่เดียว
+    คือตอนสร้างนิสิตผ่าน `POST /students` เท่านั้น ไม่งั้นจะกลับไปมีบัญชีนิสิต
+    ที่ผูกผิดคน/ไม่ผูกใครเลยได้อีก
+
+    extra="forbid" เพื่อให้การส่ง student_id มาเด้ง 422 ไม่ใช่ถูกกลืนเงียบ ๆ
+    แล้วผู้ดูแลเข้าใจผิดว่าเปลี่ยนสำเร็จ
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     role: Optional[UserRole] = None
     password: Optional[str] = None
-    student_id: Optional[int] = None
 
 
 class UserRead(UserBase):
