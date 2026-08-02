@@ -264,6 +264,8 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
   late final TextEditingController _majorController;
   late final TextEditingController _yearLevelController;
   String _status = 'active';
+  // นิสิตใหม่ควรได้บัญชีเข้าใช้งานไปพร้อมกัน ไม่ต้องไปสร้างต่ออีกหน้าแล้วลืมผูก
+  bool _createUser = true;
   bool _saving = false;
   String? _error;
 
@@ -302,6 +304,8 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
       'major': _majorController.text.trim(),
       'year_level': int.parse(_yearLevelController.text.trim()),
       'status': _status,
+      // ส่งเฉพาะตอนสร้างใหม่ — backend ไม่รับฟิลด์นี้ตอนแก้ไข
+      if (widget.existing == null) 'create_user': _createUser,
     };
     try {
       if (widget.existing == null) {
@@ -362,6 +366,20 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
           ],
           onChanged: (v) => setState(() => _status = v ?? 'active'),
         ),
+        // เฉพาะตอนสร้างใหม่ — บัญชีที่มีอยู่แล้วต้องไปจัดการที่หน้าจัดการผู้ใช้
+        if (widget.existing == null)
+          CheckboxListTile(
+            value: _createUser,
+            onChanged: (v) => setState(() => _createUser = v ?? false),
+            title: const Text('สร้างบัญชีเข้าใช้งานให้ด้วย'),
+            subtitle: Text(
+              _createUser
+                  ? 'ชื่อผู้ใช้และรหัสผ่านเริ่มต้นเป็นรหัสนิสิต — แจ้งให้เปลี่ยนรหัสผ่านหลังเข้าใช้ครั้งแรก'
+                  : 'ต้องไปสร้างบัญชีและผูกเองที่หน้าจัดการผู้ใช้',
+            ),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
       ],
     );
   }

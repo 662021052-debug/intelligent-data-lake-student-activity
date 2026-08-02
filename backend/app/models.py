@@ -54,6 +54,22 @@ class StudentCreate(StudentBase):
     pass
 
 
+class StudentCreateWithAccount(StudentCreate):
+    """สร้างข้อมูลนิสิตพร้อมบัญชีเข้าใช้งานในคำขอเดียว
+
+    แก้ปัญหาไก่กับไข่ของนิสิตใหม่: เดิมต้องเพิ่มข้อมูลนิสิตที่หน้าหนึ่ง แล้วไป
+    สร้างบัญชีอีกหน้าหนึ่งเพื่อผูกกัน ถ้าลืมขั้นที่สองก็ได้นิสิตที่ล็อกอินไม่ได้
+
+    บัญชีที่สร้างให้ใช้รูปแบบเดียวกับ seed.py คือ username และรหัสผ่านเริ่มต้น
+    เป็น "รหัสนิสิต" ทั้งคู่
+
+    ดีฟอลต์เป็น False เพื่อไม่ให้ผู้เรียก `POST /students` เดิมได้บัญชีเพิ่มมา
+    โดยไม่ได้ขอ — ฝั่งแอปเป็นคนส่ง create_user=true มาเอง (ช่องติ๊กถูกติ๊กไว้ให้แล้ว)
+    """
+
+    create_user: bool = False
+
+
 class StudentUpdate(SQLModel):
     student_id: Optional[str] = None
     full_name: Optional[str] = None

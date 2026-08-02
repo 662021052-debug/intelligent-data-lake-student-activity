@@ -1,9 +1,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, hash_password, require_admin
 from app.database import get_session
 from app.models import (
     Activity,
@@ -12,7 +13,7 @@ from app.models import (
     HourSubcategory,
     Participation,
     Student,
-    StudentCreate,
+    StudentCreateWithAccount,
     StudentRead,
     StudentStatus,
     StudentUpdate,
@@ -175,13 +176,44 @@ def get_student(
 
 
 @router.post("", response_model=StudentRead, status_code=201, dependencies=[Depends(require_admin)])
-def create_student(payload: StudentCreate, session: Session = Depends(get_session)):
+def create_student(payload: StudentCreateWithAccount, session: Session = Depends(get_session)):
+    """สร้างข้อมูลนิสิต และ (ถ้า create_user) บัญชีเข้าใช้งานที่ผูกกันไว้เลย
+
+    ทั้งสองอย่างอยู่ในทรานแซกชันเดียว — ถ้าชื่อผู้ใช้ซ้ำ ต้องไม่เหลือข้อมูลนิสิต
+    ค้างไว้ให้ผู้ดูแลตามลบเอง จึงตรวจความซ้ำ "ทั้งคู่ก่อน" แล้วค่อยเขียนลงฐาน
+    """
     existing = session.exec(select(Student).where(Student.student_id == payload.student_id)).first()
     if existing:
-        raise HTTPException(status_code=400, detail="student_id already exists")
+        raise HTTPException(status_code=400, detail="รหัสนิสิตนี้มีอยู่ในระบบแล้ว")
+
+    # ตรวจชื่อผู้ใช้ซ้ำก่อนเขียนอะไรลงฐาน ไม่ใช่ปล่อยให้ล้มตอน insert
+    if payload.create_user:
+        taken = session.exec(select(User).where(User.username == payload.student_id)).first()
+        if taken:
+            raise HTTPException(
+                status_code=400,
+                detail=f"มีบัญชีผู้ใช้ชื่อ {payload.student_id} อยู่แล้ว",
+            )
+
     student = Student.model_validate(payload)
     session.add(student)
-    session.commit()
+    try:
+        if payload.create_user:
+            # flush เพื่อให้ได้ student.id มาผูกกับบัญชี โดยยังไม่ commit
+            session.flush()
+            session.add(
+                User(
+                    username=payload.student_id,
+                    hashed_password=hash_password(payload.student_id),
+                    role=UserRole.student,
+                    student_id=student.id,
+                )
+            )
+        session.commit()
+    except IntegrityError:
+        # ชนกับคำขออื่นที่สร้างชื่อซ้ำพร้อมกัน — ทิ้งทั้งก้อน ไม่ให้เหลือนิสิตค้าง
+        session.rollback()
+        raise HTTPException(status_code=400, detail="ข้อมูลซ้ำกับที่มีอยู่แล้ว กรุณาตรวจสอบอีกครั้ง")
     session.refresh(student)
     return student
 

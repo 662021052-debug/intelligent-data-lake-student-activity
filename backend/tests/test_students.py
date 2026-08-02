@@ -36,6 +36,89 @@ def test_create_duplicate_student_id_rejected(client):
     assert response.status_code == 400
 
 
+# ---- สร้างนิสิต + บัญชีเข้าใช้งานพร้อมกันในขั้นเดียว ----
+
+def _make_student_with_account(client, student_id="6509001", full_name="นิสิต ใหม่"):
+    payload = {
+        "student_id": student_id,
+        "full_name": full_name,
+        "faculty": "วิศวกรรมศาสตร์",
+        "major": "วิศวกรรมคอมพิวเตอร์",
+        "year_level": 1,
+        "status": "active",
+        "create_user": True,
+    }
+    return client.post("/students", json=payload, headers=_admin_headers(client))
+
+
+def test_create_student_with_account_creates_both(client):
+    response = _make_student_with_account(client, student_id="6509001")
+    assert response.status_code == 201
+    student = response.json()
+
+    users = client.get("/auth/users", params={"search": "6509001"}, headers=_admin_headers(client))
+    items = users.json()["items"]
+    assert len(items) == 1
+    assert items[0]["username"] == "6509001"
+    assert items[0]["role"] == "student"
+    assert items[0]["student_id"] == student["id"]
+
+
+def test_new_student_can_login_with_student_id_and_see_own_data(client):
+    """นิสิตใหม่ต้องล็อกอินด้วยรหัสนิสิตได้ทันที ไม่ต้องรอผู้ดูแลไปสร้างบัญชีอีกหน้า"""
+    created = _make_student_with_account(client, student_id="6509002", full_name="สมชาย ใจดี").json()
+
+    login = client.post("/auth/login", data={"username": "6509002", "password": "6509002"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    listing = client.get("/students", headers=headers).json()
+    assert listing["total"] == 1
+    assert listing["items"][0]["id"] == created["id"]
+    assert listing["items"][0]["full_name"] == "สมชาย ใจดี"
+
+    # ผูกบัญชีแล้วจึงต้องเรียก endpoint แบบ /me ได้ ไม่ติด 403
+    assert client.get("/students/me/hours-summary", headers=headers).status_code == 200
+
+
+def test_duplicate_username_rolls_back_student_too(client):
+    """ถ้าชื่อผู้ใช้ซ้ำ ต้องไม่เหลือข้อมูลนิสิตค้างไว้ให้ตามลบ"""
+    # มีบัญชีชื่อ 6509003 อยู่ก่อนแล้ว แต่ยังไม่มีข้อมูลนิสิตรหัสนี้
+    client.post(
+        "/auth/register",
+        json={"username": "6509003", "password": "pw123456", "role": "staff"},
+        headers=_admin_headers(client),
+    )
+
+    response = _make_student_with_account(client, student_id="6509003")
+    assert response.status_code == 400
+    assert "6509003" in response.json()["detail"]
+
+    # ต้องไม่มีข้อมูลนิสิตค้าง
+    found = client.get("/students", params={"search": "6509003"}, headers=_admin_headers(client))
+    assert found.json()["total"] == 0
+
+
+def test_duplicate_student_id_creates_no_user(client):
+    """รหัสนิสิตซ้ำต้องหยุดตั้งแต่ต้น ไม่แอบสร้างบัญชีทิ้งไว้"""
+    _make_student_with_account(client, student_id="6509004")
+    before = client.get("/auth/users", headers=_admin_headers(client)).json()["total"]
+
+    response = _make_student_with_account(client, student_id="6509004")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "รหัสนิสิตนี้มีอยู่ในระบบแล้ว"
+
+    after = client.get("/auth/users", headers=_admin_headers(client)).json()["total"]
+    assert after == before
+
+
+def test_create_student_without_account_stays_the_default(client):
+    """ผู้เรียกเดิมที่ไม่ได้ขอบัญชี ต้องไม่ได้บัญชีเพิ่มมาเงียบ ๆ"""
+    make_student(client, student_id="6509005")
+    users = client.get("/auth/users", params={"search": "6509005"}, headers=_admin_headers(client))
+    assert users.json()["total"] == 0
+
+
 def test_list_students_with_pagination_and_filter(client):
     make_student(client, student_id="6501010", full_name="เอ บี")
     make_student(client, student_id="6501011", full_name="ซี ดี")
