@@ -91,6 +91,48 @@ String _reason(Map<String, dynamic> error) {
   }
 }
 
+/// `detail` ภาษาอังกฤษที่ backend ยังส่งมาดิบ ๆ → ข้อความไทยที่ผู้ใช้อ่านรู้เรื่อง
+///
+/// backend เขียนปนกัน: ข้อความที่เพิ่มทีหลังเป็นไทยอยู่แล้ว แต่ของเดิมยังเป็น
+/// อังกฤษ (เช่น "This account is not linked to a student record") ซึ่งนิสิตอ่านแล้ว
+/// ไม่เข้าใจ แปลที่ฝั่งนี้แทนการแก้ backend เพราะ `detail` เป็นส่วนหนึ่งของ API
+/// ที่มีเทสต์ยึดข้อความไว้ และไฟล์นี้คือจุดรวมการแปลงเป็นไทยอยู่แล้ว
+///
+/// key เป็นตัวพิมพ์เล็กทั้งหมด — เทียบแบบ case-insensitive
+const Map<String, String> _detailTranslations = {
+  // auth / สิทธิ์
+  'could not validate credentials': 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
+  'insufficient permissions': 'คุณไม่มีสิทธิ์ทำรายการนี้',
+  'incorrect username or password': 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+  'username already exists': 'ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว กรุณาตั้งชื่ออื่น',
+  'user not found': 'ไม่พบบัญชีผู้ใช้นี้',
+  // การผูกบัญชีนิสิต
+  'this account is not linked to a student record': 'บัญชีนี้ยังไม่ได้ผูกกับข้อมูลนิสิต',
+  'student_id does not exist': 'ไม่พบนิสิตที่เลือก กรุณาเลือกใหม่',
+  'student_id already exists': 'รหัสนิสิตนี้มีอยู่ในระบบแล้ว',
+  'student not found': 'ไม่พบข้อมูลนิสิต',
+  // กิจกรรม / การเข้าร่วม
+  'activity not found': 'ไม่พบกิจกรรมนี้',
+  'activity_id does not exist': 'ไม่พบกิจกรรมที่เลือก กรุณาเลือกใหม่',
+  'participation not found': 'ไม่พบรายการเข้าร่วมนี้',
+};
+
+/// ตัวอักษรไทย (บล็อก U+0E00–U+0E7F) — ใช้เดาว่า backend เขียนไทยมาให้แล้วหรือยัง
+/// เขียนเป็น escape ไม่ใช่อักขระจริง เพราะขอบบล็อกเป็นตัวที่มองไม่เห็น
+final RegExp _thaiChars = RegExp(r'[฀-๿]');
+
+/// แปลง `detail` ที่เป็นข้อความเดี่ยวให้เป็นไทย
+///
+/// อังกฤษที่ยังไม่ได้แปลจะตกไปใช้ข้อความตามรหัสสถานะแทน ดีกว่าโชว์อังกฤษดิบให้
+/// ผู้ใช้ที่อ่านไม่ออก — ถ้าเจอข้อความใหม่ที่ควรสื่อความเฉพาะเจาะจง ให้เพิ่มลง
+/// [_detailTranslations]
+String _translateDetail(String detail, int statusCode) {
+  final mapped = _detailTranslations[detail.toLowerCase()];
+  if (mapped != null) return mapped;
+  if (_thaiChars.hasMatch(detail)) return detail;
+  return _statusMessage(statusCode);
+}
+
 /// ข้อความสำรองตามรหัสสถานะ เมื่อ backend ไม่ได้ส่ง `detail` ที่อ่านได้มา
 String _statusMessage(int statusCode) {
   switch (statusCode) {
@@ -123,9 +165,9 @@ String _statusMessage(int statusCode) {
 String apiErrorMessage(int statusCode, Object? body) {
   final detail = body is Map ? body['detail'] : null;
 
-  // 400/403/404 ฯลฯ ที่ backend เขียนข้อความไทยมาให้แล้ว — ใช้ตามนั้น
+  // 400/403/404 ฯลฯ — ไทยใช้ตามนั้น, อังกฤษแปลก่อนค่อยแสดง
   if (detail is String && detail.trim().isNotEmpty) {
-    return detail;
+    return _translateDetail(detail.trim(), statusCode);
   }
 
   // 422 ของ FastAPI: detail เป็น list ของ validation error

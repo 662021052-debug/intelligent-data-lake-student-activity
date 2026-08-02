@@ -61,6 +61,49 @@ void main() {
       expect(apiErrorMessage(418, null), 'เกิดข้อผิดพลาด (418)');
     });
 
+    test('detail อังกฤษจาก backend ต้องถูกแปลเป็นไทย', () {
+      expect(
+        apiErrorMessage(403, {'detail': 'This account is not linked to a student record'}),
+        'บัญชีนี้ยังไม่ได้ผูกกับข้อมูลนิสิต',
+      );
+      expect(
+        apiErrorMessage(403, {'detail': 'Insufficient permissions'}),
+        'คุณไม่มีสิทธิ์ทำรายการนี้',
+      );
+      expect(
+        apiErrorMessage(401, {'detail': 'Incorrect username or password'}),
+        'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+      );
+      expect(
+        apiErrorMessage(400, {'detail': 'username already exists'}),
+        'ชื่อผู้ใช้นี้ถูกใช้ไปแล้ว กรุณาตั้งชื่ออื่น',
+      );
+      expect(
+        apiErrorMessage(400, {'detail': 'student_id does not exist'}),
+        'ไม่พบนิสิตที่เลือก กรุณาเลือกใหม่',
+      );
+      expect(apiErrorMessage(404, {'detail': 'Student not found'}), 'ไม่พบข้อมูลนิสิต');
+      expect(apiErrorMessage(404, {'detail': 'Activity not found'}), 'ไม่พบกิจกรรมนี้');
+      expect(
+        apiErrorMessage(404, {'detail': 'Participation not found'}),
+        'ไม่พบรายการเข้าร่วมนี้',
+      );
+      expect(apiErrorMessage(404, {'detail': 'User not found'}), 'ไม่พบบัญชีผู้ใช้นี้');
+    });
+
+    test('เทียบข้อความแบบไม่สนตัวพิมพ์เล็กใหญ่', () {
+      expect(
+        apiErrorMessage(403, {'detail': 'INSUFFICIENT PERMISSIONS'}),
+        'คุณไม่มีสิทธิ์ทำรายการนี้',
+      );
+    });
+
+    test('อังกฤษที่ยังไม่ได้แปล ต้องไม่หลุดไปถึงผู้ใช้', () {
+      final message = apiErrorMessage(400, {'detail': 'Some brand new english error'});
+      expect(message, 'ข้อมูลที่ส่งไม่ถูกต้อง');
+      expect(message, isNot(contains('english')));
+    });
+
     test('extra_forbidden (ส่งฟิลด์ที่ห้ามส่ง) อธิบายเป็นไทย', () {
       final body = {
         'detail': [
