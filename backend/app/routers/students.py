@@ -257,6 +257,16 @@ def update_student(student_id: int, payload: StudentUpdate, session: Session = D
 
 @router.delete("/{student_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_student(student_id: int, session: Session = Depends(get_session)):
+    """ลบข้อมูลนิสิต พร้อมเก็บกวาดทุกอย่างที่ชี้มาหา ไม่ให้เหลือค้าง
+
+    บัญชีเข้าใช้งานของนิสิตต้องหายไปด้วย — ไม่งั้นจะเหลือ "บัญชีกำพร้า" ที่ยัง
+    ล็อกอินได้แต่ไม่มีข้อมูลนิสิตอยู่เบื้องหลัง และ FK ที่ชี้มายังแถวที่ถูกลบไป
+    แล้วก็ค้างอยู่ (บน Postgres จะเป็น FK violation ตอน commit)
+
+    บัญชี staff/admin ที่บังเอิญผูกไว้จะถูก "ปลดการผูก" ไม่ใช่ถูกลบ — การลบนิสิต
+    หนึ่งคนต้องไม่ทำให้ผู้ดูแลระบบหายไปด้วย (ปกติ `_validate_student_link` กัน
+    ไม่ให้เกิดสถานะนี้ผ่าน API อยู่แล้ว ตรงนี้กันข้อมูลที่มาจากทางอื่น)
+    """
     student = session.get(Student, student_id)
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
@@ -264,6 +274,14 @@ def delete_student(student_id: int, session: Session = Depends(get_session)):
     related = session.exec(select(Participation).where(Participation.student_id == student_id)).all()
     for row in related:
         session.delete(row)
+
+    linked_users = session.exec(select(User).where(User.student_id == student_id)).all()
+    for user in linked_users:
+        if user.role == UserRole.student:
+            session.delete(user)
+        else:
+            user.student_id = None
+            session.add(user)
 
     session.delete(student)
     session.commit()

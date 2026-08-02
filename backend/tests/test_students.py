@@ -297,6 +297,96 @@ def test_delete_student(client, tokens):
     assert get_response.status_code == 404
 
 
+# ---- ลบนิสิตแล้วต้องไม่เหลือบัญชีกำพร้า ----
+
+def test_delete_student_also_deletes_the_linked_account(client):
+    """ลบนิสิตแล้วบัญชีที่ผูกไว้ต้องหายไปด้วย ไม่ใช่ค้างให้ล็อกอินได้ต่อ"""
+    created = _make_student_with_account(client, student_id="6509020").json()
+    headers = _admin_headers(client)
+
+    # ก่อนลบ: ล็อกอินได้
+    assert client.post(
+        "/auth/login", data={"username": "6509020", "password": "6509020"}
+    ).status_code == 200
+
+    assert client.delete(f"/students/{created['id']}", headers=headers).status_code == 204
+
+    # หลังลบ: ไม่มีบัญชีเหลือ และล็อกอินไม่ได้อีก
+    users = client.get("/auth/users", params={"search": "6509020"}, headers=headers)
+    assert users.json()["total"] == 0
+    assert client.post(
+        "/auth/login", data={"username": "6509020", "password": "6509020"}
+    ).status_code == 401
+
+
+def test_delete_student_removes_account_created_with_custom_username(client):
+    """บัญชีที่ตั้งชื่อเองก็ต้องถูกลบตาม เพราะผูกด้วย student_id ไม่ใช่ชื่อ"""
+    created = _make_student_with_account(
+        client, student_id="6509021", username="orphan.check"
+    ).json()
+    headers = _admin_headers(client)
+
+    assert client.delete(f"/students/{created['id']}", headers=headers).status_code == 204
+
+    users = client.get("/auth/users", params={"search": "orphan.check"}, headers=headers)
+    assert users.json()["total"] == 0
+
+
+def test_delete_student_without_account_still_works(client):
+    """ไม่มีบัญชีผูกอยู่ก็ต้องลบได้ตามปกติ ไม่ใช่พังเพราะหาไม่เจอ"""
+    created = make_student(client, student_id="6509022").json()
+    headers = _admin_headers(client)
+    assert client.delete(f"/students/{created['id']}", headers=headers).status_code == 204
+    assert client.get(f"/students/{created['id']}").status_code == 404
+
+
+def test_delete_student_keeps_other_students_accounts(client):
+    """ต้องลบเฉพาะบัญชีของนิสิตคนที่ถูกลบ ไม่กวาดคนอื่นไปด้วย"""
+    victim = _make_student_with_account(client, student_id="6509023").json()
+    _make_student_with_account(client, student_id="6509024")
+    headers = _admin_headers(client)
+
+    assert client.delete(f"/students/{victim['id']}", headers=headers).status_code == 204
+
+    survivors = client.get("/auth/users", params={"search": "6509024"}, headers=headers)
+    assert survivors.json()["total"] == 1
+    assert client.post(
+        "/auth/login", data={"username": "6509024", "password": "6509024"}
+    ).status_code == 200
+
+
+def test_delete_student_unlinks_staff_account_instead_of_deleting_it(client, session):
+    """บัญชีที่ไม่ใช่ role=student ต้องถูกปลดการผูก ไม่ใช่ถูกลบทิ้ง
+
+    API ปกติสร้างสถานะนี้ไม่ได้ (`_validate_student_link` ล้าง student_id ของ
+    staff/admin ทิ้งเสมอ) จึงต้องยัดผ่าน session ตรง ๆ เพื่อทดสอบด่านสุดท้าย
+    """
+    from app.auth import hash_password
+    from app.models import User, UserRole
+
+    created = make_student(client, student_id="6509025").json()
+    session.add(
+        User(
+            username="staff.linked",
+            hashed_password=hash_password("pw123456"),
+            role=UserRole.staff,
+            student_id=created["id"],
+        )
+    )
+    session.commit()
+
+    headers = _admin_headers(client)
+    assert client.delete(f"/students/{created['id']}", headers=headers).status_code == 204
+
+    users = client.get("/auth/users", params={"search": "staff.linked"}, headers=headers)
+    items = users.json()["items"]
+    assert len(items) == 1, "บัญชีเจ้าหน้าที่ต้องยังอยู่"
+    assert items[0]["student_id"] is None, "แต่ต้องไม่ผูกกับนิสิตที่ถูกลบแล้ว"
+    assert client.post(
+        "/auth/login", data={"username": "staff.linked", "password": "pw123456"}
+    ).status_code == 200
+
+
 def test_staff_cannot_create_student(client):
     # default `client` fixture is authenticated as staff
     payload = {
