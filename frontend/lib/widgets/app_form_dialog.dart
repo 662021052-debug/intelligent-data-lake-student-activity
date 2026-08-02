@@ -88,7 +88,10 @@ class AppFormDialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
-          onPressed: saving ? null : () => Navigator.pop(context, false),
+          // ปิดโดยไม่ส่งค่ากลับ — ผู้เรียกทุกที่เช็ก "สำเร็จหรือไม่" จาก
+          // ค่าที่ฝั่งบันทึกส่งมาเท่านั้น การ pop(false) ตายตัวจะพังกับ dialog
+          // ที่ประกาศชนิดผลลัพธ์เป็นอย่างอื่น (เช่น StudentSaveResult)
+          onPressed: saving ? null : () => Navigator.pop(context),
           child: const Text('ยกเลิก'),
         ),
         FilledButton(

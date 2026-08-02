@@ -69,11 +69,21 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   Future<void> _openForm({Student? existing}) async {
-    final result = await showDialog<bool>(
+    final result = await showDialog<StudentSaveResult>(
       context: context,
-      builder: (_) => _StudentFormDialog(existing: existing),
+      builder: (_) => StudentFormDialog(existing: existing),
     );
-    if (result == true) _load();
+    if (result == null) return;
+    _load();
+    // บอกชื่อผู้ใช้ที่เพิ่งสร้างทันที ผู้ดูแลจะได้แจ้งนิสิตต่อได้โดยไม่ต้องเปิด
+    // หน้าจัดการผู้ใช้ไปหาเอง
+    final username = result.username;
+    if (username != null && mounted) {
+      showInfoSnackbar(
+        context,
+        accountCreatedMessage(username, customPassword: result.customPassword),
+      );
+    }
   }
 
   Future<void> _delete(Student s) async {
@@ -248,26 +258,60 @@ class _StudentsScreenState extends State<StudentsScreen> {
       );
 }
 
-class _StudentFormDialog extends StatefulWidget {
-  final Student? existing;
-  const _StudentFormDialog({this.existing});
+/// ผลลัพธ์ของการบันทึกฟอร์มนิสิต
+///
+/// [username] มีค่าเฉพาะตอนที่เพิ่งสร้างบัญชีเข้าใช้งานให้ด้วย — ใช้บอกผู้ดูแล
+/// ว่านิสิตคนนี้จะล็อกอินด้วยชื่ออะไร (เป็น null ตอนแก้ไข หรือตอนไม่ได้ขอบัญชี)
+class StudentSaveResult {
+  final String? username;
 
-  @override
-  State<_StudentFormDialog> createState() => _StudentFormDialogState();
+  /// true = ผู้ดูแลตั้งรหัสผ่านเอง (ข้อความแจ้งจะได้ไม่ไปบอกว่าเป็นรหัสนิสิต)
+  final bool customPassword;
+
+  const StudentSaveResult({this.username, this.customPassword = false});
 }
 
-class _StudentFormDialogState extends State<_StudentFormDialog> {
+/// ข้อความแจ้งหลังสร้างบัญชีให้นิสิตสำเร็จ
+///
+/// แยกเป็นฟังก์ชันเพื่อให้เทสต์ได้โดยไม่ต้องประกอบทั้งหน้าจอ
+String accountCreatedMessage(String username, {required bool customPassword}) {
+  final password = customPassword ? 'ตามที่กำหนดไว้' : 'รหัสนิสิต';
+  return 'สร้างบัญชีนิสิตแล้ว · ชื่อผู้ใช้: $username · '
+      'รหัสผ่านเริ่มต้น: $password (แนะนำให้เปลี่ยนหลังเข้าใช้ครั้งแรก)';
+}
+
+/// ตรวจรูปแบบรหัสนิสิต — ตัวเลขล้วน 9 หลักตามรูปแบบของมหาวิทยาลัย
+String? studentIdValidator(String? value) {
+  final text = (value ?? '').trim();
+  if (text.isEmpty) return 'กรอกรหัสนิสิต';
+  if (!RegExp(r'^\d{9}$').hasMatch(text)) return 'รหัสนิสิตต้องเป็นตัวเลข 9 หลัก';
+  return null;
+}
+
+class StudentFormDialog extends StatefulWidget {
+  final Student? existing;
+  const StudentFormDialog({super.key, this.existing});
+
+  @override
+  State<StudentFormDialog> createState() => _StudentFormDialogState();
+}
+
+class _StudentFormDialogState extends State<StudentFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _studentIdController;
   late final TextEditingController _fullNameController;
   late final TextEditingController _facultyController;
   late final TextEditingController _majorController;
   late final TextEditingController _yearLevelController;
+  late final TextEditingController _usernameController;
+  late final TextEditingController _passwordController;
   String _status = 'active';
   // นิสิตใหม่ควรได้บัญชีเข้าใช้งานไปพร้อมกัน ไม่ต้องไปสร้างต่ออีกหน้าแล้วลืมผูก
   bool _createUser = true;
   bool _saving = false;
   String? _error;
+
+  bool get _isNew => widget.existing == null;
 
   @override
   void initState() {
@@ -278,6 +322,8 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
     _facultyController = TextEditingController(text: e?.faculty ?? '');
     _majorController = TextEditingController(text: e?.major ?? '');
     _yearLevelController = TextEditingController(text: e != null ? '${e.yearLevel}' : '1');
+    _usernameController = TextEditingController();
+    _passwordController = TextEditingController();
     _status = e?.status ?? 'active';
   }
 
@@ -288,6 +334,8 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
     _facultyController.dispose();
     _majorController.dispose();
     _yearLevelController.dispose();
+    _usernameController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -297,23 +345,44 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
       _saving = true;
       _error = null;
     });
+    final studentId = _studentIdController.text.trim();
+    // เว้นว่าง = ให้ backend ใช้รหัสนิสิตเป็นค่าเริ่มต้น จึงไม่ส่งคีย์ไปเลย
+    // (ส่งสตริงว่างไปก็ได้ผลเหมือนกัน แต่ไม่ส่งอ่านเจตนาได้ชัดกว่า)
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+    final wantsAccount = _isNew && _createUser;
+
     final body = {
-      'student_id': _studentIdController.text.trim(),
+      'student_id': studentId,
       'full_name': _fullNameController.text.trim(),
       'faculty': _facultyController.text.trim(),
       'major': _majorController.text.trim(),
       'year_level': int.parse(_yearLevelController.text.trim()),
       'status': _status,
       // ส่งเฉพาะตอนสร้างใหม่ — backend ไม่รับฟิลด์นี้ตอนแก้ไข
-      if (widget.existing == null) 'create_user': _createUser,
+      if (_isNew) 'create_user': _createUser,
+      if (wantsAccount && username.isNotEmpty) 'username': username,
+      if (wantsAccount && password.isNotEmpty) 'password': password,
     };
     try {
-      if (widget.existing == null) {
-        await ApiService.create('/students', body, Student.fromJson);
+      if (_isNew) {
+        final created = await ApiService.create<Map<String, dynamic>>(
+          '/students',
+          body,
+          (json) => json,
+        );
+        if (!mounted) return;
+        Navigator.pop(
+          context,
+          StudentSaveResult(
+            username: created['username'] as String?,
+            customPassword: password.isNotEmpty,
+          ),
+        );
       } else {
         await ApiService.update('/students/${widget.existing!.id}', body, Student.fromJson);
+        if (mounted) Navigator.pop(context, const StudentSaveResult());
       }
-      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _error = friendlyError(e));
     } finally {
@@ -333,7 +402,8 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
         TextFormField(
           controller: _studentIdController,
           decoration: const InputDecoration(labelText: 'รหัสนิสิต'),
-          validator: requiredValidator,
+          keyboardType: TextInputType.number,
+          validator: studentIdValidator,
         ),
         TextFormField(
           controller: _fullNameController,
@@ -367,19 +437,36 @@ class _StudentFormDialogState extends State<_StudentFormDialog> {
           onChanged: (v) => setState(() => _status = v ?? 'active'),
         ),
         // เฉพาะตอนสร้างใหม่ — บัญชีที่มีอยู่แล้วต้องไปจัดการที่หน้าจัดการผู้ใช้
-        if (widget.existing == null)
+        if (_isNew)
           CheckboxListTile(
             value: _createUser,
             onChanged: (v) => setState(() => _createUser = v ?? false),
             title: const Text('สร้างบัญชีเข้าใช้งานให้ด้วย'),
             subtitle: Text(
               _createUser
-                  ? 'ชื่อผู้ใช้และรหัสผ่านเริ่มต้นเป็นรหัสนิสิต — แจ้งให้เปลี่ยนรหัสผ่านหลังเข้าใช้ครั้งแรก'
+                  ? 'เว้นช่องด้านล่างว่างไว้ = ใช้รหัสนิสิตเป็นทั้งชื่อผู้ใช้และรหัสผ่านเริ่มต้น'
                   : 'ต้องไปสร้างบัญชีและผูกเองที่หน้าจัดการผู้ใช้',
             ),
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
           ),
+        // ช่องกำหนดเอง โผล่เฉพาะตอนที่จะสร้างบัญชีจริง ๆ เพื่อไม่ให้ฟอร์มรก
+        if (_isNew && _createUser) ...[
+          TextFormField(
+            controller: _usernameController,
+            decoration: const InputDecoration(
+              labelText: 'ชื่อผู้ใช้ (ไม่บังคับ)',
+              helperText: 'เว้นว่าง = ใช้รหัสนิสิต',
+            ),
+          ),
+          TextFormField(
+            controller: _passwordController,
+            decoration: const InputDecoration(
+              labelText: 'รหัสผ่านเริ่มต้น (ไม่บังคับ)',
+              helperText: 'เว้นว่าง = ใช้รหัสนิสิต · แนะนำให้นิสิตเปลี่ยนหลังเข้าใช้ครั้งแรก',
+            ),
+          ),
+        ],
       ],
     );
   }
