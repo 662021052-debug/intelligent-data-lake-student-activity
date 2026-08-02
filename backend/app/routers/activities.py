@@ -23,7 +23,8 @@ from app.routers.participations import (
     _latest_ocr_map,
     _to_read as _participation_to_read,
 )
-from app.schemas import Page
+from app.checkin import checkin_window, qr_payload
+from app.schemas import ActivityCheckinQr, Page
 
 router = APIRouter(prefix="/activities", tags=["activities"], dependencies=[Depends(get_current_user)])
 
@@ -209,6 +210,32 @@ def list_activity_participations(
         _participation_to_read(p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id))
         for p in parts
     ]
+
+
+@router.get("/{activity_id}/checkin-qr", response_model=ActivityCheckinQr)
+def get_checkin_qr(
+    activity_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_writer),
+):
+    """token/payload สำหรับให้เจ้าหน้าที่เจ้าของกิจกรรม (หรือ admin) เอาไปสร้าง QR
+    แสดงที่หน้างาน — นิสิตเรียกไม่ได้ ไม่งั้นก็สแกนเองจากที่บ้านได้"""
+    activity = session.get(Activity, activity_id)
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    if current_user.role == UserRole.staff and activity.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    opens_at, closes_at = checkin_window(activity)
+    return ActivityCheckinQr(
+        activity_id=activity.id,
+        activity_name=activity.name,
+        token=activity.checkin_token,
+        qr_payload=qr_payload(activity),
+        start_at=activity.start_at,
+        checkin_opens_at=opens_at,
+        checkin_closes_at=closes_at,
+    )
 
 
 @router.delete("/{activity_id}", status_code=204)

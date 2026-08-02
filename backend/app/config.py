@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     ocr_auto_confidence: float = 0.6
     ocr_auto_match: float = 0.7
 
+    # ---- เช็กอินหน้างานด้วย QR ----
+    # หน้าต่างเวลาที่ยอมให้สแกน QR ได้: เปิดก่อนเริ่มกิจกรรม checkin_open_before_minutes
+    # นาที และปิดหลังกิจกรรมจบ (start_at + activity.hours) อีก checkin_close_after_minutes
+    # นาที — กันสแกนจากรูปถ่ายย้อนหลัง/ล่วงหน้า (กฎ D1)
+    checkin_open_before_minutes: int = 60
+    checkin_close_after_minutes: int = 180
+
     # ---- Chatbot (LLM + RAG, Phase 16) ----
     # llm_backend: "gemini" (real cloud LLM, needs gemini_api_key) or "stub"
     # (deterministic, offline — used by tests and local runs without a key).

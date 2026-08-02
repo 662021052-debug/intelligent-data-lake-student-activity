@@ -28,8 +28,9 @@ from app.models import (
     User,
     UserRole,
 )
+from app.checkin import checkin_window, normalize_token
 from app.ocr import OcrEngine, get_ocr
-from app.schemas import Page, ParticipationRegister
+from app.schemas import Page, ParticipationCheckin, ParticipationRegister
 from app.storage import ObjectStorage, get_storage
 
 router = APIRouter(
@@ -251,6 +252,75 @@ def register_self(
         evidence_status=EvidenceStatus.pending,
         hours_earned=0,
     )
+    session.add(participation)
+    session.commit()
+    session.refresh(participation)
+    return _read_with_evidence(session, participation)
+
+
+@router.post("/checkin", response_model=ParticipationRead)
+def checkin_with_qr(
+    payload: ParticipationCheckin,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """นิสิตสแกน QR ของกิจกรรมที่หน้างาน → บันทึก `check_in_time` ทันที.
+
+    เช็กอิน = "มาร่วมงาน" เท่านั้น ไม่ให้ชั่วโมง (กฎ D2): `hours_earned` ยังเป็น 0
+    และ `evidence_status` ยังเป็น pending — ชั่วโมงยังต้องส่งหลักฐาน + เจ้าหน้าที่
+    อนุมัติตามกฎ A3 เดิม
+    """
+    # ตัวตนมาจาก JWT อย่างเดียว → สแกนแทนกันไม่ได้ ต่อให้ได้ token เดียวกันมา
+    if current_user.role != UserRole.student:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if current_user.student_id is None:
+        raise HTTPException(status_code=403, detail="This account is not linked to a student record")
+
+    token = normalize_token(payload.token)
+    activity = (
+        session.exec(select(Activity).where(Activity.checkin_token == token)).first()
+        if token
+        else None
+    )
+    if not activity:
+        raise HTTPException(status_code=400, detail="QR ไม่ถูกต้อง")
+    if activity.approval_status != ApprovalStatus.approved:
+        raise HTTPException(status_code=400, detail="กิจกรรมนี้ยังไม่เปิดให้เช็กอิน")
+
+    now = datetime.utcnow()
+    opens_at, closes_at = checkin_window(activity)
+    if now < opens_at:
+        raise HTTPException(status_code=400, detail="ยังไม่ถึงเวลาเช็กอิน")
+    if now > closes_at:
+        raise HTTPException(status_code=400, detail="เลยเวลาเช็กอินแล้ว")
+
+    participation = session.exec(
+        select(Participation).where(
+            Participation.student_id == current_user.student_id,
+            Participation.activity_id == activity.id,
+        )
+    ).first()
+
+    if participation:
+        if participation.check_in_time is not None:
+            raise HTTPException(status_code=400, detail="คุณเช็กอินกิจกรรมนี้แล้ว")
+    else:
+        # walk-up: เดินมาหน้างานเลยโดยไม่ได้สมัครล่วงหน้า → สร้าง participation ให้
+        participant_count = session.exec(
+            select(func.count())
+            .select_from(Participation)
+            .where(Participation.activity_id == activity.id)
+        ).one()
+        if participant_count >= activity.max_participants:
+            raise HTTPException(status_code=400, detail="กิจกรรมนี้เต็มแล้ว")
+        participation = Participation(
+            student_id=current_user.student_id,
+            activity_id=activity.id,
+            evidence_status=EvidenceStatus.pending,
+            hours_earned=0,
+        )
+
+    participation.check_in_time = now
     session.add(participation)
     session.commit()
     session.refresh(participation)

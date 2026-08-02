@@ -1,9 +1,15 @@
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict
 from sqlmodel import Field, Relationship, SQLModel
+
+
+def new_checkin_token() -> str:
+    """Token ประจำกิจกรรมที่ใช้ทำ QR สำหรับเช็กอินหน้างาน (เดาไม่ได้ ไม่ซ้ำ)."""
+    return uuid.uuid4().hex
 
 
 class UserRole(str, Enum):
@@ -117,6 +123,10 @@ class ActivityBase(SQLModel):
 
 class Activity(ActivityBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # QR เช็กอินหน้างาน: ไม่อยู่ใน ActivityBase โดยตั้งใจ — สร้างเองเสมอ ตั้งค่าจาก
+    # ภายนอกไม่ได้ (ไม่อยู่ใน ActivityCreate/Update) และไม่หลุดออกไปกับ ActivityRead
+    # ที่นิสิตทุกคนเห็น ต้องขอผ่าน GET /activities/{id}/checkin-qr เท่านั้น
+    checkin_token: str = Field(default_factory=new_checkin_token, unique=True, index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="user.id")
     approval_status: ApprovalStatus = ApprovalStatus.pending
     approved_by: Optional[int] = Field(default=None, foreign_key="user.id")
