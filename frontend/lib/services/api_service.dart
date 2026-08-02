@@ -6,6 +6,7 @@ import 'package:http_parser/http_parser.dart';
 
 import '../config.dart';
 import '../models/chat_response.dart';
+import '../models/checkin_qr.dart';
 import '../models/ocr_result.dart';
 import '../models/page.dart';
 import '../models/participation.dart';
@@ -185,6 +186,11 @@ class ApiService {
     final response = await http.Response.fromStream(streamed);
     final data = _decode(response) as Map<String, dynamic>;
     return Participation.fromJson(data);
+  }
+
+  /// ข้อมูล QR เช็กอินของกิจกรรม สำหรับเจ้าหน้าที่เจ้าของกิจกรรม/ผู้ดูแล
+  static Future<CheckinQr> fetchCheckinQr(int activityId) async {
+    return fetchObject('/activities/$activityId/checkin-qr', CheckinQr.fromJson);
   }
 
   /// เช็กอินหน้างานด้วย token ที่สแกนได้จาก QR ของกิจกรรม

@@ -15,6 +15,7 @@ import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/subcategory_dropdown.dart';
 import 'activity_participants_screen.dart';
+import 'checkin_qr_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
 
@@ -124,6 +125,15 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => ActivityParticipantsScreen(activity: a)),
+    );
+  }
+
+  void _openCheckinQr(Activity a) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CheckinQrScreen(activityId: a.id!, activityName: a.name),
+      ),
     );
   }
 
@@ -290,6 +300,14 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                   size: 20, color: StatusPalette.approved.foreground),
               tooltip: 'อนุมัติกิจกรรม',
               onPressed: () => _approve(a),
+            ),
+          // แสดงเฉพาะกิจกรรมที่อนุมัติแล้ว — กิจกรรมที่ยังรออนุมัติสแกนไม่ผ่านอยู่ดี
+          // (backend ตอบ "กิจกรรมนี้ยังไม่เปิดให้เช็กอิน") การโชว์ QR จึงมีแต่ทำให้เข้าใจผิด
+          if (a.approvalStatus == 'approved')
+            IconButton(
+              icon: const Icon(Icons.qr_code_2, size: 20),
+              tooltip: 'แสดง QR เช็กอิน',
+              onPressed: () => _openCheckinQr(a),
             ),
           IconButton(
             icon: const Icon(Icons.groups, size: 20),
