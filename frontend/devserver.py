@@ -17,7 +17,6 @@
 import functools
 import http.server
 import os
-import socketserver
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", "web")
@@ -62,9 +61,22 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
+    def handle_one_request(self):
+        # เบราว์เซอร์ตัดการเชื่อมต่อกลางคันเป็นเรื่องปกติ (เช่น ยกเลิกโหลด asset)
+        # ไม่ต้องพ่น stack trace ยาว ๆ ให้ตกใจว่าเซิร์ฟเวอร์พัง
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
 
-class ReusableServer(socketserver.TCPServer):
+
+class ReusableServer(http.server.ThreadingHTTPServer):
+    """ต้องเป็น threading — Flutter web โหลด asset หลายไฟล์พร้อมกัน (canvaskit,
+    wasm, ฟอนต์, AssetManifest) เซิร์ฟเวอร์เธรดเดียวจะรับได้ทีละ connection
+    ที่เหลือถูกปฏิเสธ กลายเป็นอาการ "เข้าเว็บไม่ได้" ทั้งที่โปรเซสยังรันอยู่"""
+
     allow_reuse_address = True
+    daemon_threads = True
 
 
 def main():
