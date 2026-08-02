@@ -66,12 +66,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadFaculties() async {
     try {
-      final page = await ApiService.fetchPage(
-        '/students',
-        Student.fromJson,
-        query: {'limit': '200'},
-      );
-      final set = <String>{for (final s in page.items) s.faculty};
+      // ต้องไล่ดูนิสิต "ทุกคน" ไม่ใช่แค่ 200 คนแรก ไม่งั้นคณะที่มีแต่นิสิตรหัสท้าย ๆ
+      // จะหายไปจากตัวกรอง แล้วผู้ใช้กรองตามคณะนั้นไม่ได้เลย
+      final students = await ApiService.fetchAll('/students', Student.fromJson);
+      final set = <String>{for (final s in students) s.faculty};
       if (mounted) setState(() => _faculties = set.toList()..sort());
     } catch (_) {
       // faculty filter is optional; ignore load failure

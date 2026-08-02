@@ -22,6 +22,28 @@ class ApiException implements Exception {
 }
 
 class ApiService {
+  /// เพดาน `limit` ของทุก endpoint แบบแบ่งหน้าใน backend (`Query(..., le=200)`)
+  ///
+  /// ขอเกินนี้ backend ตอบ 422 ทั้งคำขอ — หน้าจอที่ไม่ได้โชว์ error จะว่างเปล่าเงียบ ๆ
+  /// (เคสจริง: dropdown เลือกนิสิตขอ limit=500 แล้วไม่มีรายชื่อให้เลือกเลย)
+  static const int maxPageSize = 200;
+
+  /// บีบ `limit` ที่เกินเพดานลงมาให้พอดี เพื่อไม่ให้พลาดแบบเดิมซ้ำอีก
+  ///
+  /// เป็นตาข่ายกันพลาดชั้นสุดท้าย ไม่ใช่ที่แก้หลัก — ผู้เรียกที่ต้องการ "ทุกรายการ"
+  /// ควรใช้ [fetchAll] ซึ่งไล่ดึงทีละหน้าจนครบ ไม่ใช่ขอก้อนใหญ่ครั้งเดียวแล้วโดนตัด
+  ///
+  /// เปิดเป็น public เพราะเป็นฟังก์ชันบริสุทธิ์ที่เทสต์ตรง ๆ ได้ (ApiService เรียก
+  /// `http.get` ตรง จึงไม่มีจุดให้สวม mock client โดยไม่รื้อโครงทั้งคลาส)
+  static Map<String, String>? clampLimit(Map<String, String>? query) {
+    if (query == null) return null;
+    final raw = query['limit'];
+    if (raw == null) return query;
+    final value = int.tryParse(raw);
+    if (value == null || value <= maxPageSize) return query;
+    return {...query, 'limit': '$maxPageSize'};
+  }
+
   static Uri _uri(String path, [Map<String, String>? query]) {
     final uri = Uri.parse('${AppConfig.apiBaseUrl}$path');
     if (query == null || query.isEmpty) return uri;
@@ -53,7 +75,7 @@ class ApiService {
     T Function(Map<String, dynamic>) fromJsonT, {
     Map<String, String>? query,
   }) async {
-    final response = await http.get(_uri(path, query), headers: _headers());
+    final response = await http.get(_uri(path, clampLimit(query)), headers: _headers());
     final data = _decode(response) as Map<String, dynamic>;
     return Page<T>.fromJson(data, fromJsonT);
   }
@@ -67,19 +89,20 @@ class ApiService {
     String path,
     T Function(Map<String, dynamic>) fromJsonT, {
     Map<String, String>? query,
-    int pageSize = 200,
+    int pageSize = maxPageSize,
     int maxItems = 2000,
   }) async {
+    final size = pageSize.clamp(1, maxPageSize);
     final items = <T>[];
     var skip = 0;
     while (true) {
       final page = await fetchPage<T>(
         path,
         fromJsonT,
-        query: {...?query, 'skip': '$skip', 'limit': '$pageSize'},
+        query: {...?query, 'skip': '$skip', 'limit': '$size'},
       );
       items.addAll(page.items);
-      skip += pageSize;
+      skip += size;
       if (page.items.isEmpty || items.length >= page.total || items.length >= maxItems) {
         return items;
       }
@@ -91,7 +114,7 @@ class ApiService {
     T Function(Map<String, dynamic>) fromJsonT, {
     Map<String, String>? query,
   }) async {
-    final response = await http.get(_uri(path, query), headers: _headers());
+    final response = await http.get(_uri(path, clampLimit(query)), headers: _headers());
     final data = _decode(response) as List;
     return data.map((e) => fromJsonT(e as Map<String, dynamic>)).toList();
   }
