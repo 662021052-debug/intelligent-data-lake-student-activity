@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     ocr_auto_match: float = 0.7
 
     # ---- เช็กอินหน้างานด้วย QR ----
+    # URL ของ "หน้าเว็บนิสิต" ที่ QR จะชี้ไป — ต้องเป็นโดเมนจริงที่มือถือเปิดถึง
+    # ตอน deploy (localhost ใช้ได้แค่ทดสอบในเครื่องเดียว) เก็บ URL เต็มลง QR
+    # เพื่อให้กล้องมือถือปกติขึ้นปุ่ม "เปิดลิงก์" ให้ ไม่ต้องเปิดแอปสแกนเอง
+    public_app_base_url: str = "http://localhost:8080"
     # หน้าต่างเวลาที่ยอมให้สแกน QR ได้: เปิดก่อนเริ่มกิจกรรม checkin_open_before_minutes
     # นาที และปิดหลังกิจกรรมจบ (start_at + activity.hours) อีก checkin_close_after_minutes
     # นาที — กันสแกนจากรูปถ่ายย้อนหลัง/ล่วงหน้า (กฎ D1)

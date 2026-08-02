@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from sqlmodel import select
 
 from app.auth import hash_password
-from app.checkin import QR_PREFIX
+from app.checkin import QR_PREFIX, normalize_token, qr_payload
+from app.config import settings
 from app.models import (
     Activity,
     ApprovalStatus,
@@ -102,8 +103,13 @@ def test_owner_staff_can_get_checkin_qr(client, session):
     response = client.get(f"/activities/{activity.id}/checkin-qr")
     assert response.status_code == 200, response.text
     body = response.json()
+    # token ล้วนไว้ให้เจ้าหน้าที่อ่านให้นิสิตกรอกมือ, qr_payload เป็น URL เต็ม
+    # เพื่อให้กล้องมือถือปกติขึ้นปุ่มเปิดลิงก์ให้ (F4/B3)
     assert body["token"] == activity.checkin_token
-    assert body["qr_payload"] == f"{QR_PREFIX}{activity.checkin_token}"
+    assert body["qr_payload"] == (
+        f"{settings.public_app_base_url.rstrip('/')}/#/checkin?c={activity.checkin_token}"
+    )
+    assert normalize_token(body["qr_payload"]) == activity.checkin_token
     assert body["activity_name"] == activity.name
     # หน้าต่างเวลาที่ backend บังคับจริง ส่งไปให้หน้าจอแสดงด้วย
     assert body["checkin_opens_at"] < body["start_at"] < body["checkin_closes_at"]
