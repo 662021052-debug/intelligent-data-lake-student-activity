@@ -19,9 +19,12 @@ import 'theme/app_theme.dart';
 ///   flutter build web --dart-define=ENABLE_SEMANTICS=true
 const bool _enableSemantics = bool.fromEnvironment('ENABLE_SEMANTICS');
 
-void main() {
+Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
   if (_enableSemantics) binding.ensureSemantics();
+  // กู้สถานะล็อกอินก่อน build หน้าแรก — ไม่งั้นหน้า login จะแวบขึ้นมาก่อนแล้ว
+  // ค่อยสลับเป็นหน้าหลัก ทุกครั้งที่ผู้ใช้กดรีเฟรช
+  await authService.restore();
   // deep link จากการสแกน QR ด้วยกล้องมือถือปกติ — ต้องอ่านตั้งแต่ตอนเปิดแอป
   // ก่อนที่หน้าไหนจะวาด (ส่งทั้ง route และ URL เต็มไปให้ ดูเหตุผลใน PendingCheckin)
   pendingCheckin.readFromAppStart(

@@ -61,6 +61,11 @@ class ApiService {
       if (response.body.isEmpty) return null;
       return jsonDecode(utf8.decode(response.bodyBytes));
     }
+    if (response.statusCode == 401) {
+      // token หมดอายุ/ถูกเพิกถอน — ทิ้งทั้งใน state และใน storage แล้วปล่อยให้
+      // ตัว builder ที่ main.dart พาไปหน้า login แทนที่จะค้าง error เดิมทุกหน้า
+      authService.handleUnauthorized();
+    }
     Object? body;
     try {
       body = jsonDecode(utf8.decode(response.bodyBytes));
