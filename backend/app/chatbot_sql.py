@@ -25,6 +25,7 @@ from enum import Enum
 from sqlalchemy import bindparam, text
 from sqlmodel import Session
 
+from app import chatbot_format as fmt
 from app.llm import LlmClient
 from app.sql_guard import UnsafeSqlError, validate_select
 
@@ -57,7 +58,12 @@ _MISSING_WORDS = ("ขาด", "ยังไม่ครบ", "ไม่คร�
 _OPEN_WORDS = ("เปิดรับ", "รับสมัคร", "สมัคร", "ลงทะเบียน", "เข้าร่วมได้", "ยังรับ")
 _REQUIRED_WORDS = ("บังคับ", "ต้องเข้าร่วม", "กิจกรรมบังคับ")
 _RECOMMEND_WORDS = ("แนะนำ", "ควรลง", "ควรเข้าร่วม", "ลงอะไรดี", "กิจกรรมไหนดี",
-                    "เลือกกิจกรรม", "อยากได้ชั่วโมงเพิ่ม", "ทดแทน", "แทนได้")
+                    "เลือกกิจกรรม", "อยากได้ชั่วโมงเพิ่ม", "ทดแทน", "แทนได้",
+                    # "กิจกรรมเต็มแล้วลงอันไหนดี" and friends — these used to fall
+                    # through to the LLM Text-to-SQL path and come back as a raw
+                    # key:value dump (see PHASE_Chatbot_Humanize_Answers.md).
+                    "อันไหนดี", "ตัวไหนดี", "อันไหนได้", "ลงอันไหน", "ลงตัวไหน",
+                    "เต็มแล้วลง", "มีอะไรลง", "ลงอะไรได้")
 _RULES_WORDS = ("เกณฑ์", "กติกา", "กฎ", "หมวด", "โครงสร้าง", "แต่ละหมวด", "ทั้งหมดกี่")
 _HOURS_WORDS = ("กี่ชั่วโมง", "ชั่วโมงสะสม", "สะสม", "ได้กี่", "ชั่วโมงของ", "ผ่านหรือยัง")
 # Strong self-hours phrases that imply "my hours" even without an explicit pronoun.
@@ -116,18 +122,10 @@ def answer_hours(session: Session, student_id: int) -> ChatAnswer:
         {"sid": student_id},
     ).mappings().all()
 
-    total_earned = sum(float(r["earned_hours"]) for r in rows)
-    completed_count = sum(1 for r in rows if r["completed"])
-    lines = [
-        f"คุณมีชั่วโมงกิจกรรมที่อนุมัติแล้ว {total_earned:g} จาก {TOTAL_REQUIRED_HOURS} ชั่วโมง "
-        f"(ผ่านครบ {completed_count} จาก {len(rows)} หมวด)"
-    ]
-    for r in rows:
-        status = "✓ ครบ" if r["completed"] else "ยังไม่ครบ"
-        lines.append(
-            f"• {r['category_name']}: {float(r['earned_hours']):g}/{float(r['required_hours']):g} ชม. ({status})"
-        )
-    return ChatAnswer(Intent.HOURS, "\n".join(lines), [dict(r) for r in rows], needs_student=True)
+    data = [dict(r) for r in rows]
+    return ChatAnswer(
+        Intent.HOURS, fmt.my_hours(data, TOTAL_REQUIRED_HOURS), data, needs_student=True
+    )
 
 
 def answer_missing(session: Session, student_id: int) -> ChatAnswer:
@@ -140,39 +138,22 @@ def answer_missing(session: Session, student_id: int) -> ChatAnswer:
         {"sid": student_id},
     ).mappings().all()
 
-    if not rows:
-        return ChatAnswer(
-            Intent.MISSING, "ยินดีด้วย! คุณเก็บชั่วโมงครบทุกหมวดแล้ว", [], needs_student=True
-        )
-    lines = ["หมวดที่คุณยังเก็บชั่วโมงไม่ครบ:"]
-    for r in rows:
-        remaining = float(r["required_hours"]) - float(r["earned_hours"])
-        lines.append(
-            f"• {r['category_name']}: ได้ {float(r['earned_hours']):g}/{float(r['required_hours']):g} ชม. "
-            f"(ยังขาดอีก {remaining:g} ชม.)"
-        )
-    return ChatAnswer(Intent.MISSING, "\n".join(lines), [dict(r) for r in rows], needs_student=True)
+    data = [dict(r) for r in rows]
+    return ChatAnswer(Intent.MISSING, fmt.missing_categories(data), data, needs_student=True)
 
 
 def answer_open_activities(session: Session) -> ChatAnswer:
     rows = session.execute(
         text(
-            "SELECT name, activity_type, hours, max_participants, participant_count "
-            "FROM gold_activity_catalog "
+            "SELECT name, activity_type, hours, category_name, max_participants, "
+            "participant_count FROM gold_activity_catalog "
             "WHERE approval_status = 'approved' AND participant_count < max_participants "
             "ORDER BY start_at"
         )
     ).mappings().all()
 
-    if not rows:
-        return ChatAnswer(Intent.OPEN_ACTIVITIES, "ขณะนี้ยังไม่มีกิจกรรมที่เปิดรับสมัคร", [])
-    lines = ["กิจกรรมที่เปิดรับสมัครอยู่ตอนนี้:"]
-    for r in rows:
-        lines.append(
-            f"• {r['name']} ({r['activity_type']}) — {float(r['hours']):g} ชม. "
-            f"รับแล้ว {r['participant_count']}/{r['max_participants']} คน"
-        )
-    return ChatAnswer(Intent.OPEN_ACTIVITIES, "\n".join(lines), [dict(r) for r in rows])
+    data = [dict(r) for r in rows]
+    return ChatAnswer(Intent.OPEN_ACTIVITIES, fmt.open_activities(data), data)
 
 
 def answer_required_activities(session: Session) -> ChatAnswer:
@@ -184,13 +165,8 @@ def answer_required_activities(session: Session) -> ChatAnswer:
         )
     ).mappings().all()
 
-    if not rows:
-        return ChatAnswer(Intent.REQUIRED, "ขณะนี้ยังไม่มีกิจกรรมบังคับที่เปิดให้เข้าร่วม", [])
-    lines = ["กิจกรรมบังคับที่ต้องเข้าร่วม:"]
-    for r in rows:
-        cat = r["category_name"] or "-"
-        lines.append(f"• {r['name']} ({r['activity_type']}) — {float(r['hours']):g} ชม. หมวด {cat}")
-    return ChatAnswer(Intent.REQUIRED, "\n".join(lines), [dict(r) for r in rows])
+    data = [dict(r) for r in rows]
+    return ChatAnswer(Intent.REQUIRED, fmt.required_activities(data), data)
 
 
 # ---- Recommendations (Phase 18) --------------------------------------------
@@ -230,21 +206,13 @@ def recommend_by_missing_categories(session: Session, student_id: int) -> ChatAn
 
     category_keys = [m["category_key"] for m in missing]
     activities = _open_activities_in_categories(session, category_keys)
-    if not activities:
-        names = ", ".join(m["category_name"] for m in missing)
-        return ChatAnswer(
-            Intent.RECOMMEND,
-            f"คุณยังขาดหมวด: {names} แต่ตอนนี้ยังไม่มีกิจกรรมที่เปิดรับสมัครในหมวดเหล่านี้",
-            [], needs_student=True,
-        )
-
-    lines = ["แนะนำกิจกรรมที่ช่วยเก็บชั่วโมงในหมวดที่คุณยังขาด:"]
-    for a in activities:
-        lines.append(
-            f"• {a['name']} ({a['activity_type']}) — {float(a['hours']):g} ชม. "
-            f"หมวด {a['category_name']} · รับแล้ว {a['participant_count']}/{a['max_participants']} คน"
-        )
-    return ChatAnswer(Intent.RECOMMEND, "\n".join(lines), activities, needs_student=True)
+    names = [m["category_name"] for m in missing]
+    return ChatAnswer(
+        Intent.RECOMMEND,
+        fmt.recommend_for_missing(names, activities),
+        activities,
+        needs_student=True,
+    )
 
 
 def _find_mentioned_activity(session: Session, question: str) -> dict | None:
@@ -276,22 +244,13 @@ def recommend_alternatives(session: Session, activity: dict) -> ChatAnswer:
         stmt, {"sub": activity["subcategory_key"], "self": activity["activity_key"]}
     ).mappings().all()
 
-    if not rows:
-        return ChatAnswer(
-            Intent.RECOMMEND,
-            f"กิจกรรม \"{activity['name']}\" เต็มแล้ว และยังไม่มีกิจกรรมอื่นที่นับหมวดเดียวกันเปิดรับอยู่",
-            [], needs_student=True,
-        )
-    lines = [
-        f"กิจกรรม \"{activity['name']}\" เต็มแล้ว "
-        f"({activity['subcategory_name']}) — แนะนำกิจกรรมที่นับหมวดเดียวกันและยังเปิดรับ:"
-    ]
-    for r in rows:
-        lines.append(
-            f"• {r['name']} ({r['activity_type']}) — {float(r['hours']):g} ชม. "
-            f"รับแล้ว {r['participant_count']}/{r['max_participants']} คน"
-        )
-    return ChatAnswer(Intent.RECOMMEND, "\n".join(lines), [dict(r) for r in rows], needs_student=True)
+    data = [dict(r) for r in rows]
+    return ChatAnswer(
+        Intent.RECOMMEND,
+        fmt.recommend_alternatives(activity, data),
+        data,
+        needs_student=True,
+    )
 
 
 def recommend(session: Session, student_id: int, question: str) -> ChatAnswer:
@@ -373,9 +332,5 @@ def run_text_to_sql(llm: LlmClient, session: Session, question: str, student_id:
     )
     rows = session.execute(text(wrapped), {"sid": student_id}).mappings().all()
 
-    if not rows:
-        return ChatAnswer(Intent.GENERAL, "ไม่พบข้อมูลที่ตรงกับคำถามของคุณ", [], needs_student=True)
-    lines = []
-    for r in rows:
-        lines.append(", ".join(f"{k}: {v}" for k, v in r.items()))
-    return ChatAnswer(Intent.GENERAL, "\n".join(lines), [dict(r) for r in rows], needs_student=True)
+    data = [dict(r) for r in rows]
+    return ChatAnswer(Intent.GENERAL, fmt.generic_rows(data), data, needs_student=True)

@@ -3,6 +3,7 @@
 The LLM is always mocked. Data intents are asserted to return only the asking
 student's data, and the SQL guard is asserted to block prompt-injection / DDL.
 """
+import re
 from datetime import datetime
 
 import pytest
@@ -65,6 +66,10 @@ def test_guard_blocks_dangerous_sql(sql):
         ("กิจกรรมบังคับมีอะไรบ้าง", Intent.REQUIRED),
         ("แนะนำกิจกรรมให้หน่อย", Intent.RECOMMEND),
         ("มีกิจกรรมไหนลงแทนได้บ้าง", Intent.RECOMMEND),
+        # These used to fall through to the LLM Text-to-SQL path and come back as a
+        # raw key:value dump (PHASE_Chatbot_Humanize_Answers.md).
+        ("กิจกรรมเต็มแล้วลงอันไหนดี", Intent.RECOMMEND),
+        ("ลงตัวไหนดี", Intent.RECOMMEND),
         ("หมวด TSU รับใช้สังคม ต้องเก็บกี่ชั่วโมง", Intent.RULES),
     ],
 )
@@ -319,3 +324,82 @@ def test_recommend_alternatives_when_activity_is_full(client, world):
     assert body["intent"] == Intent.RECOMMEND.value
     # "กิจกรรมเต็มแล้ว" is in sub2; the open same-subcategory activity is "กิจกรรมหมวดสอง".
     assert "กิจกรรมหมวดสอง" in body["answer"]
+
+
+# ------------- humanized answers (PHASE_Chatbot_Humanize_Answers.md) ---------
+# The whole point of this phase: no answer may leak a database column name, and
+# every canned intent must open with a Thai sentence rather than a bare list.
+
+RAW_COLUMN_NAMES = [
+    "available_seats", "category_name", "participant_count", "max_participants",
+    "earned_hours", "required_hours", "activity_type", "subcategory_name",
+    "completed", "is_required",
+]
+
+# question → the leading words the answer must start with
+HUMAN_INTENT_QUESTIONS = [
+    ("ฉันได้กี่ชั่วโมงแล้ว", "ตอนนี้คุณสะสมชั่วโมงที่อนุมัติแล้ว"),
+    ("ขาดหมวดไหนบ้าง", "คุณยังขาดหมวด"),
+    ("กิจกรรมอะไรเปิดรับสมัครบ้าง", "ตอนนี้มี"),
+    ("กิจกรรมบังคับมีอะไรบ้าง", "มีกิจกรรมบังคับที่ต้องเข้าร่วม"),
+    ("แนะนำกิจกรรมให้หน่อย", "แนะนำ:"),
+]
+
+
+@pytest.mark.parametrize("question,opening", HUMAN_INTENT_QUESTIONS)
+def test_every_canned_intent_answers_in_thai_prose(client, world, question, opening):
+    token = _login(client, world["code"], world["password"])
+    answer = _ask(client, token, question).json()["answer"]
+    assert answer.startswith(opening), f"{question!r} answered with: {answer}"
+    for column in RAW_COLUMN_NAMES:
+        assert column not in answer, f"{question!r} leaked column {column!r}: {answer}"
+
+
+def test_full_activity_question_gets_a_recommendation_not_a_row_dump(client, world):
+    """The exact question from the phase spec. It used to reach the LLM Text-to-SQL
+    fallback and answer with 'name: …, available_seats: 98'."""
+    token = _login(client, world["code"], world["password"])
+    resp = _ask(client, token, "กิจกรรมเต็มแล้วลงอันไหนดี")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["intent"] == Intent.RECOMMEND.value
+    answer = body["answer"]
+    assert answer.startswith("แนะนำ:")
+    assert "กิจกรรมหมวดสอง" in answer     # the open substitute in the same subcategory
+    assert "1. กิจกรรมหมวดสอง — 4 ชม. · เหลือ 48 ที่" in answer
+    for column in RAW_COLUMN_NAMES:
+        assert column not in answer
+    # no "key: value, key: value" line survives anywhere in the answer
+    assert not re.search(r"^\w+: .*, \w+: ", answer, re.MULTILINE), answer
+
+
+def test_open_activities_are_ordered_by_free_seats(client, session, world):
+    """A roomy activity added last must still be listed before the nearly-full ones."""
+    staff_id = _staff_id(session)
+    sub_id = session.execute(
+        text("SELECT subcategory_key FROM gold_activity_catalog WHERE name = 'กิจกรรมหมวดสอง'")
+    ).scalar_one()
+    _make_activity(session, sub_id, staff_id, hours=2, name="กิจกรรมที่ว่างเยอะ",
+                   max_participants=200)
+    create_gold_layer(session)
+
+    token = _login(client, world["code"], world["password"])
+    answer = _ask(client, token, "กิจกรรมอะไรเปิดรับสมัครบ้าง").json()["answer"]
+    assert answer.index("กิจกรรมที่ว่างเยอะ") < answer.index("กิจกรรมหมวดหนึ่ง")
+    assert "เหลือ 200 ที่" in answer
+    assert "กิจกรรมเต็มแล้ว" not in answer   # full ones stay out
+
+
+def test_text_to_sql_rows_are_humanized(session, world):
+    """Even the LLM fallback must not dump 'column: value' at the user."""
+    student_a = world["student_a"]
+    fake = FakeLlm(
+        "SELECT name, hours, (max_participants - participant_count) AS available_seats "
+        "FROM gold_activity_catalog WHERE approval_status = 'approved'"
+    )
+    result = run_text_to_sql(fake, session, "กิจกรรมไหนมีที่ว่างเยอะสุด", student_a.id)
+    assert result.rows, "the query should return catalog rows"
+    assert "available_seats" not in result.answer
+    assert "ที่ว่าง" in result.answer
+    assert "ชม." in result.answer
+    assert result.answer.startswith("จากข้อมูลของคุณ")
