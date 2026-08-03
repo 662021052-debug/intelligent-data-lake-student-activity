@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:activity_tracking_frontend/models/student.dart';
 import 'package:activity_tracking_frontend/screens/students_screen.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
+import 'package:activity_tracking_frontend/widgets/app_form_dialog.dart';
 
 // ต้องใช้ธีมจริง — ธีมของแอปตั้ง splashFactory เป็น InkRipple ส่วนดีฟอลต์ M3
 // เป็น InkSparkle ที่ต้องโหลด shader asset ซึ่งไม่มีตอนรัน --no-test-assets
@@ -94,6 +95,81 @@ void main() {
       // แต่ต้องเติมข้อมูลเดิมมาให้ครบ
       expect(find.text('652021002'), findsOneWidget);
       expect(find.text('ธนกร นวลจันทร์'), findsOneWidget);
+    });
+
+    testWidgets('แบ่งกลุ่ม "ข้อมูลนิสิต" / "บัญชีเข้าใช้งาน" ให้เห็นชัด', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ข้อมูลนิสิต'), findsOneWidget);
+      expect(find.text('บัญชีเข้าใช้งาน'), findsOneWidget);
+      expect(find.text('ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก'), findsOneWidget);
+      expect(find.byType(FormSectionHeader), findsNWidgets(2));
+    });
+
+    testWidgets('โหมดแก้ไขมีเฉพาะกลุ่มข้อมูลนิสิต ไม่มีกลุ่มบัญชี', (tester) async {
+      await tester.pumpWidget(_wrap(StudentFormDialog(existing: _existing)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ข้อมูลนิสิต'), findsOneWidget);
+      expect(find.text('บัญชีเข้าใช้งาน'), findsNothing);
+    });
+
+    testWidgets('ช่องบังคับลงท้ายด้วย * ช่องไม่บังคับบอก (ไม่บังคับ)', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      for (final label in ['รหัสนิสิต *', 'ชื่อ-สกุล *', 'คณะ *', 'สาขา *', 'ชั้นปี *', 'สถานะ *']) {
+        expect(find.text(label), findsOneWidget, reason: 'ไม่พบป้าย "$label"');
+      }
+      expect(find.text('ชื่อผู้ใช้ (ไม่บังคับ)'), findsOneWidget);
+      expect(find.text('รหัสผ่านเริ่มต้น (ไม่บังคับ)'), findsOneWidget);
+    });
+
+    testWidgets('ทุกช่องมี label ลอยด้านบนเหมือนกัน ไม่มีช่อง placeholder ล้วน',
+        (tester) async {
+      // ปัญหาเดิม: M3 เก็บ label ไว้ในช่องที่ยังว่าง แล้วลอยขึ้นเมื่อมีค่า —
+      // ช่องที่มีค่าเริ่มต้น (ชั้นปี/สถานะ) จึงดูต่างจากช่องที่เหลือ
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      final fields = tester.widgetList<TextField>(find.byType(TextField));
+      expect(fields, isNotEmpty);
+      for (final field in fields) {
+        final decoration = field.decoration!;
+        expect(decoration.labelText, isNotNull,
+            reason: 'ทุกช่องต้องมี labelText ไม่ใช่ placeholder ลอย');
+        expect(decoration.floatingLabelBehavior, FloatingLabelBehavior.always,
+            reason: 'label ของ "${decoration.labelText}" ต้องลอยอยู่ด้านบนเสมอ');
+      }
+    });
+
+    testWidgets('เช็กบ็อกซ์บัญชีวางตัวติ๊กชิดซ้ายและไม่มีระยะขอบส่วนเกิน',
+        (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      final tile = tester.widget<CheckboxListTile>(find.byType(CheckboxListTile));
+      expect(tile.controlAffinity, ListTileControlAffinity.leading);
+      expect(tile.contentPadding, EdgeInsets.zero);
+
+      // ตัวติ๊กต้องอยู่ซ้ายสุดของแถว ไม่ลอยไปกลาง
+      final checkbox = tester.getTopLeft(find.byType(Checkbox));
+      final title = tester.getTopLeft(find.text('สร้างบัญชีเข้าใช้งานให้ด้วย'));
+      expect(checkbox.dx, lessThan(title.dx));
+    });
+
+    testWidgets('ฟอร์มเลื่อนได้เมื่อจอเตี้ย', (tester) async {
+      tester.view.physicalSize = const Size(800, 500);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SingleChildScrollView), findsWidgets);
+      expect(tester.takeException(), isNull, reason: 'ต้องไม่ overflow บนจอเตี้ย');
     });
 
     testWidgets('กรอกรหัสนิสิตผิดรูปแบบแล้วกดบันทึก ต้องขึ้น error ไม่ยิง API',

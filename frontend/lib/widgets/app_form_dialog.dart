@@ -6,6 +6,52 @@ import '../theme/app_theme.dart';
 ///
 /// ปุ่ม "ยกเลิก" เป็น text button และ "บันทึก" เป็น primary (FilledButton) ชิดขวาเสมอ
 /// พร้อม spinner ตอนกำลังบันทึก และช่องแสดง error ใต้ฟอร์ม
+/// หัวข้อย่อยคั่นกลุ่มช่องกรอกใน [AppFormDialog]
+///
+/// ใช้เมื่อฟอร์มยาวจนอ่านเป็นพืดเดียวไม่ไหว เช่น "ข้อมูลนิสิต" กับ
+/// "บัญชีเข้าใช้งาน" — เส้นคั่นบาง ๆ ใต้หัวข้อทำหน้าที่แบ่งสายตา
+class FormSectionHeader extends StatelessWidget {
+  const FormSectionHeader(this.title, {super.key, this.note, this.first = false});
+
+  final String title;
+
+  /// คำอธิบายเล็ก ๆ ใต้หัวข้อ เช่น บอกว่าเครื่องหมาย * แปลว่าอะไร
+  final String? note;
+
+  /// หัวข้อแรกของฟอร์มไม่ต้องเว้นด้านบน (ชิดกับ title ของ dialog อยู่แล้ว)
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 0 : AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          if (note != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(
+                note!,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+          const Divider(height: AppSpacing.lg),
+        ],
+      ),
+    );
+  }
+}
+
 class AppFormDialog extends StatelessWidget {
   const AppFormDialog({
     super.key,

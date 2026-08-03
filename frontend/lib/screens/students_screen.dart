@@ -390,8 +390,28 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
     }
   }
 
+  /// ป้ายช่องแบบเดียวกันทั้งฟอร์ม
+  ///
+  /// M3 จะเก็บ label ไว้ "ข้างใน" ช่องที่ยังว่าง แล้วค่อยลอยขึ้นเมื่อมีค่า —
+  /// ฟอร์มนี้จึงเคยดูไม่สม่ำเสมอ (ชั้นปี/สถานะ มีค่าเริ่มต้นอยู่แล้วเลยลอย
+  /// ส่วนช่องที่เหลือว่างจึงดูเหมือน placeholder) บังคับ `always` ให้ label
+  /// อยู่ด้านบนเหมือนกันหมด แล้วใช้ hint เป็นตัวอย่างข้างในช่องแทน
+  InputDecoration _decoration(
+    String label, {
+    bool required = false,
+    String? hint,
+    String? helper,
+  }) =>
+      InputDecoration(
+        labelText: required ? '$label *' : '$label (ไม่บังคับ)',
+        hintText: hint,
+        helperText: helper,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+      );
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return AppFormDialog(
       title: widget.existing == null ? 'เพิ่มนิสิต' : 'แก้ไขนิสิต',
       formKey: _formKey,
@@ -399,37 +419,42 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
       error: _error,
       onSubmit: _submit,
       fields: [
+        const FormSectionHeader(
+          'ข้อมูลนิสิต',
+          note: 'ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก',
+          first: true,
+        ),
         TextFormField(
           controller: _studentIdController,
-          decoration: const InputDecoration(labelText: 'รหัสนิสิต'),
+          decoration: _decoration('รหัสนิสิต', required: true, hint: 'ตัวเลข 9 หลัก'),
           keyboardType: TextInputType.number,
           validator: studentIdValidator,
         ),
         TextFormField(
           controller: _fullNameController,
-          decoration: const InputDecoration(labelText: 'ชื่อ-สกุล'),
+          decoration: _decoration('ชื่อ-สกุล', required: true, hint: 'เช่น สมชาย ใจดี'),
           validator: requiredValidator,
         ),
         TextFormField(
           controller: _facultyController,
-          decoration: const InputDecoration(labelText: 'คณะ'),
+          decoration: _decoration('คณะ', required: true, hint: 'เช่น วิศวกรรมศาสตร์'),
           validator: requiredValidator,
         ),
         TextFormField(
           controller: _majorController,
-          decoration: const InputDecoration(labelText: 'สาขา'),
+          decoration: _decoration('สาขา', required: true, hint: 'เช่น วิศวกรรมคอมพิวเตอร์'),
           validator: requiredValidator,
         ),
         TextFormField(
           controller: _yearLevelController,
-          decoration: const InputDecoration(labelText: 'ชั้นปี'),
+          decoration: _decoration('ชั้นปี', required: true),
           keyboardType: TextInputType.number,
           validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
         ),
         DropdownButtonFormField<String>(
           initialValue: _status,
           isExpanded: true,
-          decoration: const InputDecoration(labelText: 'สถานะ'),
+          decoration: _decoration('สถานะ', required: true),
           items: const [
             DropdownMenuItem(value: 'active', child: Text('กำลังศึกษา')),
             DropdownMenuItem(value: 'inactive', child: Text('พ้นสภาพ')),
@@ -437,7 +462,8 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
           onChanged: (v) => setState(() => _status = v ?? 'active'),
         ),
         // เฉพาะตอนสร้างใหม่ — บัญชีที่มีอยู่แล้วต้องไปจัดการที่หน้าจัดการผู้ใช้
-        if (_isNew)
+        if (_isNew) ...[
+          const FormSectionHeader('บัญชีเข้าใช้งาน'),
           CheckboxListTile(
             value: _createUser,
             onChanged: (v) => setState(() => _createUser = v ?? false),
@@ -446,26 +472,33 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
               _createUser
                   ? 'เว้นช่องด้านล่างว่างไว้ = ใช้รหัสนิสิตเป็นทั้งชื่อผู้ใช้และรหัสผ่านเริ่มต้น'
                   : 'ต้องไปสร้างบัญชีและผูกเองที่หน้าจัดการผู้ใช้',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
+            // ดึงตัวติ๊กกับข้อความให้ชิดซ้ายติดกัน ไม่เหลือช่องว่างกลางแถว
+            visualDensity: VisualDensity.compact,
+            dense: true,
           ),
-        // ช่องกำหนดเอง โผล่เฉพาะตอนที่จะสร้างบัญชีจริง ๆ เพื่อไม่ให้ฟอร์มรก
-        if (_isNew && _createUser) ...[
-          TextFormField(
-            controller: _usernameController,
-            decoration: const InputDecoration(
-              labelText: 'ชื่อผู้ใช้ (ไม่บังคับ)',
-              helperText: 'เว้นว่าง = ใช้รหัสนิสิต',
+          // ช่องกำหนดเอง โผล่เฉพาะตอนที่จะสร้างบัญชีจริง ๆ เพื่อไม่ให้ฟอร์มรก
+          if (_createUser) ...[
+            TextFormField(
+              controller: _usernameController,
+              decoration: _decoration(
+                'ชื่อผู้ใช้',
+                hint: 'รหัสนิสิต',
+                helper: 'เว้นว่าง = ใช้รหัสนิสิต',
+              ),
             ),
-          ),
-          TextFormField(
-            controller: _passwordController,
-            decoration: const InputDecoration(
-              labelText: 'รหัสผ่านเริ่มต้น (ไม่บังคับ)',
-              helperText: 'เว้นว่าง = ใช้รหัสนิสิต · แนะนำให้นิสิตเปลี่ยนหลังเข้าใช้ครั้งแรก',
+            TextFormField(
+              controller: _passwordController,
+              decoration: _decoration(
+                'รหัสผ่านเริ่มต้น',
+                helper: 'เว้นว่าง = ใช้รหัสนิสิต · แนะนำให้นิสิตเปลี่ยนหลังเข้าใช้ครั้งแรก',
+              ),
             ),
-          ),
+          ],
         ],
       ],
     );
