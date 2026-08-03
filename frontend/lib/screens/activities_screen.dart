@@ -26,6 +26,23 @@ String _formatDateTime(DateTime dt) {
 
 String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
 
+/// คอลัมน์ของตารางกิจกรรม — แยกเป็นฟังก์ชันบนสุดเพื่อให้เทสต์ยืนยันได้ว่ามุมมอง
+/// นิสิตไม่มีคอลัมน์ "สถานะอนุมัติ" (หน้าจอเต็มต้องยิง API จริงจึงเทสต์ตรง ๆ ไม่ได้)
+List<DataColumn> activityTableColumns(bool isStudent) => [
+      const DataColumn(label: Text('ชื่อกิจกรรม')),
+      const DataColumn(label: Text('ประเภท')),
+      const DataColumn(label: Text('หมวดชั่วโมง')),
+      const DataColumn(label: Text('ชั่วโมง')),
+      const DataColumn(label: Text('บังคับ')),
+      const DataColumn(label: Text('รับสูงสุด')),
+      const DataColumn(label: Text('วันเวลา')),
+      const DataColumn(label: Text('สถานที่')),
+      // นิสิตเห็นเฉพาะกิจกรรมที่อนุมัติแล้ว (backend กรองให้) คอลัมน์นี้จึงเป็น
+      // ค่าเดียวกันทุกแถว ไม่ให้ข้อมูลอะไร — ซ่อนเฉพาะมุมมองนิสิต
+      if (!isStudent) const DataColumn(label: Text('สถานะอนุมัติ')),
+      const DataColumn(label: Text('')),
+    ];
+
 class ActivitiesScreen extends StatefulWidget {
   const ActivitiesScreen({super.key});
 
@@ -197,8 +214,8 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                         : LayoutBuilder(
                             builder: (context, constraints) {
                               return constraints.maxWidth > 800
-                                  ? _buildTable(canWrite)
-                                  : _buildList(canWrite);
+                                  ? _buildTable(canWrite, isStudent)
+                                  : _buildList(canWrite, isStudent);
                             },
                           ),
           ),
@@ -220,21 +237,10 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     );
   }
 
-  Widget _buildTable(bool canWrite) {
+  Widget _buildTable(bool canWrite, bool isStudent) {
     final scheme = Theme.of(context).colorScheme;
     return AppDataTable(
-      columns: const [
-        DataColumn(label: Text('ชื่อกิจกรรม')),
-        DataColumn(label: Text('ประเภท')),
-        DataColumn(label: Text('หมวดชั่วโมง')),
-        DataColumn(label: Text('ชั่วโมง')),
-        DataColumn(label: Text('บังคับ')),
-        DataColumn(label: Text('รับสูงสุด')),
-        DataColumn(label: Text('วันเวลา')),
-        DataColumn(label: Text('สถานที่')),
-        DataColumn(label: Text('สถานะอนุมัติ')),
-        DataColumn(label: Text('')),
-      ],
+      columns: activityTableColumns(isStudent),
       rows: [
         for (final a in _activities)
           [
@@ -253,14 +259,14 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
             DataCell(Text('${a.maxParticipants}')),
             DataCell(Text(_formatDateTime(a.startAt))),
             DataCell(Text(a.location)),
-            DataCell(_approvalChip(a)),
+            if (!isStudent) DataCell(_approvalChip(a)),
             DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
           ],
       ],
     );
   }
 
-  Widget _buildList(bool canWrite) {
+  Widget _buildList(bool canWrite, bool isStudent) {
     return ListView.builder(
       itemCount: _activities.length,
       itemBuilder: (context, index) {
@@ -273,8 +279,10 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Flexible(child: Text(a.name)),
-                const SizedBox(width: 8),
-                _approvalChip(a),
+                if (!isStudent) ...[
+                  const SizedBox(width: 8),
+                  _approvalChip(a),
+                ],
               ],
             ),
             subtitle: Text(

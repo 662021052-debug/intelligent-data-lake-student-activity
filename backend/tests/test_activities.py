@@ -95,6 +95,10 @@ def _admin_headers(tokens):
     return {"Authorization": f"Bearer {tokens['admin']}"}
 
 
+def _student_headers(tokens):
+    return {"Authorization": f"Bearer {tokens['student']}"}
+
+
 def _staff_id(client, tokens):
     response = client.get("/auth/users", headers=_admin_headers(tokens))
     for u in response.json()["items"]:
@@ -232,9 +236,59 @@ def test_student_sees_only_approved_activities(client, tokens):
     approved = make_activity(client, name="กิจกรรม approved").json()
     client.patch(f"/activities/{approved['id']}/approve", headers=_admin_headers(tokens))
 
-    student_headers = {"Authorization": f"Bearer {tokens['student']}"}
-    response = client.get("/activities", headers=student_headers)
+    response = client.get("/activities", headers=_student_headers(tokens))
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "กิจกรรม approved"
+
+
+def test_student_list_hides_pending_from_total_not_just_items(client, tokens):
+    """`total` มาจาก count query คนละตัวกับ items — ถ้ากรองแค่ items จำนวนกิจกรรม
+    ที่รออนุมัติจะรั่วออกไปทาง pagination ได้"""
+    for i in range(3):
+        make_activity(client, name=f"กิจกรรม pending {i}")
+    approved = make_activity(client, name="กิจกรรม approved").json()
+    client.patch(f"/activities/{approved['id']}/approve", headers=_admin_headers(tokens))
+
+    body = client.get("/activities", headers=_student_headers(tokens)).json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+
+
+def test_student_cannot_get_pending_activity_by_id(client, tokens):
+    """การกรองในรายการอย่างเดียวไม่พอ — นิสิตที่เดา id ได้ต้องโดน 403 ด้วย"""
+    pending = make_activity(client, name="กิจกรรมที่ยังไม่อนุมัติ").json()
+
+    response = client.get(f"/activities/{pending['id']}", headers=_student_headers(tokens))
+    assert response.status_code == 403
+
+    client.patch(f"/activities/{pending['id']}/approve", headers=_admin_headers(tokens))
+    assert client.get(f"/activities/{pending['id']}", headers=_student_headers(tokens)).status_code == 200
+
+
+def test_student_filters_cannot_surface_pending_activity(client, tokens):
+    """ตัวกรอง (search/type) ต้องทำงานบนชุดที่กรอง role แล้ว ไม่ใช่บนทั้งตาราง"""
+    make_activity(client, name="ค่ายอาสาลับ", activity_type="จิตอาสา")  # pending
+
+    student_headers = _student_headers(tokens)
+    by_search = client.get("/activities", params={"search": "ค่ายอาสาลับ"}, headers=student_headers)
+    assert by_search.json()["total"] == 0
+
+    by_type = client.get("/activities", params={"activity_type": "จิตอาสา"}, headers=student_headers)
+    assert by_type.json()["total"] == 0
+
+
+def test_staff_and_admin_still_see_pending_activities(client, tokens):
+    """กันการแก้เกินขอบเขต: การกรองต้องมีผลกับ role=student เท่านั้น"""
+    pending = make_activity(client, name="กิจกรรมรออนุมัติของ staff").json()
+
+    # staff เห็นของตัวเองทุกสถานะ (default client คือ staff)
+    staff_items = client.get("/activities").json()["items"]
+    assert any(item["id"] == pending["id"] for item in staff_items)
+    assert client.get(f"/activities/{pending['id']}").status_code == 200
+
+    # admin เห็นทุกกิจกรรมทุกสถานะ
+    admin_body = client.get("/activities", headers=_admin_headers(tokens)).json()
+    assert any(item["id"] == pending["id"] for item in admin_body["items"])
+    assert any(item["approval_status"] == "pending" for item in admin_body["items"])
