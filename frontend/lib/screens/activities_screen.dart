@@ -46,6 +46,12 @@ bool isBackdatedActivity(DateTime startAt, [DateTime? now]) =>
 /// — ผู้ใช้จะได้เห็นว่าปัญหาอยู่ที่ช่องไหน ไม่ต้องไล่หาเอง
 bool isActivityDateError(String message) => message.contains('วันเวลากิจกรรมเป็นอดีต');
 
+/// กด "ลบ" กิจกรรมนี้แล้วจะกลายเป็นการ "ซ่อน" แทนการลบจริงหรือไม่
+///
+/// กติกาเดียวกับ backend: มีผู้เข้าร่วมผูกอยู่ = ลบทิ้งไม่ได้ เพราะจะลากชั่วโมงที่
+/// นิสิตได้ไปแล้วหายตามไปด้วย — UI ต้องตัดสินให้ตรงกัน ไม่งั้นคำเตือนจะโกหกผู้ใช้
+bool activityWillBeHiddenOnDelete(Activity a) => a.participantCount > 0;
+
 /// คอลัมน์ของตารางกิจกรรม — แยกเป็นฟังก์ชันบนสุดเพื่อให้เทสต์ยืนยันได้ว่ามุมมอง
 /// นิสิตไม่มีคอลัมน์ "สถานะอนุมัติ" (หน้าจอเต็มต้องยิง API จริงจึงเทสต์ตรง ๆ ไม่ได้)
 List<DataColumn> activityTableColumns(bool isStudent) => [
@@ -146,10 +152,33 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   }
 
   Future<void> _delete(Activity a) async {
-    final confirmed = await confirmDelete(context, a.name);
+    // มีคนเข้าร่วมแล้ว backend จะ "ซ่อน" ให้แทนการลบจริง — คำเตือนต้องตรงกับสิ่งที่
+    // จะเกิดขึ้นจริง ไม่งั้นผู้ใช้จะกลัวว่าชั่วโมงของนิสิตหายทั้งที่ไม่หาย
+    final confirmed = activityWillBeHiddenOnDelete(a)
+        ? await confirmAction(
+            context,
+            title: 'ยืนยันการซ่อนกิจกรรม',
+            message: 'ซ่อน "${a.name}" ใช่หรือไม่?',
+            detail: 'กิจกรรมนี้มีผู้เข้าร่วมแล้ว ${a.participantCount} คน จึงลบทิ้งไม่ได้ '
+                'ระบบจะซ่อนให้แทน — นิสิตจะไม่เห็นและสมัครใหม่ไม่ได้ '
+                'แต่ประวัติการเข้าร่วมและชั่วโมงเดิมยังอยู่ครบ กด "เลิกซ่อน" เพื่อกู้คืนได้',
+            confirmLabel: 'ซ่อน',
+            icon: Icons.visibility_off_outlined,
+            destructive: true,
+          )
+        : await confirmDelete(context, a.name);
     if (confirmed != true) return;
     try {
       await ApiService.delete('/activities/${a.id}');
+      _load();
+    } catch (e) {
+      if (mounted) showErrorSnackbar(context, e);
+    }
+  }
+
+  Future<void> _unhide(Activity a) async {
+    try {
+      await ApiService.patch('/activities/${a.id}/unhide', Activity.fromJson);
       _load();
     } catch (e) {
       if (mounted) showErrorSnackbar(context, e);
@@ -343,11 +372,31 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     );
   }
 
-  Widget _approvalChip(Activity a) => StatusChip.activityApproval(a.approvalStatus, dense: true);
+  /// ชิปสถานะฝั่ง staff/admin: สถานะอนุมัติ + "ซ่อนอยู่" ถ้าถูกซ่อนไว้
+  Widget _approvalChip(Activity a) => Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          StatusChip.activityApproval(a.approvalStatus, dense: true),
+          if (a.isHidden)
+            const StatusChip(
+              label: 'ซ่อนอยู่',
+              palette: StatusPalette.neutral,
+              icon: Icons.visibility_off_outlined,
+              dense: true,
+            ),
+        ],
+      );
 
   Widget _actionButtons(Activity a) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (a.isHidden)
+            IconButton(
+              icon: const Icon(Icons.visibility, size: 20),
+              tooltip: 'เลิกซ่อน',
+              onPressed: () => _unhide(a),
+            ),
           if (authService.isAdmin && a.approvalStatus != 'approved')
             IconButton(
               icon: Icon(Icons.check_circle,
@@ -355,9 +404,9 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               tooltip: 'อนุมัติกิจกรรม',
               onPressed: () => _approve(a),
             ),
-          // แสดงเฉพาะกิจกรรมที่อนุมัติแล้ว — กิจกรรมที่ยังรออนุมัติสแกนไม่ผ่านอยู่ดี
+          // แสดงเฉพาะกิจกรรมที่อนุมัติแล้วและยังไม่ถูกซ่อน — สองกรณีนี้สแกนไม่ผ่านอยู่ดี
           // (backend ตอบ "กิจกรรมนี้ยังไม่เปิดให้เช็กอิน") การโชว์ QR จึงมีแต่ทำให้เข้าใจผิด
-          if (a.approvalStatus == 'approved')
+          if (a.approvalStatus == 'approved' && !a.isHidden)
             IconButton(
               icon: const Icon(Icons.qr_code_2, size: 20),
               tooltip: 'แสดง QR เช็กอิน',
@@ -373,11 +422,13 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
             tooltip: 'แก้ไข',
             onPressed: () => _openForm(existing: a),
           ),
-          IconButton(
-            icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-            tooltip: 'ลบ',
-            onPressed: () => _delete(a),
-          ),
+          // ที่ซ่อนอยู่แล้วไม่ต้องมีปุ่มลบ — กดไปก็ได้ผลเดิม แต่ชวนให้เข้าใจผิดว่าลบได้
+          if (!a.isHidden)
+            IconButton(
+              icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+              tooltip: activityWillBeHiddenOnDelete(a) ? 'ซ่อน (มีผู้เข้าร่วมแล้ว ลบไม่ได้)' : 'ลบ',
+              onPressed: () => _delete(a),
+            ),
         ],
       );
 

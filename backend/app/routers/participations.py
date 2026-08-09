@@ -224,7 +224,9 @@ def register_self(
     activity = session.get(Activity, payload.activity_id)
     if not activity:
         raise HTTPException(status_code=400, detail="activity_id does not exist")
-    if activity.approval_status != ApprovalStatus.approved:
+    if activity.approval_status != ApprovalStatus.approved or activity.is_hidden:
+        # กิจกรรมที่ถูกซ่อน = ถูกยกเลิกในสายตานิสิต จึงสมัครใหม่ไม่ได้ (คนที่สมัคร
+        # ไปแล้วยังเก็บประวัติ/ชั่วโมงไว้เหมือนเดิม)
         raise HTTPException(status_code=400, detail="กิจกรรมนี้ยังไม่เปิดรับสมัคร")
     if activity.start_at <= datetime.utcnow():
         raise HTTPException(status_code=400, detail="กิจกรรมนี้ปิดรับสมัครแล้ว")
@@ -284,7 +286,7 @@ def checkin_with_qr(
     )
     if not activity:
         raise HTTPException(status_code=400, detail="QR ไม่ถูกต้อง")
-    if activity.approval_status != ApprovalStatus.approved:
+    if activity.approval_status != ApprovalStatus.approved or activity.is_hidden:
         raise HTTPException(status_code=400, detail="กิจกรรมนี้ยังไม่เปิดให้เช็กอิน")
 
     now = datetime.utcnow()

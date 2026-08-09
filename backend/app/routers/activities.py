@@ -16,13 +16,10 @@ from app.models import (
     ApprovalStatus,
     Participation,
     ParticipationRead,
-    RawFile,
-    SilverEvidenceOcr,
     User,
     UserRole,
 )
 from app.database import get_session
-from app.storage import ObjectStorage, get_storage
 from app.timeutil import TZ_TH, today_th
 from app.routers.participations import (
     _activity_names,
@@ -59,7 +56,8 @@ def _validate_not_backdated(start_at: datetime) -> None:
 def _ensure_visible(activity: Activity, current_user: User) -> None:
     """Raise 403 if `current_user` isn't allowed to see/manage this activity."""
     if current_user.role == UserRole.student:
-        if activity.approval_status != ApprovalStatus.approved:
+        # กิจกรรมที่ถูกซ่อน = ถูก "ลบ" ในสายตานิสิต แม้ประวัติการเข้าร่วมจะยังอยู่
+        if activity.approval_status != ApprovalStatus.approved or activity.is_hidden:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
     elif current_user.role == UserRole.staff:
         if activity.created_by != current_user.id:
@@ -107,6 +105,9 @@ def list_activities(
     if current_user.role == UserRole.student:
         query = query.where(Activity.approval_status == ApprovalStatus.approved)
         count_query = count_query.where(Activity.approval_status == ApprovalStatus.approved)
+        # กิจกรรมที่ซ่อนไว้ต้องหายไปจากฝั่งนิสิตทั้งหมด (staff/admin ยังเห็นพร้อม badge)
+        query = query.where(Activity.is_hidden == False)  # noqa: E712
+        count_query = count_query.where(Activity.is_hidden == False)  # noqa: E712
     elif current_user.role == UserRole.staff:
         query = query.where(Activity.created_by == current_user.id)
         count_query = count_query.where(Activity.created_by == current_user.id)
@@ -295,17 +296,16 @@ def delete_activity(
     activity_id: int,
     session: Session = Depends(get_session),
     current_user: User = Depends(require_writer),
-    storage: ObjectStorage = Depends(get_storage),
 ):
-    """ลบกิจกรรม พร้อมเก็บกวาดทุกอย่างที่ชี้มาหาตลอดสาย Bronze → Silver
+    """ลบกิจกรรม — แต่ถ้ามีคนเข้าร่วมไปแล้วจะ "ซ่อน" แทนการลบจริง
 
-    เดิมลบแค่ `participation` แล้ว commit ซึ่งล้มทันทีที่มีใครอัปโหลดหลักฐาน
-    เพราะ `raw_file` และ `silver_evidence_ocr` ยัง FK ชี้มาที่ participation อยู่
-    (NO ACTION ทั้งคู่) จึงต้องลบไล่จากปลายสายเข้ามา:
-    silver_evidence_ocr → raw_file → participation → activity
+    ลบกิจกรรมที่มีผู้เข้าร่วมทิ้งจะลากชั่วโมงที่นิสิตได้ไปแล้วหายตามไปด้วย
+    (`gold_student_hours` คำนวณสดจาก participation) ซึ่งกู้คืนไม่ได้ กรณีนั้นจึงแค่
+    ตั้ง `is_hidden` แทน: นิสิตไม่เห็นและสมัครใหม่ไม่ได้ แต่ประวัติ/ชั่วโมง/หลักฐานเดิม
+    อยู่ครบ และ staff/admin ยังเห็นพร้อม badge "ซ่อนอยู่" กด "เลิกซ่อน" กลับมาได้
 
-    ชั่วโมงที่นิสิตได้จากกิจกรรมนี้จะหายไปด้วยตามเจตนาของการลบกิจกรรม
-    (`gold_student_hours` คำนวณสดจาก participation)
+    กิจกรรมที่ยังไม่มีใครเข้าร่วมเลยไม่มีอะไรให้เสีย จึงลบทิ้งได้จริง (หลักฐานทั้งสาย
+    Bronze → Silver ผูกกับ participation ทั้งหมด ไม่มี participation ก็ไม่มีอะไรค้าง)
     """
     activity = session.get(Activity, activity_id)
     if not activity:
@@ -313,32 +313,16 @@ def delete_activity(
     if current_user.role == UserRole.staff and activity.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    related = session.exec(select(Participation).where(Participation.activity_id == activity_id)).all()
-    participation_ids = [p.id for p in related]
+    has_participants = session.exec(
+        select(Participation).where(Participation.activity_id == activity_id)
+    ).first()
+    if has_participants:
+        activity.is_hidden = True
+        session.add(activity)
+        session.commit()
+        return None
 
-    raw_files: list[RawFile] = []
-    if participation_ids:
-        ocr_rows = session.exec(
-            select(SilverEvidenceOcr).where(
-                SilverEvidenceOcr.participation_id.in_(participation_ids)
-            )
-        ).all()
-        raw_files = session.exec(
-            select(RawFile).where(RawFile.participation_id.in_(participation_ids))
-        ).all()
-        # Silver อ้างทั้ง raw_file และ participation จึงต้องไปก่อนทั้งคู่
-        for row in ocr_rows:
-            session.delete(row)
-        for row in raw_files:
-            session.delete(row)
-
-    for row in related:
-        session.delete(row)
     session.delete(activity)
-
-    # เก็บ key ไว้ก่อน commit — หลัง commit อ็อบเจกต์ ORM ถูก expire ไปแล้ว
-    object_keys = [(f.bucket, f.object_key) for f in raw_files]
-
     try:
         session.commit()
     except IntegrityError:
@@ -352,13 +336,28 @@ def delete_activity(
             detail="ลบกิจกรรมไม่ได้ เพราะยังมีข้อมูลอื่นอ้างถึงอยู่ กรุณาติดต่อผู้ดูแลระบบ",
         )
 
-    # ลบไฟล์ใน object storage หลัง commit สำเร็จเท่านั้น — ถ้าทำก่อนแล้ว commit ล้ม
-    # ไฟล์จะหายทั้งที่ข้อมูลยังอยู่ กู้คืนไม่ได้ ส่วนไฟล์ที่ลบไม่ผ่านแค่ค้างเป็นขยะ
-    # ใน MinIO ซึ่งไม่กระทบผู้ใช้ จึงกลืน error ไว้แล้วบันทึก log แทนการตอบ 500
-    for bucket, object_key in object_keys:
-        try:
-            storage.remove_object(bucket, object_key)
-        except Exception:
-            logger.warning("ลบไฟล์หลักฐาน %s/%s ไม่สำเร็จ", bucket, object_key, exc_info=True)
-
     return None
+
+
+@router.patch("/{activity_id}/unhide", response_model=ActivityRead)
+def unhide_activity(
+    activity_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_writer),
+):
+    """เลิกซ่อนกิจกรรมที่เคยกด "ลบ" ไปตอนมีผู้เข้าร่วมแล้ว — กู้กลับมาให้นิสิตเห็นได้
+
+    สถานะอนุมัติเดิมไม่ถูกแตะ: กิจกรรมที่อนุมัติแล้วกลับมาแสดงทันที ส่วนที่ยังรออนุมัติ
+    ก็ยังรอต่อเหมือนก่อนถูกซ่อน
+    """
+    activity = session.get(Activity, activity_id)
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    if current_user.role == UserRole.staff and activity.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    activity.is_hidden = False
+    session.add(activity)
+    session.commit()
+    session.refresh(activity)
+    return _to_read_single(session, activity)

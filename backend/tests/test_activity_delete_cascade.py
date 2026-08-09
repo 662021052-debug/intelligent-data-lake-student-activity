@@ -1,12 +1,11 @@
-"""ลบกิจกรรมต้องเก็บกวาดตลอดสาย Bronze → Silver ไม่ให้เหลือแถวกำพร้า
+"""กิจกรรมที่มีผู้เข้าร่วมแล้วต้อง "ถูกซ่อน" ไม่ใช่ถูกลบ (Prompt C)
 
-เดิม `delete_activity` ลบแค่ `participation` แล้ว commit — บน Postgres จะล้มด้วย
-FK violation ทันทีที่มีใครอัปโหลดหลักฐาน (raw_file/silver_evidence_ocr ยังชี้มาที่
-participation อยู่) แล้วโผล่หน้าเว็บเป็น "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้"
+เดิมกด "ลบ" แล้วลบทิ้งจริงทั้งสาย participation → raw_file → silver_evidence_ocr
+ซึ่งลากชั่วโมงที่นิสิตได้ไปแล้วหายตามไปด้วยและกู้คืนไม่ได้ ตอนนี้กรณีนั้นเปลี่ยนเป็น
+ตั้ง `is_hidden` แทน ส่วนกิจกรรมที่ยังไม่มีใครลงทะเบียนยังลบทิ้งได้จริงเหมือนเดิม
 
-เทสต์ชุดนี้เช็ก "แถวหายจริง" ไม่ใช่พึ่ง FK เพราะ SQLite ที่ conftest ใช้ไม่ได้เปิด
-`PRAGMA foreign_keys` ไว้ จึงไม่บ่นแม้จะเหลือแถวกำพร้า — ซึ่งเป็นเหตุผลที่บั๊กนี้
-รอดเทสต์เดิมมาได้
+เทสต์ชุดนี้เช็ก "แถวยังอยู่จริง" ไม่ใช่พึ่ง FK เพราะ SQLite ที่ conftest ใช้ไม่ได้เปิด
+`PRAGMA foreign_keys` ไว้ จึงไม่บ่นแม้จะเหลือแถวกำพร้า
 """
 from datetime import datetime
 
@@ -121,7 +120,8 @@ def _participation_with_evidence(client, session, storage, username, student_cod
     return activity, participation, raw_file
 
 
-def test_delete_activity_removes_evidence_chain(client, session, storage):
+def test_delete_activity_with_evidence_hides_it_and_keeps_everything(client, session, storage):
+    """มีคนเข้าร่วมแล้ว = ห้ามลบจริง — ทั้งการเข้าร่วม หลักฐาน และไฟล์ต้องอยู่ครบ"""
     activity, participation, raw_file = _participation_with_evidence(
         client, session, storage, "del_owner", "8401001"
     )
@@ -130,27 +130,26 @@ def test_delete_activity_removes_evidence_chain(client, session, storage):
     response = client.delete(f"/activities/{activity.id}")
     assert response.status_code == 204, response.text
 
-    assert session.get(Activity, activity.id) is None
-    assert session.get(Participation, participation.id) is None
+    session.expire_all()
+    hidden = session.get(Activity, activity.id)
+    assert hidden is not None
+    assert hidden.is_hidden is True
+
+    assert session.get(Participation, participation.id) is not None
     assert session.exec(
         select(RawFile).where(RawFile.participation_id == participation.id)
-    ).first() is None
+    ).first() is not None
     assert session.exec(
         select(SilverEvidenceOcr).where(
             SilverEvidenceOcr.participation_id == participation.id
         )
-    ).first() is None
-
-    # ไฟล์ใน object storage ต้องถูกลบด้วย ไม่ปล่อยค้างเป็นขยะที่ไม่มีใครอ้างถึง
-    try:
-        storage.get_object_bytes(bucket, object_key)
-        raise AssertionError("ไฟล์หลักฐานยังอยู่ใน storage ทั้งที่ลบกิจกรรมไปแล้ว")
-    except FileNotFoundError:
-        pass
+    ).first() is not None
+    # ไฟล์หลักฐานต้องไม่ถูกลบทิ้งไปด้วย ไม่งั้นเลิกซ่อนแล้วก็กู้ไม่ครบ
+    assert storage.get_object_bytes(bucket, object_key) == PNG_BYTES
 
 
 def test_delete_activity_keeps_other_activities_evidence(client, session, storage):
-    """ลบกิจกรรมหนึ่งต้องไม่ลากหลักฐานของกิจกรรมอื่นหายไปด้วย"""
+    """ซ่อนกิจกรรมหนึ่งต้องไม่กระทบหลักฐานของกิจกรรมอื่น"""
     doomed, _, _ = _participation_with_evidence(client, session, storage, "del_a", "8401010")
     kept_activity, kept_participation, kept_raw = _participation_with_evidence(
         client, session, storage, "del_b", "8401011"

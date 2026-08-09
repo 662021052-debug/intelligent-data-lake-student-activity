@@ -147,6 +147,10 @@ class Activity(ActivityBase, table=True):
     # ภายนอกไม่ได้ (ไม่อยู่ใน ActivityCreate/Update) และไม่หลุดออกไปกับ ActivityRead
     # ที่นิสิตทุกคนเห็น ต้องขอผ่าน GET /activities/{id}/checkin-qr เท่านั้น
     checkin_token: str = Field(default_factory=new_checkin_token, unique=True, index=True)
+    # "ซ่อน" แทนการลบ สำหรับกิจกรรมที่มีคนเข้าร่วมไปแล้ว — ลบจริงจะทำให้ชั่วโมงที่
+    # นิสิตได้ไปหายตามไปด้วย ตั้งค่าจากภายนอกไม่ได้ (ไม่อยู่ใน ActivityCreate/Update)
+    # เปลี่ยนได้ทาง DELETE (ซ่อน) และ PATCH /unhide (เลิกซ่อน) เท่านั้น
+    is_hidden: bool = Field(default=False, index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="user.id")
     approval_status: ApprovalStatus = ApprovalStatus.pending
     approved_by: Optional[int] = Field(default=None, foreign_key="user.id")
@@ -183,6 +187,8 @@ class ActivityRead(ActivityBase):
     approved_by: Optional[int] = None
     approved_at: Optional[datetime] = None
     participant_count: int = 0
+    # staff/admin ใช้ขึ้น badge "ซ่อนอยู่" — นิสิตไม่เคยเห็นแถวที่ซ่อนอยู่แล้ว
+    is_hidden: bool = False
 
 
 # ---------- Participation ----------

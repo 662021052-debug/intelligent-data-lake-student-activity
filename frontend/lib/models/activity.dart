@@ -12,6 +12,10 @@ class Activity {
   final String approvalStatus; // pending | approved
   final int participantCount;
 
+  /// ถูก "ซ่อน" แทนการลบ (กิจกรรมที่มีผู้เข้าร่วมแล้ว) — นิสิตไม่เห็น
+  /// staff/admin ยังเห็นพร้อม badge และกดเลิกซ่อนได้
+  final bool isHidden;
+
   Activity({
     this.id,
     required this.name,
@@ -25,6 +29,7 @@ class Activity {
     this.createdBy,
     this.approvalStatus = 'pending',
     this.participantCount = 0,
+    this.isHidden = false,
   });
 
   bool get isFull => participantCount >= maxParticipants;
@@ -42,6 +47,7 @@ class Activity {
         createdBy: json['created_by'] as int?,
         approvalStatus: json['approval_status'] as String? ?? 'pending',
         participantCount: json['participant_count'] as int? ?? 0,
+        isHidden: json['is_hidden'] as bool? ?? false,
       );
 
   Map<String, dynamic> toJson() => {

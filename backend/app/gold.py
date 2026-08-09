@@ -116,6 +116,7 @@ def _view_definitions(dialect: str) -> list[tuple[str, str]]:
             a.hours            AS hours,
             a.max_participants AS max_participants,
             a.approval_status  AS approval_status,
+            a.is_hidden        AS is_hidden,
             a.created_by       AS created_by,
             {d['date_key']}    AS date_key
         FROM activity a
@@ -186,6 +187,10 @@ def _view_definitions(dialect: str) -> list[tuple[str, str]]:
     # have registered (all statuses) so "open for registration" = approved AND
     # participant_count < max_participants. Activities are public, so this view
     # carries no per-student data and needs no student filter.
+    #
+    # กิจกรรมที่ถูกซ่อน (is_hidden) ถูกตัดออกตรงนี้ เพราะ view นี้มีผู้อ่านคนเดียวคือ
+    # แชตบอตของนิสิต — แนะนำกิจกรรมที่สมัครไม่ได้แล้วก็ได้แต่ทำให้เข้าใจผิด
+    # (ชั่วโมงที่นับไปแล้วอยู่ใน gold_student_hours/gold_fact_participation ไม่กระทบ)
     activity_catalog = f"""
         SELECT
             a.id               AS activity_key,
@@ -206,6 +211,7 @@ def _view_definitions(dialect: str) -> list[tuple[str, str]]:
         FROM activity a
         LEFT JOIN hoursubcategory sub ON sub.id = a.subcategory_id
         LEFT JOIN hourcategory c ON c.id = sub.category_id
+        WHERE NOT a.is_hidden
     """
 
     return [
