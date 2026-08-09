@@ -4,6 +4,7 @@ from sqlmodel import select
 
 from app.auth import hash_password
 from app.models import Activity, EvidenceStatus, Participation, Student, StudentStatus, User, UserRole
+from tests.test_activities import future_start
 
 
 def _make_student(session, student_id, full_name):
@@ -186,7 +187,7 @@ def test_student_cannot_create_activity(client, tokens):
         "subcategory_id": 1,
         "is_required": False,
         "max_participants": 10,
-        "start_at": "2026-08-01T09:00:00",
+        "start_at": future_start(),
         "location": "ห้อง SC101",
         "hours": 4,
     }
@@ -203,7 +204,7 @@ def test_student_cannot_update_or_delete_activity(client, tokens):
             "subcategory_id": 1,
             "is_required": False,
             "max_participants": 10,
-            "start_at": "2026-08-01T09:00:00",
+            "start_at": future_start(),
             "location": "ห้อง SC101",
             "hours": 4,
         },

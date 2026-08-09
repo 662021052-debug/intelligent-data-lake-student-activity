@@ -1,3 +1,12 @@
+from datetime import datetime, timedelta
+
+
+def future_start(days: int = 30) -> str:
+    """วันเวลาเริ่มกิจกรรมข้างหน้า — สร้างกิจกรรมย้อนหลังไม่ได้แล้ว
+    (ดู test_activity_backdate.py) และการฝังวันที่ตายตัวก็พังเองเมื่อเวลาผ่านไป"""
+    return (datetime.now() + timedelta(days=days)).replace(microsecond=0).isoformat()
+
+
 def make_activity(client, name="กิจกรรมทดสอบ", activity_type="วิชาการ", hours=4):
     payload = {
         "name": name,
@@ -5,7 +14,7 @@ def make_activity(client, name="กิจกรรมทดสอบ", activity_
         "subcategory_id": 1,
         "is_required": False,
         "max_participants": 50,
-        "start_at": "2026-08-01T09:00:00",
+        "start_at": future_start(),
         "location": "ห้อง SC101",
         "hours": hours,
     }
@@ -54,9 +63,9 @@ def test_list_activities_order_is_stable_after_approval(client, tokens):
     """อนุมัติกิจกรรมแล้วลำดับในรายการต้องไม่เปลี่ยน (เรียงตามวันจัดกิจกรรมเสมอ)."""
     # สร้างสลับวันไปมา เพื่อให้ลำดับ insert ไม่ตรงกับลำดับที่ควรแสดง
     for name, start_at in (
-        ("กิจกรรม ก", "2026-08-03T09:00:00"),
-        ("กิจกรรม ข", "2026-08-01T09:00:00"),
-        ("กิจกรรม ค", "2026-08-02T09:00:00"),
+        ("กิจกรรม ก", future_start(32)),
+        ("กิจกรรม ข", future_start(30)),
+        ("กิจกรรม ค", future_start(31)),
     ):
         response = client.post(
             "/activities",
@@ -127,7 +136,7 @@ def test_staff_cannot_see_admin_created_activity(client, tokens):
             "subcategory_id": 1,
             "is_required": False,
             "max_participants": 50,
-            "start_at": "2026-08-01T09:00:00",
+            "start_at": future_start(),
             "location": "ห้อง SC101",
             "hours": 4,
         },
@@ -155,7 +164,7 @@ def test_admin_created_activity_is_auto_approved(client, tokens):
             "subcategory_id": 1,
             "is_required": False,
             "max_participants": 50,
-            "start_at": "2026-08-01T09:00:00",
+            "start_at": future_start(),
             "location": "ห้อง SC101",
             "hours": 4,
         },
@@ -218,7 +227,7 @@ def test_activity_requires_hours(client):
         "subcategory_id": 1,
         "is_required": False,
         "max_participants": 50,
-        "start_at": "2026-08-01T09:00:00",
+        "start_at": future_start(),
         "location": "ห้อง SC101",
     }
     assert client.post("/activities", json=payload).status_code == 422

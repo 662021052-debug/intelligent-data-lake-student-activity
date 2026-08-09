@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +52,32 @@ class Settings(BaseSettings):
     vector_backend: str = "memory"
     # How many rule chunks to retrieve for a RAG answer.
     rag_top_k: int = 4
+
+    # ---- อีเมลแจ้งเตือน (ข้อ 6.4) ----
+    # email_backend: "smtp" (ส่งจริง ต้องตั้ง SMTP_HOST) หรือ "stub" (ไม่ส่งจริง
+    # เก็บไว้ใน memory) — ดีฟอลต์เป็น stub เพื่อไม่ให้ระบบที่ยังไม่ตั้งค่าเผลอ
+    # ยิงอีเมลถึงนิสิตทั้งมหาวิทยาลัย
+    email_backend: str = "stub"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    # รับทั้ง SMTP_PASSWORD และ SMTP_PASS — เอกสารสเปกเขียน SMTP_PASS ถ้าไม่รับ
+    # ชื่อนี้ด้วย คนตั้งค่าตามเอกสารจะได้รหัสผ่านว่างแบบเงียบ ๆ แล้วงงว่าทำไม login ไม่ผ่าน
+    smtp_password: str = Field(
+        default="", validation_alias=AliasChoices("smtp_password", "smtp_pass")
+    )
+    smtp_from: str = "no-reply@tsu.ac.th"
+    smtp_use_tls: bool = True
+    # อีเมลนิสิตอนุมานจากรหัสนิสิตตามรูปแบบของมหาวิทยาลัย (เช่น 662021052@tsu.ac.th)
+    # เพราะตาราง student ยังไม่มีคอลัมน์อีเมล
+    student_email_domain: str = "tsu.ac.th"
+    # ต่ำกว่ากี่ % ของชั่วโมงที่ต้องได้ ถือว่าเป็นกลุ่มเสี่ยง (ตรงกับดีฟอลต์ของ
+    # /dashboard/at-risk เพื่อให้ "รายชื่อบนแดชบอร์ด" กับ "คนที่ได้รับอีเมล" ตรงกัน)
+    notify_at_risk_threshold: float = 50
+    # ตั้งเวลาเช็กกลุ่มเสี่ยงอัตโนมัติวันละครั้ง — ปิดไว้เป็นค่าเริ่มต้น ต้องเปิดเอง
+    # ตอน deploy จริง (ดีฟอลต์เปิดจะทำให้ทุกเครื่อง dev มี thread ตั้งเวลาโดยไม่ตั้งใจ)
+    notify_scheduler_enabled: bool = False
+    notify_at_risk_hour: int = 8  # เวลาไทยที่ให้ job รายวันทำงาน
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

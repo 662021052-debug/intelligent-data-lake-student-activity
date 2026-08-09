@@ -8,11 +8,26 @@ import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/chart_style.dart';
 import '../utils/api_error.dart';
+import '../utils/download_io.dart';
 import '../utils/format.dart';
+import '../utils/report_export.dart';
 import '../widgets/app_data_table.dart';
+import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/kpi_card.dart';
 import 'student_hours_screen.dart';
+
+/// จุดที่ [index] ควรมีป้ายเดือนบนแกน X ของกราฟแนวโน้มหรือไม่
+///
+/// แยกเป็นฟังก์ชันบนสุดเพื่อให้เทสต์ยืนยันได้ว่าไม่มีเดือนไหนถูกวาดซ้ำและป้าย
+/// ไม่ชิดกันเกินไป (หน้าจอเต็มต้องยิง API จริงจึงเทสต์ตรง ๆ ไม่ได้)
+///
+/// นับระยะจากจุดสุดท้ายย้อนกลับมา เดือนล่าสุดจึงมีป้ายเสมอ และช่วงห่างเท่ากันหมด
+bool showsTrendLabel(int index, int pointCount) {
+  if (pointCount <= 0 || index < 0 || index >= pointCount) return false;
+  final step = (pointCount / 6).ceil().clamp(1, pointCount);
+  return (pointCount - 1 - index) % step == 0;
+}
 
 /// Phase 12 — Executive dashboard (admin only). Reads the Gold-Layer
 /// dashboard API and renders KPI cards, charts and drill-down tables.
@@ -35,6 +50,9 @@ const _semesterLabels = {1: 'ภาคต้น', 2: 'ภาคปลาย', 3:
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = false;
   String? _error;
+
+  /// รูปแบบที่กำลังส่งออกอยู่ (null = ไม่ได้กำลังส่งออก) — กันกดซ้ำระหว่างรอไฟล์
+  ReportFormat? _exporting;
 
   // filters
   String? _faculty;
@@ -105,6 +123,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// ดาวน์โหลดรายงานตามตัวกรองที่เลือกอยู่ (คณะ/ชั้นปี)
+  Future<void> _export(ReportFormat format) async {
+    setState(() => _exporting = format);
+    try {
+      final bytes = await ApiService.downloadBytes(
+        format.path,
+        query: reportQuery(faculty: _faculty, yearLevel: _yearLevel),
+      );
+      saveBytesAsFile(bytes, reportFileName(format), format.mediaType);
+      if (mounted) showInfoSnackbar(context, 'ดาวน์โหลดไฟล์ ${format.displayName} เรียบร้อย');
+    } catch (e) {
+      if (mounted) showErrorSnackbar(context, friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _exporting = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!authService.isAdmin) {
@@ -145,6 +180,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.all(AppSpacing.lg),
             children: [
               _buildFilters(),
+              const SizedBox(height: AppSpacing.md),
+              _buildExportRow(),
               const SizedBox(height: AppSpacing.lg),
               _buildKpiRow(),
               const SizedBox(height: AppSpacing.lg),
@@ -172,6 +209,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
           alignment: Alignment.topCenter,
           child: LinearProgressIndicator(minHeight: 3),
         ),
+      ],
+    );
+  }
+
+  // --------------------------- export ---------------------------
+
+  Widget _buildExportRow() {
+    final theme = Theme.of(context);
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: AppSpacing.md,
+      runSpacing: AppSpacing.sm,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        // บอกให้ชัดว่าไฟล์ที่ได้ยึดตัวกรองไหน — รายงานเป็นชั่วโมง "สะสม" จึงไม่มี
+        // ภาคเรียนให้กรอง ต่างจากตัวเลขบนหน้าจอที่กรองภาคเรียนได้
+        Text(
+          'รายงานชั่วโมงสะสมตามคณะ/ชั้นปีที่เลือก',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        for (final format in ReportFormat.values)
+          OutlinedButton.icon(
+            onPressed: _exporting != null ? null : () => _export(format),
+            icon: _exporting == format
+                ? const SizedBox(
+                    width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(
+                    format == ReportFormat.xlsx ? Icons.table_view : Icons.picture_as_pdf,
+                    size: 18,
+                  ),
+            label: Text(format.label),
+          ),
       ],
     );
   }
@@ -510,11 +579,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// ป้ายเดือนของกราฟแนวโน้ม — TrendPoint ส่งปี/เดือนมาเป็นตัวเลขอยู่แล้ว
+  /// จึงไม่ต้องแกะจากสตริง `period` ("2025-08")
+  String _trendLabel(TrendPoint p) => formatMonthLabel(DateTime(p.year, p.month));
+
   Widget _buildTrendLineChart() {
     final scheme = Theme.of(context).colorScheme;
     final maxY = _trend.fold<double>(0, (m, p) => p.count > m ? p.count.toDouble() : m);
-    // แสดงป้ายเดือนเว้นระยะเมื่อจุดเยอะ ป้ายจะได้ไม่ทับกัน
-    final labelStep = (_trend.length / 6).ceil().clamp(1, _trend.length);
 
     return LineChart(
       LineChartData(
@@ -526,7 +597,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             getTooltipItems: (spots) => spots.map((s) {
               final p = _trend[s.x.toInt()];
               return LineTooltipItem(
-                '${p.period}\n${p.count} ครั้ง',
+                '${_trendLabel(p)}\n${p.count} ครั้ง',
                 ChartStyle.tooltipText(scheme),
               );
             }).toList(),
@@ -569,16 +640,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
+              // ต้องล็อก interval = 1 (หนึ่งจุดข้อมูล) ไม่งั้น fl_chart เลือกระยะ
+              // เป็นทศนิยมเอง เช่น 0.4/0.8/1.2 แล้ว value.toInt() ปัดลงมาชนกัน
+              // เป็น index เดิม ป้ายเดือนเดียวกันจึงถูกวาดซ้ำหลายรอบทับกัน
+              interval: 1,
               reservedSize: 32,
               getTitlesWidget: (value, meta) {
                 final i = value.toInt();
-                if (i < 0 || i >= _trend.length) return const SizedBox.shrink();
-                if (i % labelStep != 0 && i != _trend.length - 1) {
-                  return const SizedBox.shrink();
-                }
+                if (!showsTrendLabel(i, _trend.length)) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.only(top: AppSpacing.sm),
-                  child: Text(_trend[i].period, style: ChartStyle.axisLabel(context)),
+                  child: Text(_trendLabel(_trend[i]), style: ChartStyle.axisLabel(context)),
                 );
               },
             ),

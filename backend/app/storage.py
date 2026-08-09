@@ -26,6 +26,9 @@ class ObjectStorage(Protocol):
     def get_object_bytes(self, bucket: str, object_key: str) -> bytes:
         ...
 
+    def remove_object(self, bucket: str, object_key: str) -> None:
+        ...
+
 
 class MinIOStorage:
     """S3-compatible storage backed by MinIO.
@@ -75,6 +78,10 @@ class MinIOStorage:
                 response.close()
                 response.release_conn()
 
+    def remove_object(self, bucket: str, object_key: str) -> None:
+        # MinIO's remove_object is already idempotent — a missing key is not an error
+        self._client.remove_object(bucket, object_key)
+
 
 class InMemoryStorage:
     """Dict-backed storage for tests and local runs without MinIO."""
@@ -97,6 +104,9 @@ class InMemoryStorage:
             return self._objects[(bucket, object_key)]
         except KeyError as exc:
             raise FileNotFoundError(object_key) from exc
+
+    def remove_object(self, bucket: str, object_key: str) -> None:
+        self._objects.pop((bucket, object_key), None)
 
 
 _storage: Optional[ObjectStorage] = None

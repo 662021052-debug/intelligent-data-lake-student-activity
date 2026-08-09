@@ -248,4 +248,22 @@ class ApiService {
     _decode(response); // throws ApiException with the server detail
     throw ApiException(response.statusCode, 'unreachable');
   }
+
+  /// ดึงไฟล์ (เช่น รายงาน Excel/PDF) มาเป็น bytes พร้อมแนบ JWT
+  ///
+  /// ใช้ `http.get` ตรงเหมือน [fetchEvidence] เพราะ body ไม่ใช่ JSON — แต่ error
+  /// ยังผ่าน [_decode] เพื่อให้ได้ข้อความไทยชุดเดียวกับที่เหลือทั้งแอป
+  static Future<Uint8List> downloadBytes(String path, {Map<String, String>? query}) async {
+    final response = await http.get(
+      _uri(path, query),
+      headers: {
+        if (authService.token != null) 'Authorization': 'Bearer ${authService.token}',
+      },
+    );
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.bodyBytes;
+    }
+    _decode(response); // throws ApiException with the server detail
+    throw ApiException(response.statusCode, 'unreachable');
+  }
 }

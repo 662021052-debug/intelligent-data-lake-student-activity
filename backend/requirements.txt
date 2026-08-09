@@ -19,3 +19,11 @@ easyocr==1.7.1
 # Chatbot LLM (Gemini). Imported lazily so tests/local runs without it still work
 # when LLM_BACKEND=stub. The pgvector Postgres path uses raw SQL (no extra dep).
 google-generativeai==0.7.2
+# ส่งออกรายงานชั่วโมงเป็น Excel/PDF (ข้อ 6.5). import แบบ lazy ในฟังก์ชันที่ใช้จริง
+# หมายเหตุ: PDF ภาษาไทยต้องมีฟอนต์ไทยในเครื่องด้วย (Dockerfile ติดตั้ง fonts-thai-tlwg แล้ว)
+openpyxl==3.1.5
+reportlab==4.2.2
+# งานตั้งเวลาแจ้งเตือนกลุ่มเสี่ยงรายวัน (ข้อ 6.4). Imported lazily เช่นกัน —
+# ต้องติดตั้งเฉพาะเมื่อ NOTIFY_SCHEDULER_ENABLED=true (การส่งอีเมลใช้ smtplib
+# ซึ่งเป็น stdlib จึงไม่มี dependency เพิ่ม)
+APScheduler==3.10.4

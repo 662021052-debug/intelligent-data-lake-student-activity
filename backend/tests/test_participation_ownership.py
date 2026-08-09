@@ -1,3 +1,4 @@
+from tests.test_activities import future_start
 from tests.test_students import make_student
 
 
@@ -22,7 +23,7 @@ def _make_activity(client, name="กิจกรรมของ owner", headers=
         "subcategory_id": 1,
         "is_required": False,
         "max_participants": 50,
-        "start_at": "2026-08-01T09:00:00",
+        "start_at": future_start(),
         "location": "ห้อง SC101",
         "hours": 4,
     }

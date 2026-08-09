@@ -189,6 +189,47 @@ http://localhost:8080/#/checkin?c=<token ที่แสดงใต้ QR>
 **ตอน deploy จริงต้องตั้ง `PUBLIC_APP_BASE_URL` เป็นโดเมนจริง + HTTPS** ไม่งั้น QR จะ
 ชี้ไป `localhost` ซึ่งในมือถือหมายถึงตัวเครื่องมือถือเอง เปิดไม่ถึงเซิร์ฟเวอร์
 
+## ส่งออกรายงานชั่วโมง (Excel / PDF)
+
+ปุ่ม **"ส่งออก Excel" / "ส่งออก PDF"** อยู่บนหน้าแดชบอร์ดผู้บริหาร (ใต้แถบตัวกรอง)
+หรือเรียก API ตรง ๆ ได้ — **staff และ admin เท่านั้น**
+
+```bash
+curl -OJ -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/reports/student-hours.xlsx?faculty=วิทยาศาสตร์&year_level=4"
+curl -OJ -H "Authorization: Bearer <token>" "http://localhost:8000/reports/student-hours.pdf"
+```
+
+- หนึ่งแถว = นิสิตหนึ่งคน × หมวดชั่วโมงหนึ่งหมวด (grain เดียวกับ `gold_student_hours`)
+  คอลัมน์: รหัสนิสิต · ชื่อ-สกุล · คณะ · ชั้นปี · หมวดกิจกรรม · ชั่วโมงที่ได้ · ชั่วโมงที่ต้องการ · สถานะ
+- กรองได้ตาม `faculty` / `year_level` — **ไม่มีตัวกรองภาคเรียน** เพราะรายงานเป็นยอด
+  สะสมทั้งหลักสูตร (ต่างจากตัวเลขบนแดชบอร์ดที่กรองภาคเรียนได้)
+- **PDF ต้องมีฟอนต์ไทยในเครื่องที่รัน backend** — docker ติดตั้ง `fonts-thai-tlwg` ให้แล้ว
+  ถ้าไม่มีฟอนต์ endpoint จะตอบ 503 พร้อมข้อความบอกวิธีแก้ แทนการปล่อยไฟล์ที่ตัวอักษร
+  เป็นกล่องสี่เหลี่ยมออกไป (Excel ไม่มีปัญหานี้ เพราะใช้ฟอนต์ของเครื่องที่เปิดไฟล์)
+
+## อีเมลแจ้งเตือนอัตโนมัติ
+
+ส่งได้ 2 แบบ ทั้งคู่เป็น **admin เท่านั้น**
+
+```bash
+# 1) เตือนนิสิตที่ชั่วโมงยังไม่ถึงเกณฑ์ (อ่านจาก gold_student_hours)
+curl -X POST "http://localhost:8000/notifications/at-risk" -H "Authorization: Bearer <admin-token>"
+# กรองเฉพาะกลุ่มที่ใกล้จบ / เกณฑ์ % เองก็ได้
+curl -X POST "http://localhost:8000/notifications/at-risk?year_level=4&threshold=80" -H "Authorization: Bearer <admin-token>"
+
+# 2) ประชาสัมพันธ์กิจกรรมที่เปิดรับสมัคร ถึงนิสิตที่ยังไม่ได้สมัคร
+curl -X POST "http://localhost:8000/notifications/activity/12" -H "Authorization: Bearer <admin-token>"
+```
+
+- ค่าเริ่มต้น `EMAIL_BACKEND=stub` คือ **ไม่ส่งจริง** (เก็บไว้ในหน่วยความจำ + เขียน log)
+  ต้องตั้ง `EMAIL_BACKEND=smtp` พร้อม `SMTP_HOST/PORT/USER/PASSWORD/FROM` ใน `.env` เองเมื่อพร้อมส่ง
+- ที่อยู่อีเมลนิสิต **อนุมานจากรหัสนิสิต** (`662021052@tsu.ac.th`) เพราะตาราง `student`
+  ยังไม่มีคอลัมน์อีเมล — เปลี่ยนโดเมนได้ที่ `STUDENT_EMAIL_DOMAIN`
+- รอบอัตโนมัติวันละครั้งปิดไว้ ต้อง `pip install APScheduler` แล้วตั้ง
+  `NOTIFY_SCHEDULER_ENABLED=true` (+ `NOTIFY_AT_RISK_HOUR`) — **เปิดเมื่อรัน uvicorn
+  worker เดียวเท่านั้น** ไม่งั้นอีเมลจะถูกส่งซ้ำตามจำนวน worker
+
 ## โครงสร้างโปรเจกต์
 
 ```

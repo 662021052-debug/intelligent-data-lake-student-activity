@@ -15,7 +15,9 @@ from app.routers import (
     dashboard,
     gold,
     hour_categories,
+    notifications,
     participations,
+    reports,
     students,
 )
 from app.storage import get_storage
@@ -49,7 +51,21 @@ async def lifespan(app: FastAPI):
         rag.ingest_rules(get_llm(), get_vector_store())
     except Exception as exc:  # noqa: BLE001 - chatbot is non-critical for booting
         logger.warning("Could not ingest chatbot rules on startup: %s", exc)
+    # งานตั้งเวลาแจ้งเตือนกลุ่มเสี่ยงรายวัน — ปิดไว้เป็นค่าเริ่มต้น และ apscheduler
+    # ถูก import แบบ lazy ข้างใน จึงไม่บังคับให้ทุกเครื่องต้องติดตั้ง
+    stop_scheduler = None
+    try:
+        from app.scheduler import shutdown_notification_scheduler, start_notification_scheduler
+
+        start_notification_scheduler()
+        stop_scheduler = shutdown_notification_scheduler
+    except Exception as exc:  # noqa: BLE001 - notifications are non-critical for booting
+        logger.warning("Could not start the notification scheduler: %s", exc)
+
     yield
+
+    if stop_scheduler is not None:
+        stop_scheduler()
 
 
 app = FastAPI(title="Intelligent Data Lake - Student Activity Tracking API", lifespan=lifespan)
@@ -75,4 +91,6 @@ app.include_router(participations.router)
 app.include_router(hour_categories.router)
 app.include_router(gold.router)
 app.include_router(dashboard.router)
+app.include_router(notifications.router)
+app.include_router(reports.router)
 app.include_router(chatbot.router)

@@ -1,7 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
 from app.auth import get_current_user, require_admin, require_writer
@@ -13,10 +16,14 @@ from app.models import (
     ApprovalStatus,
     Participation,
     ParticipationRead,
+    RawFile,
+    SilverEvidenceOcr,
     User,
     UserRole,
 )
 from app.database import get_session
+from app.storage import ObjectStorage, get_storage
+from app.timeutil import TZ_TH
 from app.routers.participations import (
     _activity_names,
     _latest_evidence_map,
@@ -27,6 +34,26 @@ from app.checkin import checkin_window, qr_payload
 from app.schemas import ActivityCheckinQr, Page
 
 router = APIRouter(prefix="/activities", tags=["activities"], dependencies=[Depends(get_current_user)])
+
+logger = logging.getLogger(__name__)
+
+BACKDATED_DETAIL = "ไม่สามารถตั้งวันเวลากิจกรรมเป็นอดีตได้"
+
+
+def _validate_not_backdated(start_at: datetime) -> None:
+    """กันตั้งกิจกรรมย้อนหลัง — วันจัดกิจกรรมต้องเป็นวันนี้หรืออนาคตเท่านั้น
+
+    เทียบระดับ "วัน" ไม่ใช่ระดับวินาที เพื่อให้เจ้าหน้าที่ยังบันทึกกิจกรรมของ
+    เช้าวันนี้ได้ตอนบ่าย และให้ตรงกับ date picker ฝั่ง UI ที่ล็อก `firstDate`
+    ไว้แค่ระดับวันเหมือนกัน — ไม่งั้นผู้ใช้จะเลือกวันได้แต่กดบันทึกไม่ผ่าน
+
+    ค่าที่ไม่มีโซนเวลาถือเป็นเวลาไทย เพราะ start_at ของกิจกรรมมาจากที่ผู้ใช้กรอก
+    (ต่างจาก timestamp ที่ระบบเขียนเองซึ่งเป็น UTC) ถ้าไปตีความเป็น UTC วันจะ
+    เพี้ยนไปหนึ่งวันในช่วงหัวค่ำ
+    """
+    start_th = start_at.astimezone(TZ_TH) if start_at.tzinfo else start_at.replace(tzinfo=TZ_TH)
+    if start_th.date() < datetime.now(TZ_TH).date():
+        raise HTTPException(status_code=400, detail=BACKDATED_DETAIL)
 
 
 def _ensure_visible(activity: Activity, current_user: User) -> None:
@@ -122,6 +149,7 @@ def create_activity(
     session: Session = Depends(get_session),
     current_user: User = Depends(require_writer),
 ):
+    _validate_not_backdated(payload.start_at)
     activity = Activity.model_validate(payload)
     activity.created_by = current_user.id
     if current_user.role == UserRole.admin:
@@ -152,6 +180,15 @@ def update_activity(
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     data = payload.model_dump(exclude_unset=True)
+    new_start: Optional[datetime] = data.get("start_at")
+    # ตรวจเฉพาะตอน "ย้ายวัน" จริง ๆ — ฟอร์มแก้ไขส่งทุกฟิลด์กลับมาเสมอรวมทั้ง
+    # start_at เดิม ถ้าตรวจทุกครั้งกิจกรรมที่จัดไปแล้วจะแก้ชื่อ/สถานที่ไม่ได้เลย
+    # ทั้งที่กติกาห้ามแค่การเปลี่ยนวันไปเป็นอดีต
+    if new_start is not None and new_start.replace(microsecond=0) != activity.start_at.replace(
+        microsecond=0
+    ):
+        _validate_not_backdated(new_start)
+
     for key, value in data.items():
         setattr(activity, key, value)
 
@@ -243,7 +280,18 @@ def delete_activity(
     activity_id: int,
     session: Session = Depends(get_session),
     current_user: User = Depends(require_writer),
+    storage: ObjectStorage = Depends(get_storage),
 ):
+    """ลบกิจกรรม พร้อมเก็บกวาดทุกอย่างที่ชี้มาหาตลอดสาย Bronze → Silver
+
+    เดิมลบแค่ `participation` แล้ว commit ซึ่งล้มทันทีที่มีใครอัปโหลดหลักฐาน
+    เพราะ `raw_file` และ `silver_evidence_ocr` ยัง FK ชี้มาที่ participation อยู่
+    (NO ACTION ทั้งคู่) จึงต้องลบไล่จากปลายสายเข้ามา:
+    silver_evidence_ocr → raw_file → participation → activity
+
+    ชั่วโมงที่นิสิตได้จากกิจกรรมนี้จะหายไปด้วยตามเจตนาของการลบกิจกรรม
+    (`gold_student_hours` คำนวณสดจาก participation)
+    """
     activity = session.get(Activity, activity_id)
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -251,9 +299,51 @@ def delete_activity(
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     related = session.exec(select(Participation).where(Participation.activity_id == activity_id)).all()
+    participation_ids = [p.id for p in related]
+
+    raw_files: list[RawFile] = []
+    if participation_ids:
+        ocr_rows = session.exec(
+            select(SilverEvidenceOcr).where(
+                SilverEvidenceOcr.participation_id.in_(participation_ids)
+            )
+        ).all()
+        raw_files = session.exec(
+            select(RawFile).where(RawFile.participation_id.in_(participation_ids))
+        ).all()
+        # Silver อ้างทั้ง raw_file และ participation จึงต้องไปก่อนทั้งคู่
+        for row in ocr_rows:
+            session.delete(row)
+        for row in raw_files:
+            session.delete(row)
+
     for row in related:
         session.delete(row)
-
     session.delete(activity)
-    session.commit()
+
+    # เก็บ key ไว้ก่อน commit — หลัง commit อ็อบเจกต์ ORM ถูก expire ไปแล้ว
+    object_keys = [(f.bucket, f.object_key) for f in raw_files]
+
+    try:
+        session.commit()
+    except IntegrityError:
+        # ยังมีตารางอื่นชี้มาที่กิจกรรมนี้อยู่ — ตอบให้ผู้ใช้อ่านรู้เรื่อง ดีกว่า
+        # ปล่อย 500 ดิบ ซึ่ง CORS ไม่ได้แนบหัวข้อไปด้วยจนหน้าเว็บเข้าใจผิดว่า
+        # "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้"
+        session.rollback()
+        logger.exception("ลบกิจกรรม %s ไม่สำเร็จ: ยังมีข้อมูลอื่นอ้างถึงอยู่", activity_id)
+        raise HTTPException(
+            status_code=400,
+            detail="ลบกิจกรรมไม่ได้ เพราะยังมีข้อมูลอื่นอ้างถึงอยู่ กรุณาติดต่อผู้ดูแลระบบ",
+        )
+
+    # ลบไฟล์ใน object storage หลัง commit สำเร็จเท่านั้น — ถ้าทำก่อนแล้ว commit ล้ม
+    # ไฟล์จะหายทั้งที่ข้อมูลยังอยู่ กู้คืนไม่ได้ ส่วนไฟล์ที่ลบไม่ผ่านแค่ค้างเป็นขยะ
+    # ใน MinIO ซึ่งไม่กระทบผู้ใช้ จึงกลืน error ไว้แล้วบันทึก log แทนการตอบ 500
+    for bucket, object_key in object_keys:
+        try:
+            storage.remove_object(bucket, object_key)
+        except Exception:
+            logger.warning("ลบไฟล์หลักฐาน %s/%s ไม่สำเร็จ", bucket, object_key, exc_info=True)
+
     return None

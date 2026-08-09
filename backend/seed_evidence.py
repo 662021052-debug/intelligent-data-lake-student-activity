@@ -15,26 +15,16 @@ from __future__ import annotations
 import io
 import random
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
+
+# รายชื่อฟอนต์ไทยย้ายไปอยู่ app/fonts.py แล้ว เพราะรายงาน PDF ต้องใช้ชุดเดียวกัน
+# — re-export ไว้ให้ผู้เรียกเดิม (`from seed_evidence import find_thai_font`) ใช้ต่อได้
+from app.fonts import FONT_CANDIDATES as _FONT_CANDIDATES  # noqa: F401
+from app.fonts import find_thai_font  # noqa: F401
 
 THAI_MONTHS = [
     "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
     "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
-]
-
-# ฟอนต์ไทยที่ยอมรับได้ เรียงตามลำดับความชอบ
-# tlwg = แพ็กเกจ fonts-thai-tlwg ที่ Dockerfile ติดตั้ง, ที่เหลือเผื่อรันบนเครื่อง dev
-_FONT_CANDIDATES = [
-    "/usr/share/fonts/truetype/tlwg/Sarabun.ttf",
-    "/usr/share/fonts/truetype/tlwg/Loma.ttf",
-    "/usr/share/fonts/truetype/tlwg/Garuda.ttf",
-    "/usr/share/fonts/truetype/tlwg/Waree.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
-    "C:/Windows/Fonts/leelawui.ttf",
-    "C:/Windows/Fonts/leelawad.ttf",
-    "C:/Windows/Fonts/tahoma.ttf",
-    "/System/Library/Fonts/Supplemental/Ayuthaya.ttf",
 ]
 
 # สัดส่วนของหลักฐานแต่ละแบบ ให้ผลการตรวจออกมาปนกันเหมือนของจริง
@@ -42,14 +32,6 @@ _FONT_CANDIDATES = [
 VARIANT_FULL = "full"
 VARIANT_NO_NAME = "no_name"
 VARIANT_LOW_QUALITY = "low_quality"
-
-
-def find_thai_font() -> Optional[str]:
-    """path ของฟอนต์ไทยตัวแรกที่เจอในเครื่อง (None ถ้าไม่มีเลย)"""
-    for path in _FONT_CANDIDATES:
-        if Path(path).exists():
-            return path
-    return None
 
 
 def thai_date(dt: datetime) -> str:

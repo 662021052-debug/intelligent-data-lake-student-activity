@@ -26,6 +26,26 @@ String _formatDateTime(DateTime dt) {
 
 String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
 
+/// ข้อความเดียวกับที่ backend ตอบ (400) เมื่อกันกิจกรรมย้อนหลัง — ฝั่ง UI กันเอง
+/// ก่อนยิง API ด้วย จะได้ไม่ต้องรอ round-trip กว่าจะรู้ว่าเลือกวันไม่ได้
+const kBackdatedActivityMessage = 'ไม่สามารถตั้งวันเวลากิจกรรมเป็นอดีตได้';
+
+/// วันแรกที่เลือกเป็นวันจัดกิจกรรมได้ = วันนี้ (ตัดเวลาออก ให้เลือกวันนี้ได้ทั้งวัน)
+///
+/// รับ [now] เข้ามาได้เพื่อให้เทสต์ตรึงเวลาได้ ไม่ต้องพึ่งนาฬิกาเครื่องที่รันเทสต์
+DateTime activityFirstSelectableDate([DateTime? now]) {
+  final today = now ?? DateTime.now();
+  return DateTime(today.year, today.month, today.day);
+}
+
+/// [startAt] ตกวันก่อนวันนี้หรือไม่ — เทียบระดับวันให้ตรงกับกฎฝั่ง backend
+bool isBackdatedActivity(DateTime startAt, [DateTime? now]) =>
+    startAt.isBefore(activityFirstSelectableDate(now));
+
+/// error ที่ควรไปโผล่ใต้ช่อง "วันเวลาเริ่มกิจกรรม" แทนกล่อง error รวมท้ายฟอร์ม
+/// — ผู้ใช้จะได้เห็นว่าปัญหาอยู่ที่ช่องไหน ไม่ต้องไล่หาเอง
+bool isActivityDateError(String message) => message.contains('วันเวลากิจกรรมเป็นอดีต');
+
 /// คอลัมน์ของตารางกิจกรรม — แยกเป็นฟังก์ชันบนสุดเพื่อให้เทสต์ยืนยันได้ว่ามุมมอง
 /// นิสิตไม่มีคอลัมน์ "สถานะอนุมัติ" (หน้าจอเต็มต้องยิง API จริงจึงเทสต์ตรง ๆ ไม่ได้)
 List<DataColumn> activityTableColumns(bool isStudent) => [
@@ -368,6 +388,9 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
   bool _saving = false;
   String? _error;
 
+  /// error ของช่องวันเวลาโดยเฉพาะ (แสดงใต้ช่องนั้น ไม่ใช่กล่องรวมท้ายฟอร์ม)
+  String? _dateError;
+
   @override
   void initState() {
     super.initState();
@@ -398,20 +421,32 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
   }
 
   Future<void> _pickDateTime() async {
+    final today = activityFirstSelectableDate();
     final date = await showDatePicker(
       context: context,
-      initialDate: _startAt,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
+      // กิจกรรมเดิมที่จัดไปแล้วมี _startAt เป็นอดีต ซึ่งใช้เป็น initialDate ไม่ได้
+      // (ต้องไม่ก่อน firstDate) จึงเริ่มที่วันนี้แทน — แก้ field อื่นได้ตามปกติ
+      // แต่ถ้าจะแตะวัน ต้องเลือกวันนี้ขึ้นไปเท่านั้น
+      initialDate: _startAt.isBefore(today) ? today : _startAt,
+      firstDate: today,
+      lastDate: DateTime(today.year + 3, today.month, today.day),
     );
     if (date == null || !mounted) return;
+    // พิมพ์เวลาอย่างเดียวแบบ 24 ชม. — `inputOnly` ตัดทั้งหน้าปัดนาฬิกาที่ลากเข็มยาก
+    // และปุ่มสลับไปหน้าปัด ส่วน AM/PM ตัดด้วย alwaysUse24HourFormat
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(_startAt),
+      initialEntryMode: TimePickerEntryMode.inputOnly,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
     );
     if (time == null) return;
     setState(() {
       _startAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _dateError = null;
     });
   }
 
@@ -426,9 +461,17 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
       setState(() => _error = 'กรุณากรอกจำนวนชั่วโมงมากกว่า 0');
       return;
     }
+    // กิจกรรมเก่าที่จัดไปแล้วยังแก้ field อื่นได้ — ห้ามเฉพาะการ "ย้ายวัน" ไปอดีต
+    // (เงื่อนไขเดียวกับที่ backend บังคับ ไม่งั้นสองฝั่งจะตัดสินไม่ตรงกัน)
+    final startChanged = widget.existing == null || widget.existing!.startAt != _startAt;
+    if (startChanged && isBackdatedActivity(_startAt)) {
+      setState(() => _dateError = kBackdatedActivityMessage);
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
+      _dateError = null;
     });
     final body = {
       'name': _nameController.text.trim(),
@@ -448,7 +491,15 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
       }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() => _error = friendlyError(e));
+      final message = friendlyError(e);
+      setState(() {
+        if (isActivityDateError(message)) {
+          _dateError = message;
+          _error = null;
+        } else {
+          _error = message;
+        }
+      });
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -505,7 +556,11 @@ class _ActivityFormDialogState extends State<_ActivityFormDialog> {
           validator: requiredValidator,
         ),
         InputDecorator(
-          decoration: const InputDecoration(labelText: 'วันเวลาเริ่มกิจกรรม'),
+          decoration: InputDecoration(
+            labelText: 'วันเวลาเริ่มกิจกรรม',
+            // แสดงใต้ช่องนี้เลย ทั้งของที่ UI กันเองและ 400 ที่ backend ตอบกลับมา
+            errorText: _dateError,
+          ),
           child: InkWell(
             onTap: _pickDateTime,
             child: Row(
