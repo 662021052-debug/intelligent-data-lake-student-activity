@@ -23,7 +23,7 @@ from app.models import (
 )
 from app.database import get_session
 from app.storage import ObjectStorage, get_storage
-from app.timeutil import TZ_TH
+from app.timeutil import TZ_TH, today_th
 from app.routers.participations import (
     _activity_names,
     _latest_evidence_map,
@@ -94,6 +94,10 @@ def list_activities(
     subcategory_id: Optional[int] = None,
     is_required: Optional[bool] = None,
     search: Optional[str] = Query(None, description="ค้นหาจากชื่อกิจกรรม"),
+    upcoming: bool = Query(
+        False,
+        description="เอาเฉพาะกิจกรรมที่ยังไม่ผ่านวันจัด และเรียงจากวันที่ใกล้ที่สุดก่อน",
+    ),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -120,10 +124,21 @@ def list_activities(
         pattern = f"%{search}%"
         query = query.where(Activity.name.ilike(pattern))
         count_query = count_query.where(Activity.name.ilike(pattern))
+    if upcoming:
+        # ตัดที่วัน ไม่ใช่ที่นาที — กิจกรรมของเช้าวันนี้ยังนับว่า "ยังไม่ผ่าน" ให้ตรงกับ
+        # กฎกันย้อนหลังตอนสร้าง/แก้ไข ที่เทียบระดับวันเหมือนกัน
+        today_start = datetime.combine(today_th(), datetime.min.time())
+        query = query.where(Activity.start_at >= today_start)
+        count_query = count_query.where(Activity.start_at >= today_start)
 
     total = session.exec(count_query).one()
-    # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (เช่น อนุมัติกิจกรรม) ย้ายตำแหน่งในรายการ
-    query = query.order_by(Activity.start_at.desc(), Activity.id.desc())
+    if upcoming:
+        # รายการ "ที่กำลังจะถึง" ต้องเอาอันที่ใกล้ที่สุดขึ้นก่อน ไม่งั้นนิสิตต้องเลื่อน
+        # ผ่านกิจกรรมของอีกหลายเดือนข้างหน้ากว่าจะเจออันที่สมัครทัน
+        query = query.order_by(Activity.start_at.asc(), Activity.id.asc())
+    else:
+        # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (เช่น อนุมัติกิจกรรม) ย้ายตำแหน่งในรายการ
+        query = query.order_by(Activity.start_at.desc(), Activity.id.desc())
     activities = session.exec(query.offset(skip).limit(limit)).all()
     counts = _participant_counts(session, [a.id for a in activities])
     items = [_to_read(a, counts.get(a.id, 0)) for a in activities]

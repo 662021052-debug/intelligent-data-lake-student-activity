@@ -83,6 +83,10 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   String? _typeFilter;
   int _requestId = 0;
 
+  /// มุมมองนิสิตเริ่มต้นที่ "เฉพาะกิจกรรมที่ยังไม่ถึงวันจัด" — เปิดอันนี้เพื่อดูย้อนหลัง
+  /// (ฝั่ง staff/admin ยังเห็นทุกกิจกรรมเรียงล่าสุดก่อนเหมือนเดิม)
+  bool _includePast = false;
+
   @override
   void initState() {
     super.initState();
@@ -115,6 +119,9 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       final query = <String, String>{'skip': '$_skip', 'limit': '$_limit'};
       if (_search.isNotEmpty) query['search'] = _search;
       if (_typeFilter != null) query['activity_type'] = _typeFilter!;
+      // นิสิตเปิดหน้ามาต้องเจอกิจกรรมที่ยังสมัคร/เข้าร่วมทันได้ก่อน ไม่ใช่ของอีกปีหน้า
+      // ที่บังเอิญวันจัดไกลสุด (ลำดับปกติเรียงวันจัดจากใหม่ไปเก่า)
+      if (authService.role == 'student' && !_includePast) query['upcoming'] = 'true';
       final page = await ApiService.fetchPage('/activities', Activity.fromJson, query: query);
       // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่
       if (!mounted || requestId != _requestId) return;
@@ -209,6 +216,16 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                     _load();
                   },
                 ),
+                if (isStudent)
+                  FilterChip(
+                    label: const Text('รวมกิจกรรมที่จัดไปแล้ว'),
+                    selected: _includePast,
+                    onSelected: (value) {
+                      setState(() => _includePast = value);
+                      _skip = 0;
+                      _load();
+                    },
+                  ),
                 IconButton(
                   onPressed: _load,
                   tooltip: 'โหลดใหม่',
@@ -245,9 +262,18 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     );
   }
 
-  /// ไม่มีข้อมูล: แยกกรณี "ค้นหาไม่เจอ" ออกจาก "ยังไม่มีกิจกรรมเลย"
+  /// ไม่มีข้อมูล: แยกกรณี "ค้นหาไม่เจอ" / "ยังไม่มีอันที่กำลังจะถึง" / "ไม่มีเลย"
   Widget _emptyState(bool canWrite) {
     if (_search.isNotEmpty || _typeFilter != null) return EmptyState.noResults();
+    // นิสิตที่ยังไม่ได้เปิดดูย้อนหลัง อาจมีกิจกรรมในระบบอยู่ แค่จัดไปหมดแล้ว
+    if (!canWrite && !_includePast) {
+      return const EmptyState(
+        icon: Icons.event_busy,
+        title: 'ยังไม่มีกิจกรรมที่กำลังจะถึง',
+        message: 'เปิด "รวมกิจกรรมที่จัดไปแล้ว" เพื่อดูย้อนหลัง '
+            'หรือรอเจ้าหน้าที่เพิ่มกิจกรรมใหม่',
+      );
+    }
     return EmptyState(
       icon: Icons.event_busy,
       title: 'ยังไม่มีกิจกรรม',

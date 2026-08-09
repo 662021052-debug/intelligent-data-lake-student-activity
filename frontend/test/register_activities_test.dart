@@ -1,0 +1,93 @@
+import 'package:activity_tracking_frontend/models/activity.dart';
+import 'package:activity_tracking_frontend/screens/register_activities_screen.dart';
+import 'package:activity_tracking_frontend/utils/format.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// ตรึงเวลาไว้ทุกเคส ไม่ให้ผลเทสต์ขึ้นกับนาฬิกาของเครื่องที่รัน
+final _now = DateTime(2026, 8, 9, 14, 30);
+
+Activity _activity(String name, DateTime startAt, {int taken = 0, int max = 50}) => Activity(
+      id: name.hashCode,
+      name: name,
+      activityType: 'จิตอาสา',
+      subcategoryId: 7,
+      hours: 4,
+      maxParticipants: max,
+      startAt: startAt,
+      location: 'ห้อง SC101',
+      approvalStatus: 'approved',
+      participantCount: taken,
+    );
+
+void main() {
+  group('กิจกรรมที่ยังไม่ผ่านวันจัด', () {
+    test('พรุ่งนี้และอนาคตยังไม่ผ่าน', () {
+      expect(isUpcomingActivity(_activity('ก', DateTime(2026, 8, 10)), _now), isTrue);
+      expect(isUpcomingActivity(_activity('ข', DateTime(2027, 1, 1)), _now), isTrue);
+    });
+
+    test('เช้าวันนี้ที่ผ่านมาแล้วยังนับว่าไม่ผ่าน (ตัดที่วัน เหมือนกฎฝั่ง backend)', () {
+      expect(isUpcomingActivity(_activity('ค', DateTime(2026, 8, 9, 9, 0)), _now), isTrue);
+    });
+
+    test('เมื่อวานถือว่าผ่านไปแล้ว', () {
+      expect(isUpcomingActivity(_activity('ง', DateTime(2026, 8, 8, 23, 59)), _now), isFalse);
+    });
+  });
+
+  group('ลำดับที่นิสิตเห็น', () {
+    test('อันที่ใกล้ที่สุดขึ้นก่อน แล้วค่อยตามด้วยอันที่จัดไปแล้ว (เพิ่งจบก่อน)', () {
+      final sorted = sortActivitiesForStudent([
+        _activity('เดือนหน้า', DateTime(2026, 9, 9)),
+        _activity('เมื่อวาน', DateTime(2026, 8, 8)),
+        _activity('พรุ่งนี้', DateTime(2026, 8, 10)),
+        _activity('เดือนที่แล้ว', DateTime(2026, 7, 9)),
+        _activity('วันนี้', DateTime(2026, 8, 9, 18, 0)),
+      ], _now);
+
+      expect(sorted.map((a) => a.name).toList(), [
+        'วันนี้',
+        'พรุ่งนี้',
+        'เดือนหน้า',
+        'เมื่อวาน',
+        'เดือนที่แล้ว',
+      ]);
+    });
+
+    test('รายการว่างไม่พัง', () {
+      expect(sortActivitiesForStudent([], _now), isEmpty);
+    });
+  });
+
+  group('ป้ายนับถอยหลัง', () {
+    test('วันนี้ / พรุ่งนี้ / อีก N วัน / จัดไปแล้ว', () {
+      expect(countdownLabel(DateTime(2026, 8, 9, 23, 0), _now), 'วันนี้');
+      expect(countdownLabel(DateTime(2026, 8, 9, 8, 0), _now), 'วันนี้');
+      expect(countdownLabel(DateTime(2026, 8, 10, 6, 0), _now), 'พรุ่งนี้');
+      expect(countdownLabel(DateTime(2026, 8, 16), _now), 'อีก 7 วัน');
+      expect(countdownLabel(DateTime(2026, 8, 8, 23, 59), _now), 'จัดไปแล้ว');
+    });
+  });
+
+  group('วันเวลาบนการ์ด', () {
+    test('อ่านเป็นภาษาไทย ปี พ.ศ. ไม่ใช่ ISO', () {
+      expect(formatThaiDateTime(DateTime(2026, 12, 1, 9, 0)), '1 ธ.ค. 2569 เวลา 09:00 น.');
+      expect(formatThaiDateTime(DateTime(2026, 8, 9, 14, 5)), '9 ส.ค. 2569 เวลา 14:05 น.');
+    });
+  });
+
+  group('ป้ายที่นั่ง', () {
+    test('บอกทั้งจำนวนที่รับและที่ยังเหลือ', () {
+      expect(seatsLabel(_activity('ก', _now, taken: 20, max: 50)),
+          'สมัครแล้ว 20/50 คน • เหลือ 30 ที่');
+    });
+
+    test('เต็มแล้วไม่โชว์ "เหลือ 0 ที่"', () {
+      expect(seatsLabel(_activity('ข', _now, taken: 50, max: 50)), 'เต็มแล้ว (รับ 50 คน)');
+    });
+
+    test('เกินโควตา (เช่นเช็กอินหน้างานเพิ่ม) ก็ยังบอกว่าเต็ม ไม่ติดลบ', () {
+      expect(seatsLabel(_activity('ค', _now, taken: 52, max: 50)), 'เต็มแล้ว (รับ 50 คน)');
+    });
+  });
+}
