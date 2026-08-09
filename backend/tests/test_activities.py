@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+from tests.test_students import make_student
+
 
 def future_start(days: int = 30) -> str:
     """วันเวลาเริ่มกิจกรรมข้างหน้า — สร้างกิจกรรมย้อนหลังไม่ได้แล้ว
@@ -217,6 +219,66 @@ def test_staff_edit_resets_approval_to_pending(client, tokens):
     response = client.put(f"/activities/{created['id']}", json={"location": "ที่ใหม่"})
     assert response.status_code == 200
     assert response.json()["approval_status"] == "pending"
+
+
+def test_rename_activity_saves_and_returns_to_pending(client, tokens):
+    """เปลี่ยน "ชื่อกิจกรรม" ได้ (เช่น กิจกรรมเดิมที่จัดปีถัดไปแล้วเปลี่ยนชื่อ)
+    — ชื่อใหม่ต้องบันทึกจริง และกิจกรรมกลับไป pending รออนุมัติใหม่ตามกติกาเดิม"""
+    created = make_activity(client, name="ค่ายอาสาปี 2568").json()
+    client.patch(f"/activities/{created['id']}/approve", headers=_admin_headers(tokens))
+
+    response = client.put(f"/activities/{created['id']}", json={"name": "ค่ายอาสาปี 2569"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "ค่ายอาสาปี 2569"
+    assert body["approval_status"] == "pending"
+    assert body["approved_by"] is None
+    assert body["approved_at"] is None
+
+    # อ่านซ้ำจาก DB ไม่ใช่แค่ response ของ PUT
+    assert client.get(f"/activities/{created['id']}").json()["name"] == "ค่ายอาสาปี 2569"
+
+
+def test_rename_activity_via_full_form_payload(client):
+    """ฟอร์มฝั่ง Flutter ส่งทุกฟิลด์กลับมาเสมอ (รวม start_at เดิม) เปลี่ยนแค่ชื่อ
+    — เส้นทางนี้ต้องผ่าน ไม่ใช่ผ่านเฉพาะตอนส่ง {"name": ...} มาเดี่ยว ๆ"""
+    created = make_activity(client, name="ชื่อเดิม").json()
+
+    response = client.put(
+        f"/activities/{created['id']}",
+        json={
+            "name": "ชื่อใหม่",
+            "activity_type": created["activity_type"],
+            "subcategory_id": created["subcategory_id"],
+            "hours": created["hours"],
+            "is_required": created["is_required"],
+            "max_participants": created["max_participants"],
+            "start_at": created["start_at"],
+            "location": created["location"],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "ชื่อใหม่"
+
+
+def test_rename_activity_keeps_checkin_token_and_participations(client):
+    """เปลี่ยนชื่อแล้วต้องไม่กระทบ checkin_token (QR ที่ปริ๊นต์ไปแล้วยังใช้ได้)
+    และผู้เข้าร่วมที่ลงไว้แล้วต้องยังผูกอยู่กับกิจกรรมเดิม"""
+    created = make_activity(client, name="กิจกรรมมีคนสมัครแล้ว").json()
+    token_before = client.get(f"/activities/{created['id']}/checkin-qr").json()["token"]
+    student = make_student(client, student_id="6509001").json()
+    participation = client.post(
+        "/participations", json={"student_id": student["id"], "activity_id": created["id"]}
+    ).json()
+
+    assert client.put(f"/activities/{created['id']}", json={"name": "ชื่อใหม่"}).status_code == 200
+
+    qr = client.get(f"/activities/{created['id']}/checkin-qr").json()
+    assert qr["token"] == token_before
+    assert qr["activity_name"] == "ชื่อใหม่"  # QR ใบใหม่โชว์ชื่อใหม่ แต่ token เดิม
+
+    parts = client.get(f"/activities/{created['id']}/participations").json()
+    assert [p["id"] for p in parts] == [participation["id"]]
 
 
 def test_activity_requires_hours(client):

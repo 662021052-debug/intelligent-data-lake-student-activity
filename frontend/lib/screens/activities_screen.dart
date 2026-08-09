@@ -133,7 +133,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   Future<void> _openForm({Activity? existing}) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => _ActivityFormDialog(existing: existing, categories: _categories),
+      builder: (_) => ActivityFormDialog(existing: existing, categories: _categories),
     );
     if (result == true) _load();
   }
@@ -366,16 +366,18 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       );
 }
 
-class _ActivityFormDialog extends StatefulWidget {
+/// ฟอร์มเพิ่ม/แก้ไขกิจกรรม — public เพื่อให้เทสต์ pump ตรง ๆ ได้ (หน้าเต็มต้องยิง
+/// API จริง จึงเปิด dialog ผ่านหน้าจอในเทสต์ไม่ได้)
+class ActivityFormDialog extends StatefulWidget {
   final Activity? existing;
   final List<HourCategory> categories;
-  const _ActivityFormDialog({this.existing, required this.categories});
+  const ActivityFormDialog({super.key, this.existing, required this.categories});
 
   @override
-  State<_ActivityFormDialog> createState() => _ActivityFormDialogState();
+  State<ActivityFormDialog> createState() => _ActivityFormDialogState();
 }
 
-class _ActivityFormDialogState extends State<_ActivityFormDialog> {
+class _ActivityFormDialogState extends State<ActivityFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _maxParticipantsController;
