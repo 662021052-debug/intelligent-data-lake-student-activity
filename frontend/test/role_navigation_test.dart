@@ -48,6 +48,7 @@ void main() {
 
     expect(find.widgetWithText(Card, 'นิสิต'), findsNothing);
     expect(find.text('จัดการผู้ใช้'), findsNothing);
+    expect(find.text('หมวดชั่วโมงกิจกรรม'), findsNothing);
     expect(find.text('กิจกรรม'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsNothing);
     expect(find.text('แดชบอร์ดชั่วโมงของฉัน'), findsNothing);
@@ -64,6 +65,7 @@ void main() {
     expect(find.widgetWithText(Card, 'นิสิต'), findsOneWidget);
     expect(find.text('จัดการผู้ใช้'), findsOneWidget);
     expect(find.text('แดชบอร์ดผู้บริหาร'), findsOneWidget);
+    expect(find.text('หมวดชั่วโมงกิจกรรม'), findsOneWidget);
   });
 
   testWidgets('non-admin roles do not see the "แดชบอร์ดผู้บริหาร" card', (tester) async {

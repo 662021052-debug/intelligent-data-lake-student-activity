@@ -9,6 +9,7 @@ import 'activity_calendar_screen.dart';
 import 'chatbot_screen.dart';
 import 'checkin_scan_screen.dart';
 import 'dashboard_screen.dart';
+import 'hour_categories_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
 import 'register_activities_screen.dart';
@@ -134,6 +135,13 @@ class HomeScreen extends StatelessWidget {
           title: 'จัดการผู้ใช้',
           subtitle: 'สร้างผู้ใช้และกำหนดสิทธิ์',
           onTap: () => open(const UsersScreen()),
+        ),
+      if (authService.isAdmin)
+        _MenuCard(
+          icon: Icons.category,
+          title: 'หมวดชั่วโมงกิจกรรม',
+          subtitle: 'เพิ่ม/แก้ไขหมวดและหมวดย่อยที่ใช้นับชั่วโมง',
+          onTap: () => open(const HourCategoriesScreen()),
         ),
       if (isStudent)
         _MenuCard(
