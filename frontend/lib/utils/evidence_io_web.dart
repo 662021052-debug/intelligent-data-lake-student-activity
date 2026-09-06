@@ -11,9 +11,21 @@ typedef PickedEvidence = (Uint8List, String, String);
 
 /// Opens the browser file dialog (images + PDF) and returns the chosen file's
 /// bytes, filename and MIME type, or null if the user cancels.
-Future<PickedEvidence?> pickEvidenceFile() async {
+Future<PickedEvidence?> pickEvidenceFile() =>
+    _pickFile('image/jpeg,image/png,application/pdf');
+
+/// เปิดกล่องเลือกไฟล์สำหรับ "นำเข้าแผนกิจกรรม" — รับเฉพาะ .xlsx/.csv
+///
+/// แยกจาก [pickEvidenceFile] เพราะชนิดไฟล์ที่รับต่างกันคนละเรื่อง (หลักฐานเป็น
+/// รูป/PDF ส่วนแผนกิจกรรมเป็นสเปรดชีต) — ตัวกรองผิดชนิดทำให้ผู้ใช้เลือกไฟล์ไม่ได้
+Future<PickedEvidence?> pickSpreadsheetFile() => _pickFile(
+      '.xlsx,.csv,'
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv',
+    );
+
+Future<PickedEvidence?> _pickFile(String accept) async {
   final input = html.FileUploadInputElement()
-    ..accept = 'image/jpeg,image/png,application/pdf'
+    ..accept = accept
     ..multiple = false;
   input.click();
 

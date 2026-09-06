@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Optional
+from urllib.parse import quote
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
+from app import activity_import
 from app.auth import get_current_user, require_admin, require_writer
 from app.models import (
     Activity,
@@ -14,6 +16,8 @@ from app.models import (
     ActivityRead,
     ActivityUpdate,
     ApprovalStatus,
+    HourCategory,
+    HourSubcategory,
     Participation,
     ParticipationRead,
     User,
@@ -28,7 +32,13 @@ from app.routers.participations import (
     _to_read as _participation_to_read,
 )
 from app.checkin import checkin_window, qr_payload
-from app.schemas import ActivityCheckinQr, Page
+from app.schemas import (
+    ActivityCheckinQr,
+    ActivityImportCreated,
+    ActivityImportResult,
+    ActivityImportRowError,
+    Page,
+)
 
 router = APIRouter(prefix="/activities", tags=["activities"], dependencies=[Depends(get_current_user)])
 
@@ -159,6 +169,23 @@ def get_activity(
     return _to_read_single(session, activity)
 
 
+def _apply_initial_approval(activity: Activity, current_user: User) -> None:
+    """ตั้งสถานะอนุมัติของกิจกรรมที่เพิ่งสร้าง ตามสิทธิ์ของคนสร้าง
+
+    admin สร้างเอง = อนุมัติเอง จึงอนุมัติให้ทันที ส่วน staff ต้องรอ admin ตรวจ
+    กฎนี้อยู่ที่เดียวเพราะกิจกรรมเกิดได้สองทาง — สร้างทีละอันผ่านฟอร์ม และนำเข้า
+    ทั้งแผนจากไฟล์ — ถ้าเขียนแยกกันไว้ สองทางจะเพี้ยนจากกันเมื่อกฎเปลี่ยน
+    """
+    if current_user.role == UserRole.admin:
+        activity.approval_status = ApprovalStatus.approved
+        activity.approved_by = current_user.id
+        activity.approved_at = datetime.utcnow()
+    else:
+        activity.approval_status = ApprovalStatus.pending
+        activity.approved_by = None
+        activity.approved_at = None
+
+
 @router.post("", response_model=ActivityRead, status_code=201)
 def create_activity(
     payload: ActivityCreate,
@@ -168,18 +195,161 @@ def create_activity(
     _validate_not_backdated(payload.start_at)
     activity = Activity.model_validate(payload)
     activity.created_by = current_user.id
-    if current_user.role == UserRole.admin:
-        activity.approval_status = ApprovalStatus.approved
-        activity.approved_by = current_user.id
-        activity.approved_at = datetime.utcnow()
-    else:
-        activity.approval_status = ApprovalStatus.pending
-        activity.approved_by = None
-        activity.approved_at = None
+    _apply_initial_approval(activity, current_user)
     session.add(activity)
     session.commit()
     session.refresh(activity)
     return _to_read(activity, 0)
+
+
+# ---------------------------------------------------------------- นำเข้าทั้งภาคเรียน
+
+# ไฟล์แผนหนึ่งภาคเรียนเป็นสเปรดชีตข้อความล้วน ไม่กี่ร้อย KB — เกินนี้แปลว่ามาผิดไฟล์
+MAX_IMPORT_BYTES = 5 * 1024 * 1024
+
+SUBCATEGORY_PATH_SEPARATOR = "›"
+
+
+def _subcategory_rows(session: Session) -> list[tuple[HourSubcategory, Optional[HourCategory]]]:
+    subcategories = session.exec(select(HourSubcategory)).all()
+    categories = {c.id: c for c in session.exec(select(HourCategory)).all()}
+    return [(sub, categories.get(sub.category_id)) for sub in subcategories]
+
+
+def _subcategory_paths(session: Session) -> list[str]:
+    """ชื่อเต็ม "หมวดแม่ › หมวดย่อย" ของทุกหมวดย่อย — รูปแบบเดียวกับที่ UI แสดง"""
+    return [
+        f"{category.name} {SUBCATEGORY_PATH_SEPARATOR} {sub.name}" if category else sub.name
+        for sub, category in _subcategory_rows(session)
+    ]
+
+
+def _subcategory_index(session: Session) -> dict[str, list[int]]:
+    """คีย์ที่ผู้ใช้กรอกได้ → id ของหมวดย่อยที่ตรงกัน
+
+    รับ 3 แบบ: ชื่อหมวดย่อยล้วน, ชื่อเต็ม "หมวดแม่ › หมวดย่อย" (ก็อปจากไฟล์ต้นแบบ)
+    และเลข id ตรง ๆ ชื่อล้วนที่ซ้ำข้ามหมวดจะได้ list ยาวกว่า 1 แล้วชั้นตรวจสอบ
+    จะขอให้ผู้ใช้ระบุชื่อเต็มแทนการเดา
+    """
+    index: dict[str, list[int]] = {}
+
+    def add(raw_key: str, subcategory_id: int) -> None:
+        key = activity_import.normalize_lookup_key(raw_key)
+        if key:
+            index.setdefault(key, []).append(subcategory_id)
+
+    for sub, category in _subcategory_rows(session):
+        add(sub.name, sub.id)
+        add(str(sub.id), sub.id)
+        if category:
+            add(f"{category.name} {SUBCATEGORY_PATH_SEPARATOR} {sub.name}", sub.id)
+            # เผื่อผู้ใช้พิมพ์คั่นด้วย > หรือ / แทนอักขระ › ที่พิมพ์ยากบนคีย์บอร์ดไทย
+            add(f"{category.name} > {sub.name}", sub.id)
+            add(f"{category.name} / {sub.name}", sub.id)
+    return index
+
+
+def _existing_activity_keys(session: Session) -> set[tuple[str, datetime]]:
+    """(ชื่อ, วันเวลา) ของกิจกรรมที่มีอยู่แล้ว — กันอัปโหลดไฟล์เดิมซ้ำรอบสอง"""
+    rows = session.exec(select(Activity.name, Activity.start_at)).all()
+    return {(activity_import.normalize_lookup_key(name), start_at) for name, start_at in rows}
+
+
+@router.get("/import/template.xlsx")
+def download_import_template(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_writer),
+):
+    """ไฟล์ต้นแบบเปล่าสำหรับกรอกแผนกิจกรรม (มีชีตรายชื่อหมวดย่อยที่ใช้ได้จริงแนบมาด้วย)"""
+    content = activity_import.build_template_xlsx(_subcategory_paths(session))
+    # ชื่อไฟล์ไทยต้องไปทาง filename* (RFC 5987) เพราะ header เป็น latin-1
+    # — เหมือน routers/reports.py ที่ส่งรายงานภาษาไทยออกไป
+    return Response(
+        content=content,
+        media_type=activity_import.XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="activity-import-template.xlsx"; '
+                f"filename*=UTF-8''{quote(activity_import.TEMPLATE_FILENAME)}"
+            )
+        },
+    )
+
+
+@router.post("/import", response_model=ActivityImportResult)
+def import_activities(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_writer),
+):
+    """นำเข้าแผนการจัดกิจกรรมทั้งภาคเรียนจากไฟล์ .xlsx/.csv (ข้อ 6.7)
+
+    สถานะอนุมัติของกิจกรรมที่นำเข้าใช้กฎเดียวกับการสร้างทีละอัน
+    (`_apply_initial_approval`): admin นำเข้า → approved, staff นำเข้า → pending
+
+    ไฟล์ไม่ล้มทั้งไฟล์เพราะแถวเดียวผิด: แถวที่ผิดถูกรายงานกลับพร้อมเลขแถวและเหตุผล
+    """
+    content = file.file.read()
+    if len(content) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=413, detail="ไฟล์ใหญ่เกิน 5 MB")
+
+    try:
+        rows = activity_import.parse_spreadsheet(file.filename or "", content)
+    except activity_import.ImportFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    outcome = activity_import.validate_rows(
+        rows,
+        subcategory_index=_subcategory_index(session),
+        today=today_th(),
+        existing_keys=_existing_activity_keys(session),
+    )
+
+    created: list[ActivityImportCreated] = []
+    if outcome.drafts:
+        activities = []
+        for draft in outcome.drafts:
+            activity = Activity(
+                name=draft.name,
+                activity_type=draft.activity_type,
+                is_required=draft.is_required,
+                max_participants=draft.max_participants,
+                start_at=draft.start_at,
+                location=draft.location,
+                hours=draft.hours,
+                subcategory_id=draft.subcategory_id,
+                created_by=current_user.id,
+            )
+            _apply_initial_approval(activity, current_user)
+            session.add(activity)
+            activities.append((draft, activity))
+
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            logger.exception("นำเข้าแผนกิจกรรมไม่สำเร็จตอนบันทึกลงฐานข้อมูล")
+            raise HTTPException(
+                status_code=400,
+                detail="บันทึกกิจกรรมที่นำเข้าไม่สำเร็จ กรุณาตรวจข้อมูลในไฟล์แล้วลองใหม่",
+            ) from None
+
+        for draft, activity in activities:
+            session.refresh(activity)
+            created.append(
+                ActivityImportCreated(row=draft.row_number, id=activity.id, name=activity.name)
+            )
+
+    return ActivityImportResult(
+        total_rows=len(rows),
+        created_count=len(created),
+        error_count=len(outcome.issues),
+        created=created,
+        errors=[
+            ActivityImportRowError(row=issue.row_number, message=issue.message)
+            for issue in outcome.issues
+        ],
+    )
 
 
 @router.put("/{activity_id}", response_model=ActivityRead)

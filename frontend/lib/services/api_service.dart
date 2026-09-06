@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import '../config.dart';
+import '../models/activity_import.dart';
 import '../models/chat_response.dart';
 import '../models/checkin_qr.dart';
 import '../models/ocr_result.dart';
@@ -191,6 +192,26 @@ class ApiService {
     final response = await http.Response.fromStream(streamed);
     final data = _decode(response) as Map<String, dynamic>;
     return Participation.fromJson(data);
+  }
+
+  /// นำเข้าแผนการจัดกิจกรรมทั้งภาคเรียนจากไฟล์ .xlsx/.csv (ข้อ 6.7)
+  ///
+  /// 200 ไม่ได้แปลว่าทุกแถวผ่าน — ผลลัพธ์บอกว่าสำเร็จกี่แถวและผิดแถวไหนบ้าง
+  /// ส่วน 400 คือไฟล์ใช้ไม่ได้ทั้งไฟล์ (นามสกุลผิด/ไม่มีหัวตาราง) ซึ่งโยนเป็น
+  /// [ApiException] ตามปกติ
+  static Future<ActivityImportResult> importActivities(
+    Uint8List bytes,
+    String filename,
+  ) async {
+    final request = http.MultipartRequest('POST', _uri('/activities/import'));
+    if (authService.token != null) {
+      request.headers['Authorization'] = 'Bearer ${authService.token}';
+    }
+    request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    final data = _decode(response) as Map<String, dynamic>;
+    return ActivityImportResult.fromJson(data);
   }
 
   /// ข้อมูล QR เช็กอินของกิจกรรม สำหรับเจ้าหน้าที่เจ้าของกิจกรรม/ผู้ดูแล

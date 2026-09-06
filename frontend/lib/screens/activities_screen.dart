@@ -14,6 +14,7 @@ import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/subcategory_dropdown.dart';
+import 'activity_import_dialog.dart';
 import 'activity_participants_screen.dart';
 import 'checkin_qr_screen.dart';
 
@@ -194,6 +195,18 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     }
   }
 
+  /// เปิด dialog นำเข้าแผนกิจกรรม แล้วโหลดรายการใหม่ถ้ามีกิจกรรมถูกสร้างจริง
+  Future<void> _openImportDialog() async {
+    final imported = await showDialog<bool>(
+      context: context,
+      builder: (_) => const ActivityImportDialog(),
+    );
+    if (imported == true) {
+      _skip = 0;
+      _load();
+    }
+  }
+
   void _openParticipants(Activity a) {
     Navigator.push(
       context,
@@ -215,7 +228,21 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     final canWrite = authService.canWrite;
     final isStudent = authService.role == 'student';
     return Scaffold(
-      appBar: AppBar(title: Text(isStudent ? 'กิจกรรม' : 'จัดการกิจกรรม')),
+      appBar: AppBar(
+        title: Text(isStudent ? 'กิจกรรม' : 'จัดการกิจกรรม'),
+        actions: [
+          // นำเข้าทั้งภาคเรียนทีเดียว (ข้อ 6.7) — อยู่คู่กับปุ่ม + ที่สร้างทีละอัน
+          if (canWrite)
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.md),
+              child: OutlinedButton.icon(
+                onPressed: _openImportDialog,
+                icon: const Icon(Icons.upload_file, size: 18),
+                label: const Text('นำเข้าแผนกิจกรรม'),
+              ),
+            ),
+        ],
+      ),
       floatingActionButton: canWrite
           ? FloatingActionButton(onPressed: () => _openForm(), child: const Icon(Icons.add))
           : null,

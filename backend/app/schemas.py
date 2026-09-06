@@ -45,6 +45,33 @@ class ActivityCheckinQr(BaseModel):
     checkin_closes_at: datetime
 
 
+class ActivityImportRowError(BaseModel):
+    """แถวที่นำเข้าไม่ได้ — เลขแถวคือเลขแถวจริงในไฟล์ ผู้ใช้จะได้เปิดไปแก้ถูกบรรทัด"""
+
+    row: int
+    message: str
+
+
+class ActivityImportCreated(BaseModel):
+    row: int
+    id: int
+    name: str
+
+
+class ActivityImportResult(BaseModel):
+    """สรุปผลการนำเข้า: สำเร็จกี่แถว ผิดกี่แถว พร้อมเหตุผลรายแถว
+
+    แถวที่ผ่านถูกบันทึกจริงแม้แถวอื่นจะผิด — ไฟล์หนึ่งไฟล์ไม่ล้มทั้งไฟล์เพราะ
+    แถวเดียวพิมพ์ผิด
+    """
+
+    total_rows: int
+    created_count: int
+    error_count: int
+    created: list[ActivityImportCreated]
+    errors: list[ActivityImportRowError]
+
+
 class HourSubcategorySummary(BaseModel):
     id: int
     name: str
