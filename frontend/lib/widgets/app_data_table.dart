@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// ตารางมาตรฐานของแอป — หัวตารางตัวหนา, แถวสลับสีอ่อน (zebra), hover highlight
+/// ตารางมาตรฐานของแอป — หัวตารางตัวเล็กสีจาง เส้นแบ่งบาง แถวโปร่ง
 ///
 /// ทุกหน้าที่มีตารางให้ใช้ตัวนี้แทน [DataTable] ตรง ๆ เพื่อให้หน้าตาเหมือนกันหมด
-/// (เดิมแต่ละหน้าเรียก DataTable เองจึงไม่มีทั้ง zebra และ hover)
+/// (เดิมแต่ละหน้าเรียก DataTable เองจึงไม่มีทั้งเส้นแบ่งบางและ hover)
 class AppDataTable extends StatelessWidget {
   const AppDataTable({
     super.key,
@@ -28,11 +28,7 @@ class AppDataTable extends StatelessWidget {
         child: DataTable(
           columns: columns,
           rows: [
-            for (final (index, cells) in rows.indexed)
-              DataRow(
-                color: zebraRowColor(scheme, index),
-                cells: cells,
-              ),
+            for (final cells in rows) DataRow(color: appRowColor(scheme), cells: cells),
           ],
         ),
       ),
@@ -40,28 +36,32 @@ class AppDataTable extends StatelessWidget {
   }
 }
 
-/// สีพื้นหลังของแถวที่ [index]: แถวคู่/คี่สลับสีอ่อน และเข้มขึ้นเมื่อเมาส์ชี้
+/// สีพื้นหลังของแถวตาราง: โปร่งตามปกติ และเรืองฟ้าอ่อนเมื่อเมาส์ชี้
 ///
-/// แยกออกมาเป็นฟังก์ชันเพื่อให้ตารางที่ต้องประกอบ [DataRow] เองใช้ค่าเดียวกันได้
-WidgetStateProperty<Color?> zebraRowColor(ColorScheme scheme, int index) {
+/// ตาม mockup แถวไม่สลับสี (zebra) แล้ว — ให้เส้นแบ่งบาง ๆ ทำหน้าที่คั่นแถวแทน
+/// ซึ่งอ่านง่ายกว่าเมื่อตารางมีหลายคอลัมน์
+///
+/// แยกเป็นฟังก์ชันเพื่อให้ตารางที่ต้องประกอบ [DataRow] เองใช้ค่าเดียวกันได้
+WidgetStateProperty<Color?> appRowColor(ColorScheme scheme) {
   return WidgetStateProperty.resolveWith((states) {
     if (states.contains(WidgetState.hovered)) {
-      return scheme.primaryContainer.withValues(alpha: 0.45);
+      return AppColors.blueBg.withValues(alpha: 0.6);
     }
-    return index.isEven ? null : scheme.surfaceContainerHighest.withValues(alpha: 0.4);
+    return null;
   });
 }
 
-/// ธีมของ [DataTable] ทั้งแอป (หัวตารางตัวหนา + ระยะห่างสม่ำเสมอ)
+/// ธีมของ [DataTable] ทั้งแอป (หัวตารางตัวเล็กสีจาง + เส้นแบ่งบาง)
 DataTableThemeData appDataTableTheme(ColorScheme scheme, TextTheme text) {
   return DataTableThemeData(
-    headingRowColor: WidgetStatePropertyAll(scheme.surfaceContainerHigh),
-    headingTextStyle: text.titleSmall?.copyWith(
-      fontWeight: FontWeight.w700,
-      color: scheme.onSurface,
-    ),
+    // หัวตารางพื้นขาวเหมือนตัวการ์ด ให้ตัวอักษรจาง ๆ เป็นตัวบอกว่าเป็นหัวตาราง
+    headingRowColor: const WidgetStatePropertyAll(Colors.transparent),
+    headingTextStyle: text.labelSmall?.copyWith(color: AppColors.muted),
     dataTextStyle: text.bodyMedium,
-    dividerThickness: 0.6,
+    dividerThickness: 1,
+    headingRowHeight: 40,
+    dataRowMinHeight: 44,
+    dataRowMaxHeight: 60,
     horizontalMargin: AppSpacing.lg,
     columnSpacing: AppSpacing.xl,
   );

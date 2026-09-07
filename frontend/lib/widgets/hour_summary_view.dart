@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/hour_summary.dart';
+import '../theme/app_theme.dart';
 import '../utils/format.dart';
 
 /// Shared renderer for a student's accumulated-hours breakdown, used by both
@@ -81,7 +82,7 @@ class HourSummaryView extends StatelessWidget {
                 if (c.completed)
                   const Padding(
                     padding: EdgeInsets.only(right: 8),
-                    child: Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    child: Icon(Icons.check_circle, color: AppColors.success, size: 20),
                   ),
                 Expanded(child: Text(c.name, style: Theme.of(context).textTheme.titleMedium)),
                 Text('${formatHours(c.earnedHours)} / ${formatHours(c.requiredHours)} ชม.'),
@@ -93,7 +94,7 @@ class HourSummaryView extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: progress.toDouble(),
                 minHeight: 8,
-                color: c.completed ? Colors.green : null,
+                color: c.completed ? AppColors.success : null,
               ),
             ),
             if (showSubcategories) ...[
@@ -106,7 +107,7 @@ class HourSummaryView extends StatelessWidget {
                       Icon(
                         s.completed ? Icons.check_circle : Icons.radio_button_unchecked,
                         size: 16,
-                        color: s.completed ? Colors.green : Colors.grey,
+                        color: s.completed ? AppColors.success : AppColors.muted,
                       ),
                       const SizedBox(width: 8),
                       Expanded(child: Text(s.name, style: Theme.of(context).textTheme.bodySmall)),

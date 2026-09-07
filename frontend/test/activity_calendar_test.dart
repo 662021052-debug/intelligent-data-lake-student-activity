@@ -2,6 +2,7 @@ import 'package:activity_tracking_frontend/screens/activity_calendar_screen.dart
 import 'package:activity_tracking_frontend/screens/home_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
+import 'package:activity_tracking_frontend/widgets/app_nav_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -37,7 +38,7 @@ void main() {
     });
   });
 
-  testWidgets('เปิดหน้าปฏิทินได้โดยไม่ crash และมี AppBar ของตัวเอง', (tester) async {
+  testWidgets('เปิดหน้าปฏิทินได้โดยไม่ crash และมีหัวข้อหน้าของตัวเอง', (tester) async {
     authService.token = 'fake-token';
     authService.username = 'student';
     authService.role = 'student';
@@ -47,7 +48,9 @@ void main() {
       home: const ActivityCalendarScreen(),
     ));
 
-    expect(find.widgetWithText(AppBar, 'ปฏิทินกิจกรรม'), findsOneWidget);
+    // หัวข้อหน้าอยู่ในเนื้อหา ส่วนแถบบนเป็นเมนูหลักของระบบ
+    expect(find.byType(AppNavBar), findsOneWidget);
+    expect(find.text('ปฏิทินกิจกรรม'), findsOneWidget);
     // ระหว่างโหลดต้องมีตัวหมุน ไม่ใช่จอว่าง
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
   });

@@ -6,10 +6,12 @@ import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../utils/format.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/search_field.dart';
+import 'app_shell.dart';
 
 /// หน้า "จัดการหมวดชั่วโมงกิจกรรม" (admin เท่านั้น)
 ///
@@ -132,61 +134,47 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
   @override
   Widget build(BuildContext context) {
     if (!authService.isAdmin) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('หมวดชั่วโมงกิจกรรม')),
-        body: const Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
+      return const AppShell(
+        activeId: 'hour_categories',
+        body: Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
       );
     }
 
     final visible = _visible;
+    final subcategoryCount =
+        _categories.fold<int>(0, (sum, c) => sum + c.subcategories.length);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('หมวดชั่วโมงกิจกรรม')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openCategoryForm(),
-        icon: const Icon(Icons.add),
-        label: const Text('เพิ่มหมวด'),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Row(
-              children: [
-                DebouncedSearchField(
-                  label: 'ค้นหาหมวด/หมวดย่อย',
-                  onSearch: (value) => setState(() => _search = value),
-                ),
-                IconButton(
-                  onPressed: _load,
-                  tooltip: 'โหลดใหม่',
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            height: 2,
-            child: _loading && _categories.isNotEmpty
-                ? const LinearProgressIndicator(minHeight: 2)
-                : null,
-          ),
-          Expanded(
-            child: _loading && _categories.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? ErrorState(message: _error!, onRetry: _load)
-                    : visible.isEmpty
-                        ? _emptyState()
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(bottom: 80),
-                            itemCount: visible.length,
-                            itemBuilder: (context, index) =>
-                                _categoryTile(context, visible[index]),
-                          ),
-          ),
-        ],
-      ),
+    return AdminPage(
+      activeId: 'hour_categories',
+      title: 'หมวดชั่วโมงกิจกรรม',
+      subtitle: '${_categories.length} หมวดใหญ่ · $subcategoryCount หมวดย่อย',
+      actions: [
+        FilledButton.icon(
+          onPressed: () => _openCategoryForm(),
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('เพิ่มหมวดใหญ่'),
+        ),
+      ],
+      filters: [
+        DebouncedSearchField(
+          label: 'ค้นหาหมวด/หมวดย่อย',
+          onSearch: (value) => setState(() => _search = value),
+        ),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      busy: _loading && _categories.isNotEmpty,
+      child: _loading && _categories.isEmpty
+          ? const LoadingState(message: 'กำลังโหลดหมวดชั่วโมง...')
+          : _error != null
+              ? ErrorState(message: _error!, onRetry: _load)
+              : visible.isEmpty
+                  ? _emptyState()
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+                      itemCount: visible.length,
+                      itemBuilder: (context, index) =>
+                          _categoryTile(context, visible[index]),
+                    ),
     );
   }
 
@@ -196,33 +184,38 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
         category.subcategories.fold<double>(0, (sum, s) => sum + s.requiredHours);
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
         // เปิดค้างไว้ตอนกำลังค้นหา ผู้ใช้จะได้เห็นหมวดย่อยที่ตรงคำค้นทันที
         initiallyExpanded: _search.isNotEmpty,
         key: PageStorageKey('hour-category-${category.id}-$_search'),
-        leading: const Icon(Icons.category_outlined),
-        title: Text(category.name, style: theme.textTheme.titleMedium),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        childrenPadding: EdgeInsets.zero,
+        title: Text(category.name, style: theme.textTheme.titleSmall),
         subtitle: Text(
           'ต้องการ ${formatHours(category.requiredHours)} ชม. • '
           'หมวดย่อย ${category.subcategories.length} รายการ '
           '(รวม ${formatHours(totalSubHours)} ชม.)',
+          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+        trailing: Wrap(
+          spacing: AppSpacing.xs,
           children: [
-            IconButton(
-              icon: const Icon(Icons.add, size: 20),
+            AppIconButton(
+              icon: Icons.add,
               tooltip: 'เพิ่มหมวดย่อย',
               onPressed: () => _openSubcategoryForm(category: category),
             ),
-            IconButton(
-              icon: const Icon(Icons.edit, size: 20),
+            AppIconButton(
+              icon: Icons.edit,
               tooltip: 'แก้ไขหมวด',
               onPressed: () => _openCategoryForm(existing: category),
             ),
-            IconButton(
-              icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+            AppIconButton(
+              icon: Icons.delete,
+              danger: true,
               tooltip: 'ลบหมวด',
               onPressed: () => _deleteCategory(category),
             ),
@@ -230,30 +223,46 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
         ),
         children: category.subcategories.isEmpty
             ? [
-                const ListTile(
-                  dense: true,
-                  leading: Icon(Icons.subdirectory_arrow_right),
-                  title: Text('ยังไม่มีหมวดย่อย — กดปุ่ม + เพื่อเพิ่ม'),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(42, 0, AppSpacing.lg, AppSpacing.md),
+                  child: Text(
+                    'ยังไม่มีหมวดย่อย — กดปุ่ม + เพื่อเพิ่ม',
+                    style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                  ),
                 ),
               ]
             : [
                 for (final sub in category.subcategories)
-                  ListTile(
-                    dense: true,
-                    leading: const Icon(Icons.subdirectory_arrow_right),
-                    title: Text(sub.name),
-                    subtitle: Text('ต้องการ ${formatHours(sub.requiredHours)} ชม.'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(42, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
+                    decoration: const BoxDecoration(
+                      border: Border(top: BorderSide(color: AppColors.line)),
+                    ),
+                    child: Row(
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, size: 18),
+                        Expanded(
+                          child: Text(
+                            sub.name,
+                            style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.sub),
+                          ),
+                        ),
+                        Text(
+                          '${formatHours(sub.requiredHours)} ชม.',
+                          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        AppIconButton(
+                          icon: Icons.edit,
+                          size: 28,
                           tooltip: 'แก้ไขหมวดย่อย',
                           onPressed: () =>
                               _openSubcategoryForm(category: category, existing: sub),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                        const SizedBox(width: AppSpacing.xs),
+                        AppIconButton(
+                          icon: Icons.delete,
+                          size: 28,
+                          danger: true,
                           tooltip: 'ลบหมวดย่อย',
                           onPressed: () => _deleteSubcategory(sub),
                         ),
@@ -270,7 +279,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     return const EmptyState(
       icon: Icons.category_outlined,
       title: 'ยังไม่มีหมวดชั่วโมง',
-      message: 'กดปุ่ม "เพิ่มหมวด" มุมขวาล่างเพื่อสร้างหมวดแรก',
+      message: 'กดปุ่ม "เพิ่มหมวดใหญ่" ด้านบนเพื่อสร้างหมวดแรก',
     );
   }
 }

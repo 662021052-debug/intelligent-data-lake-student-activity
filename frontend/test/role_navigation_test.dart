@@ -5,11 +5,12 @@ import 'package:activity_tracking_frontend/screens/home_screen.dart';
 import 'package:activity_tracking_frontend/screens/students_screen.dart';
 import 'package:activity_tracking_frontend/screens/users_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
+import 'package:activity_tracking_frontend/widgets/app_nav_bar.dart';
 
 void main() {
   tearDown(() => authService.logout());
 
-  testWidgets('student does not see the "นิสิต" management card but sees "สมัครกิจกรรม" on Home',
+  testWidgets('นิสิตไม่เห็นทางเข้าหน้าจัดการนิสิต แต่เห็นทางลัดของตัวเองบนหน้าแรก',
       (tester) async {
     authService.token = 'fake-token';
     authService.username = 'student';
@@ -17,26 +18,38 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    // ค้นแบบเจาะจง "การ์ดเมนู" เพราะแถบต้อนรับมีป้าย role ที่เขียนว่า "นิสิต" เหมือนกัน
+    // หน้าแรกของนิสิตเป็นแผงโปรไฟล์ + ชั่วโมง ไม่มีแผงจัดการของผู้ดูแล
     expect(find.widgetWithText(Card, 'นิสิต'), findsNothing);
-    expect(find.text('กิจกรรม'), findsOneWidget);
+    expect(find.text('จัดการผู้ใช้'), findsNothing);
+    expect(find.text('แดชบอร์ดผู้บริหาร'), findsNothing);
+
+    // ทางลัดของนิสิต — สี่หน้าที่ไม่ได้อยู่บนแถบเมนูด้านบน
+    expect(find.text('ทางลัด'), findsOneWidget);
+    expect(find.text('เช็กอินหน้างาน'), findsOneWidget);
     expect(find.text('การเข้าร่วมกิจกรรม'), findsOneWidget);
-    expect(find.text('สมัครกิจกรรม'), findsOneWidget);
-    expect(find.text('แดชบอร์ดชั่วโมงของฉัน'), findsOneWidget);
-    expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
+    expect(find.text('กิจกรรม'), findsOneWidget);
+    expect(find.text('ปฏิทินกิจกรรม'), findsOneWidget);
   });
 
-  testWidgets('Home shows the welcome header, role badge and a labelled logout button',
-      (tester) async {
+  testWidgets('แถบบนของนิสิตมีเมนูของนิสิตและปุ่มออกจากระบบ', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
     authService.token = 'fake-token';
     authService.username = '650811001';
     authService.role = 'student';
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    expect(find.text('สวัสดี, 650811001'), findsOneWidget);
-    expect(find.text('นิสิต'), findsOneWidget); // ป้าย role ในแถบต้อนรับ
+    expect(find.byType(AppNavBar), findsOneWidget);
+    expect(find.text('หน้าแรก'), findsOneWidget);
+    expect(find.text('สมัครกิจกรรม'), findsOneWidget);
+    expect(find.text('รายละเอียดชั่วโมง'), findsOneWidget);
+    expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'ออกจากระบบ'), findsOneWidget);
+    // avatar ใช้ตัวอักษรแรกของรหัสนิสิต
+    expect(find.text('6'), findsOneWidget);
   });
 
   testWidgets('staff does not see "นิสิต" or "จัดการผู้ใช้" cards on Home (admin-only)', (tester) async {

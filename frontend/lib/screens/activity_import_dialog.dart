@@ -8,6 +8,7 @@ import '../utils/api_error.dart';
 import '../utils/download_io.dart';
 import '../utils/evidence_io.dart';
 import '../widgets/activity_import_summary.dart';
+import '../widgets/app_card.dart';
 import '../widgets/dialogs.dart';
 
 /// ชื่อไฟล์ต้นแบบที่ฝั่งเว็บตั้งเอง — ต้องตรงกับที่ backend ตั้งใน
@@ -95,45 +96,47 @@ class _ActivityImportDialogState extends State<ActivityImportDialog> {
                 style: theme.textTheme.bodyMedium,
               ),
               const SizedBox(height: AppSpacing.lg),
-              Wrap(
-                spacing: AppSpacing.md,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : _downloadTemplate,
-                    icon: const Icon(Icons.download),
-                    label: const Text('ดาวน์โหลดไฟล์ต้นแบบ'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _pickAndUpload,
-                    icon: const Icon(Icons.upload_file),
-                    label: Text(result == null ? 'เลือกไฟล์และนำเข้า' : 'เลือกไฟล์อื่น'),
-                  ),
-                ],
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _downloadTemplate,
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text('ดาวน์โหลดไฟล์ต้นแบบ'),
               ),
-              if (_filename != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text('ไฟล์: $_filename', style: theme.textTheme.bodySmall),
-              ],
+              const SizedBox(height: AppSpacing.md),
+              // พื้นที่วางไฟล์แบบ mockup — กดทั้งกล่องได้ ไม่ต้องเล็งปุ่มเล็ก ๆ
+              InkWell(
+                onTap: _busy ? null : _pickAndUpload,
+                borderRadius: BorderRadius.circular(AppRadius.card),
+                child: DottedUploadArea(
+                  label: result == null ? 'เลือกไฟล์เพื่อนำเข้า' : 'เลือกไฟล์อื่น',
+                  filename: _filename,
+                ),
+              ),
               if (_busy) ...[
                 const SizedBox(height: AppSpacing.lg),
                 const LinearProgressIndicator(minHeight: 2),
               ],
               if (_error != null) ...[
                 const SizedBox(height: AppSpacing.lg),
-                Row(
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: StatusPalette.rejected.background,
+                    borderRadius: BorderRadius.circular(AppRadius.field),
+                  ),
+                  child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.error_outline, size: 18, color: theme.colorScheme.error),
+                    Icon(Icons.error_outline, size: 18, color: StatusPalette.rejected.foreground),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Text(
                         _error!,
                         style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: theme.colorScheme.error),
+                            ?.copyWith(color: StatusPalette.rejected.foreground),
                       ),
                     ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
               if (result != null) ...[
@@ -149,7 +152,7 @@ class _ActivityImportDialogState extends State<ActivityImportDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        FilledButton(
           onPressed: _busy
               ? null
               : () => Navigator.pop(context, (_result?.createdCount ?? 0) > 0),

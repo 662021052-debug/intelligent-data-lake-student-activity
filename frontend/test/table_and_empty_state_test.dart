@@ -11,7 +11,7 @@ Widget _wrap(Widget child) => MaterialApp(
 
 void main() {
   group('AppDataTable', () {
-    testWidgets('แถวสลับสี (zebra) — แถวคู่โปร่ง แถวคี่มีพื้นหลังอ่อน', (tester) async {
+    testWidgets('ทุกแถวโปร่ง ไม่สลับสี — ให้เส้นแบ่งบางเป็นตัวคั่นแทน', (tester) async {
       await tester.pumpWidget(_wrap(AppDataTable(
         columns: const [DataColumn(label: Text('ชื่อ'))],
         rows: const [
@@ -24,10 +24,13 @@ void main() {
       final rows = tester.widget<DataTable>(find.byType(DataTable)).rows;
       expect(rows.length, 3);
 
-      Color? colorOf(int index) => rows[index].color?.resolve(<WidgetState>{});
-      expect(colorOf(0), isNull, reason: 'แถวคู่ใช้พื้นหลังปกติของตาราง');
-      expect(colorOf(1), isNotNull, reason: 'แถวคี่ต้องมีพื้นหลังอ่อน');
-      expect(colorOf(2), isNull);
+      for (final (index, row) in rows.indexed) {
+        expect(
+          row.color?.resolve(<WidgetState>{}),
+          isNull,
+          reason: 'แถวที่ $index ต้องโปร่ง ตาม mockup ที่เลิกใช้แถวสลับสีแล้ว',
+        );
+      }
     });
 
     testWidgets('เมาส์ชี้แถวไหนแถวนั้นเปลี่ยนสี', (tester) async {
@@ -45,7 +48,7 @@ void main() {
       );
     });
 
-    testWidgets('หัวตารางเป็นตัวหนาจากธีมเดียวของแอป', (tester) async {
+    testWidgets('หัวตารางเป็นตัวเล็กสีจางจากธีมเดียวของแอป', (tester) async {
       await tester.pumpWidget(_wrap(AppDataTable(
         columns: const [DataColumn(label: Text('ชื่อ'))],
         rows: const [
@@ -53,8 +56,10 @@ void main() {
         ],
       )));
 
-      final theme = AppTheme.light;
-      expect(theme.dataTableTheme.headingTextStyle?.fontWeight, FontWeight.w700);
+      final heading = AppTheme.light.dataTableTheme.headingTextStyle;
+      // หัวตารางต้องจางกว่าและเล็กกว่าตัวข้อมูล เพื่อให้เนื้อหาในแถวเด่นกว่าหัวคอลัมน์
+      expect(heading?.color, AppColors.muted);
+      expect(heading?.fontSize, lessThan(AppTheme.light.textTheme.bodyMedium!.fontSize!));
     });
   });
 

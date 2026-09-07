@@ -131,7 +131,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.widgetWithText(OutlinedButton, 'ดาวน์โหลดไฟล์ต้นแบบ'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'เลือกไฟล์และนำเข้า'), findsOneWidget);
+      // ปุ่มเลือกไฟล์กลายเป็นกล่องวางไฟล์กดได้ทั้งกล่องตาม mockup
+      expect(find.text('เลือกไฟล์เพื่อนำเข้า'), findsOneWidget);
       expect(find.textContaining('หมวดย่อย'), findsOneWidget);
       expect(find.textContaining('ไม่ล้มทั้งไฟล์'), findsOneWidget);
     });
@@ -142,7 +143,7 @@ void main() {
       await tester.pumpWidget(_wrap(const ActivityImportDialog()));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(FilledButton, 'เลือกไฟล์และนำเข้า'));
+      await tester.tap(find.text('เลือกไฟล์เพื่อนำเข้า'));
       await tester.pumpAndSettle();
 
       expect(find.byType(LinearProgressIndicator), findsNothing);

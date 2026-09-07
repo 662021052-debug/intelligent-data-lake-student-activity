@@ -7,9 +7,12 @@ import '../theme/app_theme.dart';
 import '../theme/chart_style.dart';
 import '../utils/api_error.dart';
 import '../utils/format.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/hour_summary_view.dart';
 import '../widgets/kpi_card.dart';
+import 'app_shell.dart';
 import 'chatbot_screen.dart';
 import 'register_activities_screen.dart';
 
@@ -80,19 +83,10 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('แดชบอร์ดชั่วโมงของฉัน'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            tooltip: 'โหลดใหม่',
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
+    return AppShell(
+      activeId: 'my_hours',
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingState(message: 'กำลังโหลดชั่วโมงของคุณ...')
           : _error != null
               ? ErrorState(message: _error!, onRetry: _load)
               : _categories.isEmpty
@@ -107,8 +101,16 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
 
   Widget _buildDashboard() {
     return ListView(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.all(20),
       children: [
+        SectionHeader(
+          title: 'รายละเอียดชั่วโมง',
+          subtitle: 'ชั่วโมงสะสมของคุณเทียบเกณฑ์ที่ต้องเก็บ',
+          actions: [
+            AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.lg),
         _buildKpiRow(),
         const SizedBox(height: AppSpacing.lg),
         _buildNextStepCard(),
@@ -247,7 +249,7 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
               runSpacing: AppSpacing.sm,
               children: [
                 ChartLegendKey(color: scheme.primary, label: 'ชั่วโมงที่ได้'),
-                ChartLegendKey(color: scheme.surfaceContainerHighest, label: 'เกณฑ์'),
+                const ChartLegendKey(color: AppColors.page, label: 'เกณฑ์'),
               ],
             ),
           ],
@@ -329,13 +331,13 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
                 BarChartRodData(
                   toY: _categories[i].earnedHours,
                   // หมวดที่ครบแล้วใช้สีเดียวกับเครื่องหมายติ๊กในรายการด้านล่าง
-                  color: _categories[i].completed ? Colors.green : scheme.primary,
+                  color: _categories[i].completed ? StatusPalette.approved.accent : scheme.primary,
                   width: ChartStyle.barWidth,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
                   backDrawRodData: BackgroundBarChartRodData(
                     show: true,
                     toY: _categories[i].requiredHours,
-                    color: scheme.surfaceContainerHighest,
+                    color: AppColors.page,
                   ),
                 ),
               ],

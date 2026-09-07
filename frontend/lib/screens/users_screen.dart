@@ -6,17 +6,30 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
+import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
+import '../widgets/status_chip.dart';
+import 'app_shell.dart';
 
 /// สิทธิ์ที่สร้างได้จากหน้านี้ — ไม่มี "นิสิต"
 ///
 /// บัญชีนิสิตต้องมาคู่กับข้อมูลนิสิตเสมอ จึงสร้างได้ทางเดียวคือฟอร์มเพิ่มนิสิต
 /// ที่หน้าจัดการนิสิต (backend ก็ปฏิเสธ role=student ที่ endpoint นี้อยู่แล้ว)
 const creatableRoles = ['staff', 'admin'];
+
+/// สีป้ายบทบาทตาม mockup — นิสิตฟ้า เจ้าหน้าที่เขียว แอดมินม่วง
+/// (คนละความหมายกับชิป "สถานะ" จึงไม่ใช้ StatusPalette ชุดสถานะ)
+const _rolePalettes = <String, StatusPalette>{
+  'admin': StatusPalette(Color(0xFFF3EAF7), Color(0xFF6B2E86), Color(0xFF6B2E86)),
+  'staff': StatusPalette(Color(0xFFEAF3E9), Color(0xFF2E6B33), Color(0xFF2E6B33)),
+  'student': StatusPalette.info,
+};
 
 String _roleLabel(String role) {
   switch (role) {
@@ -130,37 +143,47 @@ class _UsersScreenState extends State<UsersScreen> {
   @override
   Widget build(BuildContext context) {
     if (!authService.isAdmin) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('จัดการผู้ใช้')),
-        body: const Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
+      return const AppShell(
+        activeId: 'users',
+        body: Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
       );
     }
-    return Scaffold(
-      appBar: AppBar(title: const Text('จัดการผู้ใช้')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openForm(),
-        child: const Icon(Icons.add),
-      ),
-      body: Column(
+    return AdminPage(
+      activeId: 'users',
+      title: 'จัดการผู้ใช้',
+      subtitle: 'บัญชีทั้งหมด $_total คน',
+      actions: [
+        FilledButton.icon(
+          onPressed: () => _openForm(),
+          icon: const Icon(Icons.person_add_alt, size: 18),
+          label: const Text('เพิ่มผู้ใช้'),
+        ),
+      ],
+      filters: [
+        DebouncedSearchField(label: 'ค้นหาชื่อผู้ใช้', onSearch: _onSearch),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างรายการเดิมทิ้ง
+      busy: _loading && _users.isNotEmpty,
+      footer: _error == null && _users.isNotEmpty
+          ? PaginationBar(
+              skip: _skip,
+              limit: _limit,
+              total: _total,
+              onChanged: (skip) {
+                setState(() => _skip = skip);
+                _load();
+              },
+            )
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                DebouncedSearchField(label: 'ค้นหาชื่อผู้ใช้', onSearch: _onSearch),
-                IconButton(
-                  onPressed: _load,
-                  tooltip: 'โหลดใหม่',
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
-          ),
           // รายชื่อนิสิตใช้แปลง student_id เป็นชื่อในรายการเท่านั้น โหลดไม่ได้ก็ยัง
           // ใช้หน้านี้ได้ แต่ต้องบอก ไม่ใช่ปล่อยให้ขึ้นเป็นรหัสภายในเงียบ ๆ
           if (_studentsError != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -177,70 +200,101 @@ class _UsersScreenState extends State<UsersScreen> {
                 ],
               ),
             ),
-          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างรายการเดิมทิ้ง
-          SizedBox(
-            height: 2,
-            child: _loading && _users.isNotEmpty
-                ? const LinearProgressIndicator(minHeight: 2)
-                : null,
-          ),
           Expanded(
             child: _loading && _users.isEmpty
-                ? const Center(child: CircularProgressIndicator())
+                ? const LoadingState(message: 'กำลังโหลดบัญชีผู้ใช้...')
                 : _error != null
                     ? ErrorState(message: _error!, onRetry: _load)
                     : _users.isEmpty
                         ? _emptyState()
-                        : ListView.builder(
-                            itemCount: _users.length,
-                            itemBuilder: (context, index) {
-                              final u = _users[index];
-                              final isSelf = u.username == authService.username;
-                              final subtitle = u.role == 'student'
-                                  ? '${_roleLabel(u.role)} • ${_studentLabel(u.studentId)}'
-                                  : _roleLabel(u.role);
-                              return Card(
-                                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                child: ListTile(
-                                  leading: const Icon(Icons.person),
-                                  title: Text(u.username + (isSelf ? ' (คุณ)' : '')),
-                                  subtitle: Text(subtitle),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit, size: 20),
-                                        tooltip: 'แก้ไข',
-                                        onPressed: () => _openForm(existing: u),
-                                      ),
-                                      // no self-delete (backend also blocks it)
-                                      if (!isSelf)
-                                        IconButton(
-                                          icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                                          tooltip: 'ลบ',
-                                          onPressed: () => _delete(u),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
+                        : LayoutBuilder(
+                            builder: (context, constraints) => constraints.maxWidth > 720
+                                ? TableCard(child: _buildTable())
+                                : _buildList(),
                           ),
           ),
-          if (_error == null && _users.isNotEmpty)
-            PaginationBar(
-              skip: _skip,
-              limit: _limit,
-              total: _total,
-              onChanged: (skip) {
-                setState(() => _skip = skip);
-                _load();
-              },
-            ),
         ],
       ),
     );
   }
+
+  /// ตารางแบบ mockup: ชื่อผู้ใช้ / ชื่อ-นามสกุล / บทบาท / จัดการ
+  ///
+  /// ชื่อ-นามสกุลมีเฉพาะบัญชีที่ผูกกับข้อมูลนิสิต — บัญชีเจ้าหน้าที่/แอดมินไม่มี
+  /// ชื่อจริงเก็บไว้ในระบบ จึงแสดงขีดแทนการเดา
+  Widget _buildTable() {
+    return AppDataTable(
+      columns: const [
+        DataColumn(label: Text('ชื่อผู้ใช้')),
+        DataColumn(label: Text('ชื่อ-นามสกุล')),
+        DataColumn(label: Text('บทบาท')),
+        DataColumn(label: Text('จัดการ')),
+      ],
+      rows: [
+        for (final u in _users)
+          [
+            DataCell(Text(
+              u.username + (_isSelf(u) ? ' (คุณ)' : ''),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            )),
+            DataCell(Text(
+              u.role == 'student' ? _studentLabel(u.studentId) : '-',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.sub),
+            )),
+            DataCell(_roleChip(u.role)),
+            DataCell(_actionButtons(u)),
+          ],
+      ],
+    );
+  }
+
+  Widget _buildList() {
+    return ListView.builder(
+      itemCount: _users.length,
+      itemBuilder: (context, index) {
+        final u = _users[index];
+        final subtitle = u.role == 'student'
+            ? '${_roleLabel(u.role)} • ${_studentLabel(u.studentId)}'
+            : _roleLabel(u.role);
+        return Card(
+          margin: const EdgeInsets.only(bottom: AppSpacing.md),
+          child: ListTile(
+            leading: const Icon(Icons.person),
+            title: Text(u.username + (_isSelf(u) ? ' (คุณ)' : '')),
+            subtitle: Text(subtitle),
+            trailing: _actionButtons(u),
+          ),
+        );
+      },
+    );
+  }
+
+  bool _isSelf(AppUser u) => u.username == authService.username;
+
+  Widget _roleChip(String role) => StatusChip(
+        label: _roleLabel(role),
+        palette: _rolePalettes[role] ?? StatusPalette.neutral,
+        dense: true,
+      );
+
+  Widget _actionButtons(AppUser u) => Wrap(
+        spacing: AppSpacing.xs,
+        children: [
+          AppIconButton(
+            icon: Icons.edit,
+            tooltip: 'แก้ไข',
+            onPressed: () => _openForm(existing: u),
+          ),
+          // no self-delete (backend also blocks it)
+          if (!_isSelf(u))
+            AppIconButton(
+              icon: Icons.delete,
+              danger: true,
+              tooltip: 'ลบ',
+              onPressed: () => _delete(u),
+            ),
+        ],
+      );
 
   Widget _emptyState() {
     if (_search.isNotEmpty) return EmptyState.noResults();

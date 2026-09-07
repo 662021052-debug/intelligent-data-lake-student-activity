@@ -8,8 +8,11 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import 'app_shell.dart';
 import '../widgets/status_chip.dart';
 
 const _thaiMonths = [
@@ -129,27 +132,26 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('ปฏิทินกิจกรรม'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            tooltip: 'โหลดใหม่',
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
+    return AdminPage(
+      activeId: 'calendar',
+      title: 'ปฏิทินกิจกรรม',
+      subtitle: 'กดวันที่เพื่อดูกิจกรรมของวันนั้น',
+      filters: [
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      child: _loading
+          ? const LoadingState(message: 'กำลังโหลดปฏิทิน...')
           : _error != null
               ? ErrorState(message: _error!, onRetry: _load)
-              : Column(
-                  children: [
-                    _buildCalendar(),
-                    const Divider(height: 1),
-                    Expanded(child: _buildDayList()),
-                  ],
+              : AppCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: [
+                      _buildCalendar(),
+                      const Divider(height: 1),
+                      Expanded(child: _buildDayList()),
+                    ],
+                  ),
                 ),
     );
   }

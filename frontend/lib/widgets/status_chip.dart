@@ -81,10 +81,11 @@ class StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ตัวเล็กและหนา ตาม pill ใน mockup — ชิปต้องอ่านออกแต่ไม่แย่งสายตาจากเนื้อหา
     final textStyle = Theme.of(context)
         .textTheme
-        .labelLarge
-        ?.copyWith(color: palette.foreground, fontWeight: FontWeight.w600);
+        .labelSmall
+        ?.copyWith(color: palette.foreground);
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -93,7 +94,7 @@ class StatusChip extends StatelessWidget {
       ),
       decoration: BoxDecoration(
         color: palette.background,
-        borderRadius: BorderRadius.circular(AppRadius.chip),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

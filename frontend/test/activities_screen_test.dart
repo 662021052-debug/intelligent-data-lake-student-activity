@@ -59,9 +59,11 @@ void main() {
       home: const ActivitiesScreen(),
     ));
 
-    expect(find.widgetWithText(AppBar, 'กิจกรรม'), findsOneWidget);
-    expect(find.widgetWithText(AppBar, 'จัดการกิจกรรม'), findsNothing);
-    // นิสิตต้องไม่มีปุ่ม + เพิ่มกิจกรรม
-    expect(find.byType(FloatingActionButton), findsNothing);
+    // หัวข้อหน้าอยู่ใน SectionHeader ของเนื้อหา (แถบบนเป็นเมนูหลักของระบบแล้ว)
+    expect(find.text('กิจกรรม'), findsOneWidget);
+    expect(find.text('จัดการกิจกรรม'), findsNothing);
+    // นิสิตต้องไม่มีปุ่มสร้าง/นำเข้ากิจกรรม
+    expect(find.text('สร้างกิจกรรม'), findsNothing);
+    expect(find.text('นำเข้าแผนกิจกรรม'), findsNothing);
   });
 }

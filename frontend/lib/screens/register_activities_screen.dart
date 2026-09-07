@@ -8,10 +8,13 @@ import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../utils/format.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
+import 'app_shell.dart';
 // ใช้กฎ "วันไหนถือว่าผ่านไปแล้ว" ร่วมกับหน้าจัดการกิจกรรม จะได้มีนิยามเดียว —
 // ไม่งั้นสองหน้าอาจตัดวันคนละเวลาแล้วนิสิตเห็นรายการไม่ตรงกัน
 import 'activities_screen.dart' show activityFirstSelectableDate, isBackdatedActivity;
@@ -192,59 +195,87 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('กิจกรรมที่เปิดรับสมัคร'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            tooltip: 'โหลดใหม่',
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
+    return AppShell(
+      activeId: 'register',
       // แถบค้นหา/กรองอยู่นอกส่วนที่สลับไปมา เพื่อให้กดสลับ "รวมที่จัดไปแล้ว" ได้
       // แม้ตอนนั้นจะยังไม่มีกิจกรรมที่กำลังจะถึงให้แสดง
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                DebouncedSearchField(
-                  label: 'ค้นหากิจกรรม/หมวด/สถานที่',
-                  onSearch: (value) => setState(() => _search = value),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1120),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SectionHeader(
+                      title: 'สมัครกิจกรรม',
+                      subtitle: 'กิจกรรมที่เปิดรับสมัคร ${_visible.length} รายการ',
+                      actions: [
+                        AppIconButton(
+                          icon: Icons.refresh,
+                          tooltip: 'โหลดใหม่',
+                          onPressed: _load,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Wrap(
+                      spacing: AppSpacing.md,
+                      runSpacing: AppSpacing.md,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        DebouncedSearchField(
+                          label: 'ค้นหากิจกรรม/หมวด/สถานที่',
+                          width: 340,
+                          onSearch: (value) => setState(() => _search = value),
+                        ),
+                        FilterChip(
+                          label: const Text('รวมกิจกรรมที่จัดไปแล้ว'),
+                          selected: _includePast,
+                          onSelected: (value) {
+                            setState(() => _includePast = value);
+                            _load();
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                FilterChip(
-                  label: const Text('รวมกิจกรรมที่จัดไปแล้ว'),
-                  selected: _includePast,
-                  onSelected: (value) {
-                    setState(() => _includePast = value);
-                    _load();
-                  },
-                ),
-              ],
-            ),
+              ),
+              Expanded(child: _buildBody()),
+            ],
           ),
-          Expanded(child: _buildBody()),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const LoadingState(message: 'กำลังโหลดกิจกรรม...');
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
     if (_activities.isEmpty) return _emptyState();
     final visible = _visible;
     if (visible.isEmpty) return EmptyState.noResults();
 
-    return ListView.builder(
-      itemCount: visible.length,
-      itemBuilder: (context, index) => _activityCard(visible[index]),
+    // การ์ดเรียงเป็นตารางแบบ mockup: จอกว้างสองใบต่อแถว จอแคบใบเดียวเต็มความกว้าง
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 760 ? 2 : 1;
+        final width = (constraints.maxWidth - 40 - AppSpacing.lg * (columns - 1)) / columns;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Wrap(
+            spacing: AppSpacing.lg,
+            runSpacing: AppSpacing.lg,
+            children: [
+              for (final a in visible) SizedBox(width: width, child: _activityCard(a)),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -260,103 +291,105 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       );
 
   Widget _activityCard(Activity a) {
+    final theme = Theme.of(context);
     final participation = _ownParticipationByActivity[a.id];
     final closed = a.startAt.isBefore(DateTime.now());
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: ListTile(
-        title: Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.xs,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(a.name, style: Theme.of(context).textTheme.titleMedium),
-            StatusChip(
-              label: countdownLabel(a.startAt),
-              palette: closed ? StatusPalette.neutral : StatusPalette.info,
-              icon: Icons.event_outlined,
-              dense: true,
-            ),
-            if (a.isRequired)
-              const StatusChip(
-                label: 'กิจกรรมบังคับ',
-                palette: StatusPalette.pending,
-                icon: Icons.priority_high,
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
+            children: [
+              StatusChip(label: a.activityType, palette: StatusPalette.neutral, dense: true),
+              StatusChip(
+                label: countdownLabel(a.startAt),
+                palette: closed ? StatusPalette.neutral : StatusPalette.info,
                 dense: true,
               ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${a.activityType} • ${formatThaiDateTime(a.startAt)}'),
-            Text('${a.location} • ${seatsLabel(a)}'),
-            // นิสิตต้องรู้ก่อนกดสมัครว่าได้กี่ชั่วโมงและเข้าหมวดไหน
-            _buildHoursAndCategory(a),
-          ],
-        ),
-        isThreeLine: true,
-        trailing: _buildTrailing(a, participation, closed),
-      ),
-    );
-  }
-
-  /// บรรทัด "ได้ X ชม. • หมวด › หมวดย่อย" — เน้นสีให้อ่านง่ายกว่าข้อความรายละเอียดอื่น
-  Widget _buildHoursAndCategory(Activity a) {
-    final theme = Theme.of(context);
-    final path = subcategoryPath(_categories, a.subcategoryId);
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.xs),
-      child: Row(
-        children: [
-          Icon(Icons.schedule, size: 16, color: theme.colorScheme.primary),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              'ได้ ${formatHours(a.hours)} ชม. • $path',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+              if (a.isRequired)
+                const StatusChip(
+                  label: 'กิจกรรมบังคับ',
+                  palette: StatusPalette.pending,
+                  dense: true,
+                ),
+            ],
           ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(a.name, style: theme.textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.xs),
+          // นิสิตต้องรู้ก่อนกดสมัครว่าได้กี่ชั่วโมงและเข้าหมวดไหน
+          Text(
+            subcategoryPath(_categories, a.subcategoryId),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.lg,
+            runSpacing: AppSpacing.sm,
+            children: [
+              MetaItem(icon: Icons.schedule, label: 'ได้ ${formatHours(a.hours)} ชม.'),
+              MetaItem(icon: Icons.event, label: formatThaiDateTime(a.startAt)),
+              MetaItem(icon: Icons.place_outlined, label: a.location),
+              MetaItem(icon: Icons.groups_outlined, label: seatsLabel(a)),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          _buildAction(a, participation, closed),
         ],
       ),
     );
   }
 
-  Widget _buildTrailing(Activity a, Participation? participation, bool closed) {
+  /// ปุ่ม/สถานะท้ายการ์ด — สมัครได้ / สมัครแล้ว / เต็ม / ปิดรับ
+  Widget _buildAction(Activity a, Participation? participation, bool closed) {
     if (participation != null) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
+      return Wrap(
+        spacing: AppSpacing.md,
+        runSpacing: AppSpacing.sm,
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           StatusChip.evidence(participation.evidenceStatus, dense: true),
-          IconButton(
-            icon: const Icon(Icons.cancel, color: Colors.red),
-            tooltip: 'ยกเลิกการสมัคร',
+          OutlinedButton.icon(
+            icon: const Icon(Icons.close, size: 16),
+            label: const Text('ยกเลิกการสมัคร'),
+            style: AppButtonStyles.danger(context),
             onPressed: () => _cancel(participation, a),
           ),
         ],
       );
     }
     if (a.isFull) {
-      return const StatusChip(
-        label: 'เต็มแล้ว',
-        palette: StatusPalette.neutral,
-        icon: Icons.group_off_outlined,
-        dense: true,
+      return const Align(
+        alignment: Alignment.centerLeft,
+        child: StatusChip(
+          label: 'เต็มแล้ว',
+          palette: StatusPalette.neutral,
+          icon: Icons.group_off_outlined,
+          dense: true,
+        ),
       );
     }
     if (closed) {
-      return const StatusChip(
-        label: 'ปิดรับสมัครแล้ว',
-        palette: StatusPalette.neutral,
-        icon: Icons.lock_clock,
-        dense: true,
+      return const Align(
+        alignment: Alignment.centerLeft,
+        child: StatusChip(
+          label: 'ปิดรับสมัครแล้ว',
+          palette: StatusPalette.neutral,
+          icon: Icons.lock_clock,
+          dense: true,
+        ),
       );
     }
-    return FilledButton(onPressed: () => _register(a), child: const Text('สมัคร'));
+    return FilledButton(
+      onPressed: () => _register(a),
+      child: const Text('สมัครเข้าร่วม'),
+    );
   }
 }

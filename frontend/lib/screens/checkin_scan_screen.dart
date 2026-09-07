@@ -6,7 +6,9 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../widgets/app_nav_bar.dart';
 import '../widgets/checkin_result.dart';
+import 'app_shell.dart';
 
 /// F1 — นิสิตสแกน QR ของกิจกรรมที่หน้างานเพื่อเช็กอินตัวเอง
 ///
@@ -111,48 +113,33 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
   @override
   Widget build(BuildContext context) {
     if (authService.role != 'student') {
-      return Scaffold(
-        appBar: AppBar(title: const Text('เช็กอินหน้างาน')),
-        body: const Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
+      return const AppShell(
+        activeId: 'checkin',
+        body: Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('เช็กอินหน้างาน'),
-        actions: [
-          if (_mode == _Mode.scanning)
-            IconButton(
-              tooltip: 'สลับกล้องหน้า/หลัง',
-              icon: const Icon(Icons.cameraswitch),
-              onPressed: () => _controller?.switchCamera(),
-            ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (_result != null) ...[
-                  CheckinSuccessCard(participation: _result!),
-                  const SizedBox(height: AppSpacing.lg),
-                ],
-                if (_error != null) ...[
-                  CheckinErrorBanner(message: _error!),
-                  const SizedBox(height: AppSpacing.lg),
-                ],
-                switch (_mode) {
-                  _Mode.intro => _buildIntro(context),
-                  _Mode.scanning => _buildScanner(context),
-                  _Mode.manual => _buildManualEntry(context),
-                },
-              ],
-            ),
-          ),
+    return AppShell(
+      activeId: 'checkin',
+      body: PageBody(
+        maxWidth: 560,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_result != null) ...[
+              CheckinSuccessCard(participation: _result!),
+              const SizedBox(height: AppSpacing.lg),
+            ],
+            if (_error != null) ...[
+              CheckinErrorBanner(message: _error!),
+              const SizedBox(height: AppSpacing.lg),
+            ],
+            switch (_mode) {
+              _Mode.intro => _buildIntro(context),
+              _Mode.scanning => _buildScanner(context),
+              _Mode.manual => _buildManualEntry(context),
+            },
+          ],
         ),
       ),
     );
@@ -168,24 +155,37 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(Icons.qr_code_scanner, size: 56, color: theme.colorScheme.primary),
-            const SizedBox(height: AppSpacing.lg),
+            const Center(child: TsuLogo()),
+            const SizedBox(height: AppSpacing.md),
             Text(
               'สแกน QR ของกิจกรรมที่หน้างาน',
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleLarge,
+              style: theme.textTheme.titleMedium?.copyWith(fontSize: 16),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
               'เจ้าหน้าที่จะแสดง QR ประจำกิจกรรมไว้ที่จุดลงทะเบียน '
               'สแกนแล้วระบบจะบันทึกเวลาที่คุณมาถึงทันที',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            // ช่องสี่เหลี่ยมแทนที่ของ QR ตาม mockup — สื่อว่าต้องเล็ง QR ตรงนี้
+            Center(
+              child: Container(
+                width: 96,
+                height: 96,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.line),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                ),
+                child: const Icon(Icons.qr_code_scanner, size: 52, color: AppColors.blue),
+              ),
             ),
             const SizedBox(height: AppSpacing.lg),
             const CheckinHoursNotice(),
-            const SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.lg),
             FilledButton.icon(
               icon: const Icon(Icons.photo_camera),
               label: Text(scanAgain ? 'สแกนกิจกรรมอื่น' : 'เปิดกล้องสแกน QR'),
@@ -256,15 +256,27 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
               ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextButton.icon(
-          icon: const Icon(Icons.keyboard),
-          label: const Text('กรอกรหัสกิจกรรมแทน'),
-          onPressed: _submitting ? null : _openManualEntry,
-        ),
-        TextButton.icon(
-          icon: const Icon(Icons.close),
-          label: const Text('ปิดกล้อง'),
-          onPressed: _submitting ? null : () => _stopCamera(),
+        // ปุ่มของหน้านี้ย้ายลงมาอยู่ใต้ภาพกล้อง เพราะแถบบนเป็นเมนูหลักของระบบแล้ว
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: AppSpacing.sm,
+          children: [
+            TextButton.icon(
+              icon: const Icon(Icons.cameraswitch),
+              label: const Text('สลับกล้องหน้า/หลัง'),
+              onPressed: _submitting ? null : () => _controller?.switchCamera(),
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.keyboard),
+              label: const Text('กรอกรหัสกิจกรรมแทน'),
+              onPressed: _submitting ? null : _openManualEntry,
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.close),
+              label: const Text('ปิดกล้อง'),
+              onPressed: _submitting ? null : () => _stopCamera(),
+            ),
+          ],
         ),
       ],
     );
@@ -279,12 +291,12 @@ class _CheckinScanScreenState extends State<CheckinScanScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('กรอกรหัสกิจกรรม', style: theme.textTheme.titleLarge),
+            Text('กรอกรหัสกิจกรรม',
+                style: theme.textTheme.titleMedium?.copyWith(fontSize: 16)),
             const SizedBox(height: AppSpacing.sm),
             Text(
               'ขอรหัสใต้ QR จากเจ้าหน้าที่ที่จุดลงทะเบียน แล้วพิมพ์ลงช่องนี้',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
             ),
             const SizedBox(height: AppSpacing.lg),
             TextField(
@@ -354,7 +366,7 @@ class _CameraError extends StatelessWidget {
     final theme = Theme.of(context);
 
     return ColoredBox(
-      color: theme.colorScheme.surfaceContainerHighest,
+      color: AppColors.page,
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(

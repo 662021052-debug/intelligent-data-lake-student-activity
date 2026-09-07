@@ -9,6 +9,8 @@ import '../services/auth_service.dart';
 import '../utils/api_error.dart';
 import '../utils/evidence_status.dart';
 import '../utils/format.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
@@ -17,6 +19,7 @@ import '../widgets/evidence_actions.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
+import 'app_shell.dart';
 
 const _evidenceStatuses = ['pending', 'approved', 'rejected'];
 
@@ -132,21 +135,20 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   Widget build(BuildContext context) {
     final canWrite = authService.canWrite;
     final isStudent = authService.role == 'student';
-    return Scaffold(
-      appBar: AppBar(title: const Text('การเข้าร่วมกิจกรรม')),
-      floatingActionButton: canWrite
-          ? FloatingActionButton(onPressed: () => _openForm(), child: const Icon(Icons.add))
-          : null,
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                DebouncedSearchField(
+    return AdminPage(
+      activeId: 'participations',
+      title: 'การเข้าร่วมกิจกรรม',
+      subtitle: 'ทั้งหมด $_total รายการ',
+      actions: [
+        if (canWrite)
+          FilledButton.icon(
+            onPressed: () => _openForm(),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('บันทึกการเข้าร่วม'),
+          ),
+      ],
+      filters: [
+        DebouncedSearchField(
                   label: 'ค้นหาชื่อ/รหัสนิสิต หรือกิจกรรม',
                   width: 280,
                   onSearch: _onSearch,
@@ -196,39 +198,24 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
                     _load();
                   },
                 ),
-                IconButton(
-                  onPressed: _load,
-                  tooltip: 'โหลดใหม่',
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
-          ),
-          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
-          SizedBox(
-            height: 2,
-            child: _loading && _participations.isNotEmpty
-                ? const LinearProgressIndicator(minHeight: 2)
-                : null,
-          ),
-          Expanded(
-            child: _loading && _participations.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? ErrorState(message: _error!, onRetry: _load)
-                    : _participations.isEmpty
-                        ? _emptyState(isStudent)
-                        : LayoutBuilder(
-                            builder: (context, constraints) {
-                              return constraints.maxWidth > 800
-                                  ? _buildTable(canWrite)
-                                  : _buildList(canWrite);
-                            },
-                          ),
-          ),
-          if (_error == null && _participations.isNotEmpty) _buildPagination(),
-        ],
-      ),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
+      busy: _loading && _participations.isNotEmpty,
+      footer: _error == null && _participations.isNotEmpty ? _buildPagination() : null,
+      child: _loading && _participations.isEmpty
+          ? const LoadingState(message: 'กำลังโหลดการเข้าร่วม...')
+          : _error != null
+              ? ErrorState(message: _error!, onRetry: _load)
+              : _participations.isEmpty
+                  ? _emptyState(isStudent)
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        return constraints.maxWidth > 800
+                            ? TableCard(child: _buildTable(canWrite))
+                            : _buildList(canWrite);
+                      },
+                    ),
     );
   }
 

@@ -11,10 +11,13 @@ import '../utils/api_error.dart';
 import '../utils/download_io.dart';
 import '../utils/format.dart';
 import '../utils/report_export.dart';
+import '../widgets/app_buttons.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/kpi_card.dart';
+import '../widgets/status_chip.dart';
+import 'app_shell.dart';
 import 'student_hours_screen.dart';
 
 /// จุดที่ [index] ควรมีป้ายเดือนบนแกน X ของกราฟแนวโน้มหรือไม่
@@ -143,107 +146,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     if (!authService.isAdmin) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('แดชบอร์ดผู้บริหาร')),
-        body: const Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
+      return const AppShell(
+        activeId: 'dashboard',
+        body: Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('แดชบอร์ดผู้บริหาร'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            tooltip: 'โหลดใหม่',
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: _buildBody(),
+    return AdminPage(
+      activeId: 'dashboard',
+      title: 'แดชบอร์ดผู้บริหาร',
+      subtitle: _filterSummary,
+      actions: [
+        ..._exportButtons(),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      // เปลี่ยนตัวกรองแล้วโหลดใหม่: คงหน้าเดิมไว้ + แถบบางด้านบน ไม่ล้างหน้าเป็น
+      // สปินเนอร์ เพราะทำให้เลย์เอาต์กระโดดทุกครั้งที่กรอง
+      busy: _loading && _overview != null,
+      child: _buildBody(),
     );
   }
 
   Widget _buildBody() {
-    // โหลดครั้งแรก (ยังไม่มีอะไรให้ดู) ค่อยแสดงวงกลมหมุนเต็มหน้า
+    // โหลดครั้งแรก (ยังไม่มีอะไรให้ดู) ค่อยแสดงสถานะกำลังโหลดเต็มพื้นที่
     if (_loading && _overview == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingState(message: 'กำลังโหลดแดชบอร์ด...');
     }
     if (_error != null) return ErrorState(message: _error!, onRetry: _load);
 
-    final content = RefreshIndicator(
+    return RefreshIndicator(
       onRefresh: _load,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1280),
-          child: ListView(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            children: [
-              _buildFilters(),
-              const SizedBox(height: AppSpacing.md),
-              _buildExportRow(),
-              const SizedBox(height: AppSpacing.lg),
-              _buildKpiRow(),
-              const SizedBox(height: AppSpacing.lg),
-              _buildCategoryChartCard(),
-              const SizedBox(height: AppSpacing.lg),
-              _buildTrendChartCard(),
-              const SizedBox(height: AppSpacing.lg),
-              _buildAtRiskCard(),
-              const SizedBox(height: AppSpacing.lg),
-              _buildLowParticipationCard(),
-            ],
-          ),
-        ),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+        children: [
+          _buildFilters(),
+          const SizedBox(height: AppSpacing.lg),
+          _buildKpiRow(),
+          const SizedBox(height: AppSpacing.lg),
+          _buildCategoryChartCard(),
+          const SizedBox(height: AppSpacing.lg),
+          _buildTrendChartCard(),
+          const SizedBox(height: AppSpacing.lg),
+          _buildAtRiskCard(),
+          const SizedBox(height: AppSpacing.lg),
+          _buildLowParticipationCard(),
+        ],
       ),
-    );
-
-    if (!_loading) return content;
-
-    // เปลี่ยนตัวกรองแล้วโหลดใหม่: คงหน้าเดิมไว้แบบจาง ๆ + แถบโหลดด้านบน
-    // ไม่ล้างหน้าเป็นสปินเนอร์ เพราะทำให้เลย์เอาต์กระโดดทุกครั้งที่กรอง
-    return Stack(
-      children: [
-        IgnorePointer(child: Opacity(opacity: 0.45, child: content)),
-        const Align(
-          alignment: Alignment.topCenter,
-          child: LinearProgressIndicator(minHeight: 3),
-        ),
-      ],
     );
   }
 
   // --------------------------- export ---------------------------
 
-  Widget _buildExportRow() {
-    final theme = Theme.of(context);
-    return Wrap(
-      alignment: WrapAlignment.end,
-      spacing: AppSpacing.md,
-      runSpacing: AppSpacing.sm,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        // บอกให้ชัดว่าไฟล์ที่ได้ยึดตัวกรองไหน — รายงานเป็นชั่วโมง "สะสม" จึงไม่มี
-        // ภาคเรียนให้กรอง ต่างจากตัวเลขบนหน้าจอที่กรองภาคเรียนได้
-        Text(
-          'รายงานชั่วโมงสะสมตามคณะ/ชั้นปีที่เลือก',
-          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-        ),
+  /// ปุ่มส่งออกรายงาน — อยู่มุมขวาของหัวข้อหน้าเหมือนปุ่มหลักของหน้าจัดการอื่น ๆ
+  ///
+  /// ไฟล์ที่ได้ยึดตัวกรองคณะ/ชั้นปีที่เลือกอยู่ (รายงานเป็นชั่วโมง "สะสม" จึงไม่มี
+  /// ภาคเรียนให้กรอง ต่างจากตัวเลขบนหน้าจอ) — บอกไว้ใน tooltip ของปุ่ม
+  List<Widget> _exportButtons() => [
         for (final format in ReportFormat.values)
-          OutlinedButton.icon(
-            onPressed: _exporting != null ? null : () => _export(format),
-            icon: _exporting == format
-                ? const SizedBox(
-                    width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(
-                    format == ReportFormat.xlsx ? Icons.table_view : Icons.picture_as_pdf,
-                    size: 18,
-                  ),
-            label: Text(format.label),
+          Tooltip(
+            message: 'รายงานชั่วโมงสะสมตามคณะ/ชั้นปีที่เลือก',
+            child: OutlinedButton.icon(
+              onPressed: _exporting != null ? null : () => _export(format),
+              icon: _exporting == format
+                  ? const SizedBox(
+                      width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Icon(
+                      format == ReportFormat.xlsx ? Icons.table_view : Icons.picture_as_pdf,
+                      size: 16,
+                    ),
+              label: Text(format.label),
+            ),
           ),
-      ],
-    );
-  }
+      ];
 
   // --------------------------- filters ---------------------------
 
@@ -391,6 +365,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         progress: avgProgress,
       ),
       KpiCard(
+        icon: Icons.warning_amber_rounded,
+        label: 'กลุ่มเสี่ยง',
+        value: '${_atRisk.length}',
+        sub: 'ชั่วโมงยังไม่ถึงครึ่งของเกณฑ์',
+        tone: _atRisk.isEmpty ? KpiTone.good : KpiTone.warning,
+      ),
+      KpiCard(
         icon: Icons.event_available_outlined,
         label: 'จำนวนกิจกรรม',
         value: '${o.activityCount}',
@@ -401,8 +382,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = switch (constraints.maxWidth) {
-          >= 1000 => 4,
-          >= 640 => 2,
+          >= 1100 => 5,
+          >= 860 => 3,
+          >= 560 => 2,
           _ => 1,
         };
         final width =
@@ -441,7 +423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   runSpacing: AppSpacing.sm,
                   children: [
                     ChartLegendKey(color: scheme.primary, label: 'เฉลี่ยที่ได้จริง'),
-                    ChartLegendKey(color: scheme.surfaceContainerHighest, label: 'เกณฑ์'),
+                    const ChartLegendKey(color: AppColors.blueBg, label: 'เกณฑ์'),
                   ],
                 ),
                 // ตัวเลขทุกตัวต้องอ่านได้โดยไม่ต้องเอาเมาส์ไปชี้กราฟ
@@ -547,7 +529,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   backDrawRodData: BackgroundBarChartRodData(
                     show: true,
                     toY: _byCategory[i].requiredHours,
-                    color: scheme.surfaceContainerHighest,
+                    // ฟ้าอ่อนของธีม: เป็น "ค่าเดียวกันคนละสถานะ" ไม่ใช่ชุดข้อมูลใหม่
+                    color: AppColors.blueBg,
                   ),
                 ),
               ],
@@ -724,11 +707,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                   rows: _atRisk.map((s) {
                     return DataRow(
-                      // แถวกลุ่มเสี่ยงใช้พื้นแดงอ่อน และเข้มขึ้นเมื่อเมาส์ชี้
-                      color: WidgetStateProperty.resolveWith((states) =>
-                          states.contains(WidgetState.hovered)
-                              ? StatusPalette.rejected.background
-                              : StatusPalette.rejected.background.withValues(alpha: 0.45)),
+                      // แถวโปร่งเหมือนตารางอื่นของแอป — ความรุนแรงไปอยู่ที่ชิป %
+                      // ของแต่ละคนแทน (พื้นแดงทั้งตารางทำให้แยกไม่ออกว่าใครหนักกว่า)
+                      color: appRowColor(scheme),
                       onSelectChanged: (_) => Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -759,8 +740,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// % ของเกณฑ์ + แถบสั้น ๆ ให้เห็นความห่างจากเป้าโดยไม่ต้องอ่านตัวเลข
+  ///
+  /// ต่ำกว่า 25% = แดง (เร่งด่วน) ส่วน 25–50% = เหลือง — ทั้งกลุ่มยังไม่ถึงเกณฑ์
+  /// เหมือนกัน แต่คนที่เกือบไม่มีชั่วโมงเลยต้องเด้งออกมาก่อน
+  static StatusPalette atRiskPalette(double percent) =>
+      percent < 25 ? StatusPalette.rejected : StatusPalette.pending;
+
   Widget _percentOfTarget(double percent) {
-    final theme = Theme.of(context);
+    final palette = atRiskPalette(percent);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -771,19 +758,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: LinearProgressIndicator(
               value: (percent / 100).clamp(0.0, 1.0),
               minHeight: 6,
-              backgroundColor: theme.colorScheme.surfaceContainerHighest,
-              valueColor: AlwaysStoppedAnimation<Color>(StatusPalette.rejected.foreground),
+              backgroundColor: AppColors.page,
+              valueColor: AlwaysStoppedAnimation<Color>(palette.accent),
             ),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
-        Text(
-          '${formatHours(percent)}%',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: StatusPalette.rejected.foreground,
-          ),
-        ),
+        StatusChip(label: '${formatHours(percent)}%', palette: palette, dense: true),
       ],
     );
   }
@@ -808,9 +789,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     DataColumn(label: Text('% เต็ม'), numeric: true),
                   ],
                   rows: [
-                    for (final (index, a) in _lowParticipation.indexed)
+                    for (final a in _lowParticipation)
                       DataRow(
-                        color: zebraRowColor(scheme, index),
+                        color: appRowColor(scheme),
                         cells: [
                           DataCell(Text(a.name)),
                           DataCell(Text(a.activityType)),
@@ -860,13 +841,12 @@ class _SectionCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: theme.textTheme.titleMedium),
+                      Text(title, style: theme.textTheme.titleMedium?.copyWith(fontSize: 16)),
                       if (subtitle != null) ...[
                         const SizedBox(height: AppSpacing.xs),
                         Text(
                           subtitle!,
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
                         ),
                       ],
                     ],
@@ -908,9 +888,9 @@ class _ChartTableView extends StatelessWidget {
               child: DataTable(
                 columns: [for (final c in columns) DataColumn(label: Text(c))],
                 rows: [
-                  for (final (index, row) in rows.indexed)
+                  for (final row in rows)
                     DataRow(
-                      color: zebraRowColor(scheme, index),
+                      color: appRowColor(scheme),
                       cells: [for (final cell in row) DataCell(Text(cell))],
                     ),
                 ],

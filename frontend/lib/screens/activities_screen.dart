@@ -6,6 +6,8 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
@@ -15,6 +17,7 @@ import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/subcategory_dropdown.dart';
 import 'activity_import_dialog.dart';
+import 'app_shell.dart';
 import 'activity_participants_screen.dart';
 import 'checkin_qr_screen.dart';
 
@@ -227,94 +230,68 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   Widget build(BuildContext context) {
     final canWrite = authService.canWrite;
     final isStudent = authService.role == 'student';
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(isStudent ? 'กิจกรรม' : 'จัดการกิจกรรม'),
-        actions: [
-          // นำเข้าทั้งภาคเรียนทีเดียว (ข้อ 6.7) — อยู่คู่กับปุ่ม + ที่สร้างทีละอัน
-          if (canWrite)
-            Padding(
-              padding: const EdgeInsets.only(right: AppSpacing.md),
-              child: OutlinedButton.icon(
-                onPressed: _openImportDialog,
-                icon: const Icon(Icons.upload_file, size: 18),
-                label: const Text('นำเข้าแผนกิจกรรม'),
-              ),
-            ),
-        ],
-      ),
-      floatingActionButton: canWrite
-          ? FloatingActionButton(onPressed: () => _openForm(), child: const Icon(Icons.add))
-          : null,
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                DebouncedSearchField(
-                  label: 'ค้นหาชื่อกิจกรรม',
-                  onSearch: _onSearch,
-                ),
-                DropdownButton<String?>(
-                  value: _typeFilter,
-                  hint: const Text('ประเภททั้งหมด'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('ประเภททั้งหมด')),
-                    ..._activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))),
-                  ],
-                  onChanged: (v) {
-                    setState(() => _typeFilter = v);
-                    _skip = 0;
-                    _load();
-                  },
-                ),
-                if (isStudent)
-                  FilterChip(
-                    label: const Text('รวมกิจกรรมที่จัดไปแล้ว'),
-                    selected: _includePast,
-                    onSelected: (value) {
-                      setState(() => _includePast = value);
-                      _skip = 0;
-                      _load();
-                    },
-                  ),
-                IconButton(
-                  onPressed: _load,
-                  tooltip: 'โหลดใหม่',
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
+    return AdminPage(
+      activeId: 'activities',
+      title: isStudent ? 'กิจกรรม' : 'จัดการกิจกรรม',
+      subtitle: '$_total กิจกรรม',
+      actions: [
+        if (canWrite)
+          // นำเข้าทั้งภาคเรียนทีเดียว (ข้อ 6.7) — อยู่คู่กับปุ่มสร้างทีละอัน
+          OutlinedButton.icon(
+            onPressed: _openImportDialog,
+            icon: const Icon(Icons.upload_file, size: 16),
+            label: const Text('นำเข้าแผนกิจกรรม'),
           ),
-          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
-          SizedBox(
-            height: 2,
-            child: _loading && _activities.isNotEmpty
-                ? const LinearProgressIndicator(minHeight: 2)
-                : null,
+        if (canWrite)
+          FilledButton.icon(
+            onPressed: () => _openForm(),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('สร้างกิจกรรม'),
           ),
-          Expanded(
-            child: _loading && _activities.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? ErrorState(message: _error!, onRetry: _load)
-                    : _activities.isEmpty
-                        ? _emptyState(canWrite)
-                        : LayoutBuilder(
-                            builder: (context, constraints) {
-                              return constraints.maxWidth > 800
-                                  ? _buildTable(canWrite, isStudent)
-                                  : _buildList(canWrite, isStudent);
-                            },
-                          ),
+      ],
+      filters: [
+        DebouncedSearchField(label: 'ค้นหาชื่อกิจกรรม', onSearch: _onSearch),
+        DropdownButton<String?>(
+          value: _typeFilter,
+          hint: const Text('ประเภททั้งหมด'),
+          items: [
+            const DropdownMenuItem(value: null, child: Text('ประเภททั้งหมด')),
+            ..._activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))),
+          ],
+          onChanged: (v) {
+            setState(() => _typeFilter = v);
+            _skip = 0;
+            _load();
+          },
+        ),
+        if (isStudent)
+          FilterChip(
+            label: const Text('รวมกิจกรรมที่จัดไปแล้ว'),
+            selected: _includePast,
+            onSelected: (value) {
+              setState(() => _includePast = value);
+              _skip = 0;
+              _load();
+            },
           ),
-          if (_error == null && _activities.isNotEmpty) _buildPagination(),
-        ],
-      ),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
+      busy: _loading && _activities.isNotEmpty,
+      footer: _error == null && _activities.isNotEmpty ? _buildPagination() : null,
+      child: _loading && _activities.isEmpty
+          ? const LoadingState(message: 'กำลังโหลดกิจกรรม...')
+          : _error != null
+              ? ErrorState(message: _error!, onRetry: _load)
+              : _activities.isEmpty
+                  ? _emptyState(canWrite)
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        return constraints.maxWidth > 800
+                            ? TableCard(child: _buildTable(canWrite, isStudent))
+                            : _buildList(canWrite, isStudent);
+                      },
+                    ),
     );
   }
 
@@ -334,10 +311,14 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       icon: Icons.event_busy,
       title: 'ยังไม่มีกิจกรรม',
       message: canWrite
-          ? 'กดปุ่ม + มุมขวาล่างเพื่อเพิ่มกิจกรรมแรก'
+          ? 'กดปุ่ม "สร้างกิจกรรม" ด้านบนเพื่อเพิ่มกิจกรรมแรก'
           : 'เมื่อเจ้าหน้าที่เพิ่มกิจกรรม รายการจะแสดงที่นี่',
     );
   }
+
+  /// ช่องที่เป็นข้อมูลประกอบ ใช้สีจางกว่าชื่อกิจกรรม เพื่อให้กวาดตาหาชื่อได้เร็ว
+  TextStyle? _mutedCell(BuildContext context) =>
+      Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.sub);
 
   Widget _buildTable(bool canWrite, bool isStudent) {
     final scheme = Theme.of(context).colorScheme;
@@ -347,8 +328,9 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
         for (final a in _activities)
           [
             DataCell(Text(a.name)),
-            DataCell(Text(a.activityType)),
-            DataCell(Text(subcategoryPath(_categories, a.subcategoryId))),
+            DataCell(Text(a.activityType, style: _mutedCell(context))),
+            DataCell(Text(subcategoryPath(_categories, a.subcategoryId),
+                style: _mutedCell(context))),
             DataCell(Text(_trimHours(a.hours))),
             DataCell(Tooltip(
               message: a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ',
@@ -359,8 +341,8 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               ),
             )),
             DataCell(Text('${a.maxParticipants}')),
-            DataCell(Text(_formatDateTime(a.startAt))),
-            DataCell(Text(a.location)),
+            DataCell(Text(_formatDateTime(a.startAt), style: _mutedCell(context))),
+            DataCell(Text(a.location, style: _mutedCell(context))),
             if (!isStudent) DataCell(_approvalChip(a)),
             DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
           ],
@@ -374,7 +356,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       itemBuilder: (context, index) {
         final a = _activities[index];
         return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          margin: const EdgeInsets.only(bottom: AppSpacing.md),
           child: ListTile(
             onTap: canWrite ? () => _openParticipants(a) : null,
             title: Row(
@@ -415,44 +397,45 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
         ],
       );
 
-  Widget _actionButtons(Activity a) => Row(
-        mainAxisSize: MainAxisSize.min,
+  Widget _actionButtons(Activity a) => Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
         children: [
           if (a.isHidden)
-            IconButton(
-              icon: const Icon(Icons.visibility, size: 20),
+            AppIconButton(
+              icon: Icons.visibility,
               tooltip: 'เลิกซ่อน',
               onPressed: () => _unhide(a),
             ),
           if (authService.isAdmin && a.approvalStatus != 'approved')
-            IconButton(
-              icon: Icon(Icons.check_circle,
-                  size: 20, color: StatusPalette.approved.foreground),
+            AppIconButton(
+              icon: Icons.check_circle,
               tooltip: 'อนุมัติกิจกรรม',
               onPressed: () => _approve(a),
             ),
           // แสดงเฉพาะกิจกรรมที่อนุมัติแล้วและยังไม่ถูกซ่อน — สองกรณีนี้สแกนไม่ผ่านอยู่ดี
           // (backend ตอบ "กิจกรรมนี้ยังไม่เปิดให้เช็กอิน") การโชว์ QR จึงมีแต่ทำให้เข้าใจผิด
           if (a.approvalStatus == 'approved' && !a.isHidden)
-            IconButton(
-              icon: const Icon(Icons.qr_code_2, size: 20),
+            AppIconButton(
+              icon: Icons.qr_code_2,
               tooltip: 'แสดง QR เช็กอิน',
               onPressed: () => _openCheckinQr(a),
             ),
-          IconButton(
-            icon: const Icon(Icons.groups, size: 20),
+          AppIconButton(
+            icon: Icons.groups,
             tooltip: 'ดูผู้เข้าร่วม',
             onPressed: () => _openParticipants(a),
           ),
-          IconButton(
-            icon: const Icon(Icons.edit, size: 20),
+          AppIconButton(
+            icon: Icons.edit,
             tooltip: 'แก้ไข',
             onPressed: () => _openForm(existing: a),
           ),
           // ที่ซ่อนอยู่แล้วไม่ต้องมีปุ่มลบ — กดไปก็ได้ผลเดิม แต่ชวนให้เข้าใจผิดว่าลบได้
           if (!a.isHidden)
-            IconButton(
-              icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+            AppIconButton(
+              icon: Icons.delete,
+              danger: true,
               tooltip: activityWillBeHiddenOnDelete(a) ? 'ซ่อน (มีผู้เข้าร่วมแล้ว ลบไม่ได้)' : 'ลบ',
               onPressed: () => _delete(a),
             ),

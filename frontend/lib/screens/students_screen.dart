@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../widgets/app_buttons.dart';
+import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
@@ -11,6 +14,7 @@ import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
+import 'app_shell.dart';
 
 class StudentsScreen extends StatefulWidget {
   const StudentsScreen({super.key});
@@ -100,77 +104,58 @@ class _StudentsScreenState extends State<StudentsScreen> {
   @override
   Widget build(BuildContext context) {
     if (!authService.isAdmin) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('จัดการนิสิต')),
-        body: const Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
+      return const AppShell(
+        activeId: 'students',
+        body: Center(child: Text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้')),
       );
     }
     final canWrite = authService.canWrite;
-    return Scaffold(
-      appBar: AppBar(title: const Text('จัดการนิสิต')),
-      floatingActionButton: canWrite
-          ? FloatingActionButton(onPressed: () => _openForm(), child: const Icon(Icons.add))
-          : null,
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                DebouncedSearchField(
-                  label: 'ค้นหาชื่อ/รหัสนิสิต',
-                  onSearch: _onSearch,
-                ),
-                DropdownButton<String?>(
-                  value: _statusFilter,
-                  hint: const Text('สถานะทั้งหมด'),
-                  items: const [
-                    DropdownMenuItem(value: null, child: Text('สถานะทั้งหมด')),
-                    DropdownMenuItem(value: 'active', child: Text('กำลังศึกษา')),
-                    DropdownMenuItem(value: 'inactive', child: Text('พ้นสภาพ')),
-                  ],
-                  onChanged: (v) {
-                    setState(() => _statusFilter = v);
-                    _skip = 0;
-                    _load();
-                  },
-                ),
-                IconButton(
-                  onPressed: _load,
-                  tooltip: 'โหลดใหม่',
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
+    return AdminPage(
+      activeId: 'students',
+      title: 'จัดการนิสิต',
+      subtitle: 'นิสิตทั้งหมด $_total คน',
+      actions: [
+        if (canWrite)
+          FilledButton.icon(
+            onPressed: () => _openForm(),
+            icon: const Icon(Icons.person_add_alt, size: 18),
+            label: const Text('เพิ่มนิสิต'),
           ),
-          // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
-          SizedBox(
-            height: 2,
-            child: _loading && _students.isNotEmpty
-                ? const LinearProgressIndicator(minHeight: 2)
-                : null,
-          ),
-          Expanded(
-            child: _loading && _students.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? ErrorState(message: _error!, onRetry: _load)
-                    : _students.isEmpty
-                        ? _emptyState()
-                        : LayoutBuilder(
-                            builder: (context, constraints) {
-                              return constraints.maxWidth > 800
-                                  ? _buildTable(canWrite)
-                                  : _buildList(canWrite);
-                            },
-                          ),
-          ),
-          if (_error == null && _students.isNotEmpty) _buildPagination(),
-        ],
-      ),
+      ],
+      filters: [
+        DebouncedSearchField(label: 'ค้นหาชื่อ/รหัสนิสิต', onSearch: _onSearch),
+        DropdownButton<String?>(
+          value: _statusFilter,
+          hint: const Text('สถานะทั้งหมด'),
+          items: const [
+            DropdownMenuItem(value: null, child: Text('สถานะทั้งหมด')),
+            DropdownMenuItem(value: 'active', child: Text('กำลังศึกษา')),
+            DropdownMenuItem(value: 'inactive', child: Text('พ้นสภาพ')),
+          ],
+          onChanged: (v) {
+            setState(() => _statusFilter = v);
+            _skip = 0;
+            _load();
+          },
+        ),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+      ],
+      // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
+      busy: _loading && _students.isNotEmpty,
+      footer: _error == null && _students.isNotEmpty ? _buildPagination() : null,
+      child: _loading && _students.isEmpty
+          ? const LoadingState(message: 'กำลังโหลดข้อมูลนิสิต...')
+          : _error != null
+              ? ErrorState(message: _error!, onRetry: _load)
+              : _students.isEmpty
+                  ? _emptyState()
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        return constraints.maxWidth > 800
+                            ? TableCard(child: _buildTable(canWrite))
+                            : _buildList(canWrite);
+                      },
+                    ),
     );
   }
 
@@ -179,7 +164,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
     return const EmptyState(
       icon: Icons.people_outline,
       title: 'ยังไม่มีข้อมูลนิสิต',
-      message: 'กดปุ่ม + มุมขวาล่างเพื่อเพิ่มนิสิตคนแรก',
+      message: 'กดปุ่ม "เพิ่มนิสิต" ด้านบนเพื่อเพิ่มนิสิตคนแรก',
     );
   }
 
@@ -215,7 +200,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       itemBuilder: (context, index) {
         final s = _students[index];
         return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          margin: const EdgeInsets.only(bottom: AppSpacing.md),
           child: ListTile(
             title: Text(s.fullName),
             subtitle: Text('${s.studentId} • ${s.faculty} / ${s.major} • ปี ${s.yearLevel}'),
@@ -228,17 +213,18 @@ class _StudentsScreenState extends State<StudentsScreen> {
     );
   }
 
-  Widget _actionButtons(Student s) => Row(
-        mainAxisSize: MainAxisSize.min,
+  Widget _actionButtons(Student s) => Wrap(
+        spacing: AppSpacing.xs,
         children: [
-          IconButton(
-            icon: const Icon(Icons.edit, size: 20),
+          AppIconButton(
+            icon: Icons.edit,
             tooltip: 'แก้ไข',
             onPressed: () => _openForm(existing: s),
           ),
           if (authService.isAdmin)
-            IconButton(
-              icon: const Icon(Icons.delete, size: 20, color: Colors.red),
+            AppIconButton(
+              icon: Icons.delete,
+              danger: true,
               tooltip: 'ลบ',
               onPressed: () => _delete(s),
             ),

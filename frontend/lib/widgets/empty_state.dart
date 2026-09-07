@@ -14,10 +14,14 @@ class EmptyState extends StatelessWidget {
     required this.title,
     this.message,
     this.action,
+    this.palette = StatusPalette.info,
   });
 
   final IconData icon;
   final String title;
+
+  /// สีของวงกลมไอคอน — ปกติเป็นฟ้าอ่อน ส่วนกรณีผิดพลาดใช้โทนแดง
+  final StatusPalette palette;
 
   /// คำอธิบายเพิ่ม เช่น บอกว่าต้องทำอะไรต่อ
   final String? message;
@@ -46,10 +50,10 @@ class EmptyState extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
+                color: palette.background,
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 36, color: scheme.onSurfaceVariant),
+              child: Icon(icon, size: 36, color: palette.foreground),
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(title, style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
@@ -85,6 +89,7 @@ class ErrorState extends StatelessWidget {
     return EmptyState(
       icon: Icons.error_outline,
       title: 'โหลดข้อมูลไม่สำเร็จ',
+      palette: StatusPalette.rejected,
       message: friendlyError(message),
       action: onRetry == null
           ? null
@@ -94,6 +99,42 @@ class ErrorState extends StatelessWidget {
               label: const Text('ลองใหม่'),
               style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
             ),
+    );
+  }
+}
+
+/// สถานะ "กำลังโหลด" แบบเดียวกันทั้งแอป — วงหมุน + ข้อความไทยบอกว่ากำลังทำอะไร
+///
+/// เดิมแต่ละหน้าใช้ `Center(child: CircularProgressIndicator())` เปล่า ๆ ซึ่ง
+/// ไม่บอกผู้ใช้ว่ากำลังรออะไรอยู่
+class LoadingState extends StatelessWidget {
+  const LoadingState({super.key, this.message = 'กำลังโหลดข้อมูล...'});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.sub),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

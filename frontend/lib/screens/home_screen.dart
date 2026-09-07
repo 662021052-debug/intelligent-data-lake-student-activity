@@ -1,18 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '../models/hour_summary.dart';
-import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
-import 'chatbot_screen.dart';
-import 'checkin_scan_screen.dart';
+import 'app_shell.dart';
 import 'dashboard_screen.dart';
 import 'hour_categories_screen.dart';
-import 'my_hours_screen.dart';
 import 'participations_screen.dart';
-import 'register_activities_screen.dart';
+import 'student_home_view.dart';
 import 'students_screen.dart';
 import 'users_screen.dart';
 
@@ -24,73 +20,70 @@ String roleLabel(String? role) => switch (role) {
       _ => '-',
     };
 
+/// หน้าแรก — หน้าตาต่างกันตาม role
+///
+/// ฝั่งนิสิตเป็นหน้าโปรไฟล์ + ชั่วโมงสะสมตาม mockup ส่วนฝั่งเจ้าหน้าที่/ผู้ดูแล
+/// ยังเป็นแผงเมนูเดิม (จะยกเครื่องในเฟสของฝั่งผู้ดูแล)
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final isStudent = authService.role == 'student';
+    return AppShell(
+      activeId: 'home',
+      body: authService.role == 'student' ? const StudentHomeView() : const _StaffHomeView(),
+    );
+  }
+}
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('หน้าหลัก'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.lg),
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.logout, size: 18),
-              label: const Text('ออกจากระบบ'),
-              onPressed: authService.logout,
-            ),
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          // grid ที่ responsive: จอเล็ก 1 คอลัมน์ → จอใหญ่สุด 4 คอลัมน์
-          final width = constraints.maxWidth;
-          final columns = switch (width) {
-            >= 1200 => 4,
-            >= 900 => 3,
-            >= 600 => 2,
-            _ => 1,
-          };
-          final cards = _menuCards(context, isStudent);
+class _StaffHomeView extends StatelessWidget {
+  const _StaffHomeView();
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1200),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _WelcomeHeader(),
-                    if (isStudent) ...[
-                      const SizedBox(height: AppSpacing.lg),
-                      const _MyHoursSummaryCard(),
-                    ],
-                    const SizedBox(height: AppSpacing.xl),
-                    GridView.count(
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // grid ที่ responsive: จอเล็ก 1 คอลัมน์ → จอใหญ่สุด 4 คอลัมน์
+        final columns = switch (constraints.maxWidth) {
+          >= 1200 => 4,
+          >= 900 => 3,
+          >= 600 => 2,
+          _ => 1,
+        };
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _WelcomeHeader(),
+                  const SizedBox(height: AppSpacing.xl),
+                  GridView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    // ความสูงคงที่แทนอัตราส่วน — อัตราส่วนทำให้การ์ดเตี้ยจนเนื้อหา
+                    // ล้นบนมือถือ และสูงเว่อร์บนจอกลางที่ยังเป็นคอลัมน์เดียว
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: columns,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
                       mainAxisSpacing: AppSpacing.lg,
                       crossAxisSpacing: AppSpacing.lg,
-                      childAspectRatio: columns == 1 ? 2.6 : 1.25,
-                      children: cards,
+                      mainAxisExtent: 210,
                     ),
-                  ],
-                ),
+                    children: _menuCards(context),
+                  ),
+                ],
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
-  List<Widget> _menuCards(BuildContext context, bool isStudent) {
+  List<Widget> _menuCards(BuildContext context) {
     void open(Widget screen) =>
         Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
@@ -112,7 +105,7 @@ class HomeScreen extends StatelessWidget {
       _MenuCard(
         icon: Icons.event,
         title: 'กิจกรรม',
-        subtitle: isStudent ? 'ดูกิจกรรมทั้งหมด' : 'จัดการข้อมูลกิจกรรม',
+        subtitle: 'จัดการข้อมูลกิจกรรม',
         onTap: () => open(const ActivitiesScreen()),
       ),
       _MenuCard(
@@ -124,9 +117,7 @@ class HomeScreen extends StatelessWidget {
       _MenuCard(
         icon: Icons.fact_check,
         title: 'การเข้าร่วมกิจกรรม',
-        subtitle: isStudent
-            ? 'ดูประวัติการเข้าร่วมและส่งหลักฐาน'
-            : 'บันทึกและตรวจสอบการเข้าร่วม',
+        subtitle: 'บันทึกและตรวจสอบการเข้าร่วม',
         onTap: () => open(const ParticipationsScreen()),
       ),
       if (authService.isAdmin)
@@ -143,34 +134,6 @@ class HomeScreen extends StatelessWidget {
           subtitle: 'เพิ่ม/แก้ไขหมวดและหมวดย่อยที่ใช้นับชั่วโมง',
           onTap: () => open(const HourCategoriesScreen()),
         ),
-      if (isStudent)
-        _MenuCard(
-          icon: Icons.qr_code_scanner,
-          title: 'เช็กอินหน้างาน',
-          subtitle: 'สแกน QR ของกิจกรรมเพื่อบันทึกว่ามาร่วมงาน',
-          onTap: () => open(const CheckinScanScreen()),
-        ),
-      if (isStudent)
-        _MenuCard(
-          icon: Icons.how_to_reg,
-          title: 'สมัครกิจกรรม',
-          subtitle: 'ดูกิจกรรมที่เปิดรับสมัครและสมัครเข้าร่วม',
-          onTap: () => open(const RegisterActivitiesScreen()),
-        ),
-      if (isStudent)
-        _MenuCard(
-          icon: Icons.emoji_events,
-          title: 'แดชบอร์ดชั่วโมงของฉัน',
-          subtitle: 'สรุปชั่วโมงรวม กราฟรายหมวด และสิ่งที่ยังขาด',
-          onTap: () => open(const MyHoursScreen()),
-        ),
-      if (isStudent)
-        _MenuCard(
-          icon: Icons.smart_toy,
-          title: 'ผู้ช่วยอัจฉริยะ',
-          subtitle: 'ถามชั่วโมง หมวดที่ยังขาด และขอคำแนะนำกิจกรรม',
-          onTap: () => open(const ChatbotScreen()),
-        ),
     ];
   }
 }
@@ -182,24 +145,24 @@ class _WelcomeHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xl),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        gradient: LinearGradient(
-          colors: [scheme.primaryContainer, scheme.surfaceContainerHighest],
+        border: Border.all(color: AppColors.line),
+        gradient: const LinearGradient(
+          colors: [AppColors.blueBg, AppColors.surface],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),
       ),
       child: Row(
         children: [
-          CircleAvatar(
+          const CircleAvatar(
             radius: 26,
-            backgroundColor: scheme.primary,
-            child: Icon(Icons.person, color: scheme.onPrimary, size: 28),
+            backgroundColor: AppColors.blue,
+            child: Icon(Icons.person, color: Colors.white, size: 28),
           ),
           const SizedBox(width: AppSpacing.lg),
           Expanded(
@@ -208,8 +171,7 @@ class _WelcomeHeader extends StatelessWidget {
               children: [
                 Text(
                   'สวัสดี, ${authService.username ?? ''}',
-                  style: theme.textTheme.headlineSmall
-                      ?.copyWith(fontWeight: FontWeight.w600, color: scheme.onPrimaryContainer),
+                  style: theme.textTheme.titleLarge?.copyWith(color: AppColors.ink),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Wrap(
@@ -223,19 +185,17 @@ class _WelcomeHeader extends StatelessWidget {
                         vertical: AppSpacing.xs,
                       ),
                       decoration: BoxDecoration(
-                        color: scheme.primary,
-                        borderRadius: BorderRadius.circular(AppRadius.chip),
+                        color: AppColors.blue,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
                       ),
                       child: Text(
                         roleLabel(authService.role),
-                        style: theme.textTheme.labelLarge
-                            ?.copyWith(color: scheme.onPrimary, fontWeight: FontWeight.w600),
+                        style: theme.textTheme.labelSmall?.copyWith(color: Colors.white),
                       ),
                     ),
                     Text(
                       'ระบบติดตามการเข้าร่วมกิจกรรมนิสิต',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: scheme.onPrimaryContainer),
+                      style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.sub),
                     ),
                   ],
                 ),
@@ -246,99 +206,6 @@ class _WelcomeHeader extends StatelessWidget {
       ),
     );
   }
-}
-
-/// การ์ดสรุปชั่วโมงสะสมของนิสิต (X/60 + แถบ progress) — เห็นสถานะตัวเองทันทีที่เข้า
-///
-/// โหลดไม่ได้ (ออฟไลน์ / ยังไม่ผูกข้อมูลนิสิต) ให้ซ่อนการ์ดไปเงียบ ๆ แทนที่จะโชว์ error
-/// เพราะเป็นแค่ข้อมูลเสริมบนหน้าหลัก ไม่ใช่เนื้อหาหลักของหน้า
-class _MyHoursSummaryCard extends StatefulWidget {
-  const _MyHoursSummaryCard();
-
-  @override
-  State<_MyHoursSummaryCard> createState() => _MyHoursSummaryCardState();
-}
-
-class _MyHoursSummaryCardState extends State<_MyHoursSummaryCard> {
-  late final Future<List<HourCategorySummary>> _future = ApiService.fetchList(
-    '/students/me/hours-summary',
-    HourCategorySummary.fromJson,
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<HourCategorySummary>>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done ||
-            snapshot.hasError ||
-            !snapshot.hasData ||
-            snapshot.data!.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
-        final categories = snapshot.data!;
-        final earned = categories.fold<double>(0, (sum, c) => sum + c.earnedHours);
-        final required = categories.fold<double>(0, (sum, c) => sum + c.requiredHours);
-        final progress = required == 0 ? 0.0 : (earned / required).clamp(0.0, 1.0);
-        final done = categories.where((c) => c.completed).length;
-
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
-        final passed = earned >= required && required > 0;
-        final barColor = passed
-            ? StatusPalette.approved.foreground
-            : progress >= 0.5
-                ? scheme.primary
-                : StatusPalette.pending.foreground;
-
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.timelapse, color: scheme.primary),
-                    const SizedBox(width: AppSpacing.sm),
-                    Text('ชั่วโมงสะสมของฉัน', style: theme.textTheme.titleMedium),
-                    const Spacer(),
-                    Text(
-                      '${_trim(earned)}/${_trim(required)} ชม.',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: barColor,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadius.chip),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 10,
-                    backgroundColor: scheme.surfaceContainerHighest,
-                    valueColor: AlwaysStoppedAnimation<Color>(barColor),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  passed
-                      ? 'ครบเกณฑ์แล้ว 🎉 (ผ่าน $done/${categories.length} หมวด)'
-                      : 'ยังขาดอีก ${_trim(required - earned)} ชม. • ผ่านแล้ว $done/${categories.length} หมวด',
-                  style: theme.textTheme.bodyMedium,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  String _trim(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
 }
 
 class _MenuCard extends StatefulWidget {
@@ -364,7 +231,6 @@ class _MenuCardState extends State<_MenuCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -382,18 +248,17 @@ class _MenuCardState extends State<_MenuCard> {
               padding: const EdgeInsets.all(AppSpacing.xl),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
                     padding: const EdgeInsets.all(AppSpacing.md),
                     decoration: BoxDecoration(
-                      color: _hovered ? scheme.primary : scheme.primaryContainer,
+                      color: _hovered ? AppColors.blue : AppColors.blueBg,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       widget.icon,
                       size: 30,
-                      color: _hovered ? scheme.onPrimary : scheme.onPrimaryContainer,
+                      color: _hovered ? Colors.white : AppColors.blue,
                     ),
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -408,8 +273,7 @@ class _MenuCardState extends State<_MenuCard> {
                     textAlign: TextAlign.center,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
                   ),
                 ],
               ),

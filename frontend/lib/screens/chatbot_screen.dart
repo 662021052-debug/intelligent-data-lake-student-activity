@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../widgets/typing_indicator.dart';
+import 'app_shell.dart';
 import 'register_activities_screen.dart';
 
 /// Student-facing "ผู้ช่วยอัจฉริยะ" chat screen (Phase 19).
@@ -108,10 +109,10 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('ผู้ช่วยอัจฉริยะ')),
+    return AppShell(
+      activeId: 'chatbot',
+      // หน้าแชตไม่มีหัวข้อในเนื้อหาตาม mockup แถบบนจึงต้องบอกชื่อหน้าแทนตอนจอแคบ
+      title: 'ผู้ช่วยอัจฉริยะ',
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
@@ -142,7 +143,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               // แถบล่าง (คำถามลัด + ช่องพิมพ์) อยู่ติดขอบล่างเสมอ พื้นหลังต่างจากพื้นที่แชต
               // เพื่อไม่ให้หน้าจอกระโดดเวลาคีย์บอร์ดขึ้นหรือข้อความยาวขึ้น
               Material(
-                color: scheme.surfaceContainerLow,
+                color: AppColors.surface,
                 child: SafeArea(
                   top: false,
                   child: Column(
@@ -186,10 +187,10 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final fromUser = message.fromUser;
-    final bg = fromUser ? scheme.primary : scheme.surfaceContainerHighest;
-    final fg = fromUser ? scheme.onPrimary : scheme.onSurface;
+    // ฝั่งผู้ใช้เป็นฟองฟ้าทึบ ฝั่งบอทเป็นการ์ดขาวขอบบาง — ต่างกันชัดโดยไม่ต้องอ่าน
+    final bg = fromUser ? AppColors.blue : AppColors.surface;
+    final fg = fromUser ? Colors.white : AppColors.ink;
 
     final bubble = Container(
       padding: const EdgeInsets.symmetric(
@@ -199,12 +200,13 @@ class _MessageBubble extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 520),
       decoration: BoxDecoration(
         color: bg,
+        border: fromUser ? null : Border.all(color: AppColors.line),
         // มุมด้านที่ติดกับผู้พูดโค้งน้อยกว่า ทำให้รู้ทันทีว่าใครพูด
         borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(16),
-          topRight: const Radius.circular(16),
-          bottomLeft: Radius.circular(fromUser ? 16 : 4),
-          bottomRight: Radius.circular(fromUser ? 4 : 16),
+          topLeft: const Radius.circular(14),
+          topRight: const Radius.circular(14),
+          bottomLeft: Radius.circular(fromUser ? 14 : 4),
+          bottomRight: Radius.circular(fromUser ? 4 : 14),
         ),
       ),
       child: Column(
@@ -249,8 +251,6 @@ class _TypingBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Row(
@@ -264,12 +264,13 @@ class _TypingBubble extends StatelessWidget {
               vertical: AppSpacing.md,
             ),
             decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
+              color: AppColors.surface,
+              border: Border.all(color: AppColors.line),
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
+                topLeft: Radius.circular(14),
+                topRight: Radius.circular(14),
                 bottomLeft: Radius.circular(4),
-                bottomRight: Radius.circular(16),
+                bottomRight: Radius.circular(14),
               ),
             ),
             child: const TypingIndicator(),
@@ -356,10 +357,16 @@ class _Composer extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          IconButton.filled(
+          FilledButton(
             onPressed: sending ? null : () => onSend(controller.text),
-            icon: const Icon(Icons.send),
-            tooltip: 'ส่ง',
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(48, 44),
+              padding: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.field),
+              ),
+            ),
+            child: const Icon(Icons.send, size: 18),
           ),
         ],
       ),

@@ -59,10 +59,10 @@ class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
         controller: _controller,
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
-          labelText: widget.label,
-          prefixIcon: const Icon(Icons.search),
-          border: const OutlineInputBorder(),
-          isDense: true,
+          // ข้อความบอกใบ้อยู่ในช่องเลยตาม mockup (ไม่ใช่ label ลอยอยู่เหนือช่อง)
+          // ช่องค้นหาสั้น ๆ ไม่ต้องมีป้ายชื่อค้างไว้ ไอคอนแว่นขยายบอกหน้าที่ชัดพอ
+          hintText: widget.label,
+          prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _controller.text.isEmpty
               ? null
               : IconButton(
