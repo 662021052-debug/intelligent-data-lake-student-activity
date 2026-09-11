@@ -47,6 +47,13 @@ class ProgramType(str, Enum):
     continuing = "continuing"    # ต่อเนื่อง/ภาคพิเศษ 2 ปี
 
 
+class ImportedCompletion(str, Enum):
+    """สถานะ ผ่าน/ไม่ผ่าน เกณฑ์กิจกรรม ตามไฟล์รายชื่อนิสิตที่นำเข้า (ไม่ใช่ค่าที่ระบบคำนวณ)."""
+
+    passed = "passed"    # "ผ่าน"
+    failed = "failed"    # "ไม่ผ่าน"
+
+
 class CountingRule(str, Enum):
     """วิธีนับว่านิสิต "ครบเกณฑ์" ของชุดเกณฑ์นั้น
 
@@ -148,6 +155,10 @@ class StudentBase(SQLModel):
 
 class Student(StudentBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # สถานะตามไฟล์ต้นทาง — ใช้สร้างการเข้าร่วมจำลองให้ผลออกมาตรงกับของจริง แล้วเทียบกับ
+    # completion ที่ระบบคำนวณเอง อยู่ที่ตารางอย่างเดียว ไม่อยู่ใน StudentBase เพราะไม่ใช่ข้อมูล
+    # ที่ผู้ดูแลกรอก/แก้ผ่าน API และถ้าโชว์คู่กับผลที่ระบบคำนวณจะสับสนว่าอันไหนจริง
+    imported_completion: Optional[ImportedCompletion] = None
 
     participations: list["Participation"] = Relationship(back_populates="student")
 
