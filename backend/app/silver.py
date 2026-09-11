@@ -15,6 +15,7 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
+from app.approval import apply_approval
 from app.config import settings
 from app.models import (
     Activity,
@@ -216,8 +217,11 @@ def process_participation_evidence(
         decision = OcrDecision.auto_approved
         # Reuse the existing approval rules: evidence exists (raw_file), and hours
         # are taken from the activity — never from the OCR output.
-        participation.evidence_status = EvidenceStatus.approved
-        participation.hours_earned = activity.hours if activity else 0
+        if activity is not None:
+            apply_approval(session, participation, activity)
+        else:
+            participation.evidence_status = EvidenceStatus.approved
+            participation.hours_earned = 0
         session.add(participation)
 
     row = SilverEvidenceOcr(

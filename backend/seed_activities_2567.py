@@ -363,9 +363,10 @@ def populate(session: Session, *, today: date, academic_year: Optional[int] = No
         new_past = 0
         if has_past:
             new_past = math.ceil(max(0, seats_needed - past_seats) / plan.capacity)
-            # ยังไม่มีนิสิตก็ให้มีอย่างน้อยหนึ่งรอบ — หน้าประวัติ/แดชบอร์ดจะได้ไม่ว่าง
-            if not past and new_past == 0:
-                new_past = 1
+            # นิสิตคนเดียวต้องเข้าคนละรอบกัน (เช่น TSU Good 5 ชม. × 2 รอบ) ที่นั่งพอแต่มีรอบเดียว
+            # ก็ยังทำให้ครบไม่ได้ — จำนวนรอบจึงต้องไม่น้อยกว่ารอบที่คนหนึ่งต้องใช้ (อย่างน้อย 1
+            # แม้ยังไม่มีนิสิต หน้าประวัติ/แดชบอร์ดจะได้ไม่ว่าง)
+            new_past = max(new_past, per_student - len(past))
         new_upcoming = max(0, plan.upcoming - len(upcoming)) if has_upcoming else 0
 
         days = spread_dates(past_start, past_end, new_past, *plan.window) + spread_dates(

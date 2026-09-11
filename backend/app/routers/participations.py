@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session, func, select
 
 from app import silver
+from app.approval import apply_approval, clear_approval
 from app.auth import get_current_user, require_writer
 from app.config import settings
 from app.database import get_session
@@ -379,11 +380,10 @@ def update_participation(
                     status_code=400, detail="อนุมัติไม่ได้: ยังไม่มีหลักฐานการเข้าร่วม"
                 )
             # A2: hours are derived from the activity, never typed in by a reviewer.
-            participation.hours_earned = current_activity.hours
+            apply_approval(session, participation, current_activity)
         else:
             # pending / rejected -> no hours counted (E4)
-            participation.hours_earned = 0
-        participation.evidence_status = new_status
+            clear_approval(participation, new_status)
 
     if "check_in_time" in data:
         participation.check_in_time = data["check_in_time"]

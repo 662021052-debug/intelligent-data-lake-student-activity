@@ -117,7 +117,8 @@ def test_every_requirement_gets_past_and_upcoming_activities(session, criteria):
         plan = PLAN_BY_NAME[name]
         past = [a for a in activities if _is_past(a)]
         upcoming = [a for a in activities if not _is_past(a)]
-        assert past, name
+        # นิสิตแค่ 3 คน ที่นั่งรอบเดียวก็พอ แต่คนหนึ่งต้องเข้าคนละรอบให้ครบชั่วโมง
+        assert len(past) >= math.ceil(requirements[name].required_hours / plan.hours), name
         assert len(upcoming) == plan.upcoming, name
         for activity in activities:
             assert activity.approval_status == ApprovalStatus.approved
