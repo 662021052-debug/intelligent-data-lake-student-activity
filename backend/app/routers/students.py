@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
 from app.auth import get_current_user, hash_password, require_admin
+from app.criteria import cohort_from_student_id, resolve_criteria_set_id
 from app.database import get_session
 from app.models import (
     Activity,
@@ -24,6 +25,23 @@ from app.models import (
 from app.schemas import HourCategorySummary, HourSubcategorySummary, Page
 
 router = APIRouter(prefix="/students", tags=["students"], dependencies=[Depends(get_current_user)])
+
+
+def _fill_criteria_fields(session: Session, student: Student) -> None:
+    """เติม cohort + ชุดเกณฑ์จากรหัสนิสิต ถ้ายังไม่ได้ระบุมา
+
+    ผู้ดูแลจึงกรอกแค่รหัสนิสิต แล้วระบบรู้เองว่านิสิตคนนี้ใช้เกณฑ์ชุดไหน
+    (ระบุ cohort/criteria_set_id มาเองก็ได้ ค่าที่ส่งมาชนะเสมอ)
+    """
+    if student.cohort is None:
+        student.cohort = cohort_from_student_id(student.student_id)
+    if student.criteria_set_id is None:
+        student.criteria_set_id = resolve_criteria_set_id(
+            session,
+            student.student_id,
+            student.program_type,
+            student.cohort,
+        )
 
 
 @router.get("", response_model=Page[StudentRead])
@@ -211,6 +229,7 @@ def create_student(payload: StudentCreateWithAccount, session: Session = Depends
             )
 
     student = Student.model_validate(payload)
+    _fill_criteria_fields(session, student)
     session.add(student)
     try:
         if payload.create_user:
@@ -249,6 +268,13 @@ def update_student(student_id: int, payload: StudentUpdate, session: Session = D
 
     for key, value in data.items():
         setattr(student, key, value)
+    # แก้รหัสนิสิต/กลุ่มหลักสูตรแล้วรุ่นกับชุดเกณฑ์ต้องตามไปด้วย เว้นแต่ผู้ดูแล
+    # ระบุค่ามาเองในคำขอเดียวกัน
+    if ("student_id" in data or "program_type" in data) and "criteria_set_id" not in data:
+        if "cohort" not in data:
+            student.cohort = None
+        student.criteria_set_id = None
+    _fill_criteria_fields(session, student)
     session.add(student)
     session.commit()
     session.refresh(student)

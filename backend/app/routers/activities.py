@@ -14,12 +14,14 @@ from app.models import (
     Activity,
     ActivityCreate,
     ActivityRead,
+    ActivityRequirement,
     ActivityUpdate,
     ApprovalStatus,
     HourCategory,
     HourSubcategory,
     Participation,
     ParticipationRead,
+    Requirement,
     User,
     UserRole,
 )
@@ -85,13 +87,70 @@ def _participant_counts(session: Session, activity_ids: list[int]) -> dict[int, 
     return dict(rows)
 
 
-def _to_read(activity: Activity, participant_count: int = 0) -> ActivityRead:
-    return ActivityRead(**activity.model_dump(), participant_count=participant_count)
+def _requirement_ids(session: Session, activity_ids: list[int]) -> dict[int, list[int]]:
+    """รายการเกณฑ์ที่แต่ละกิจกรรมผูกไว้ — ดึงทีเดียวทั้งหน้า ไม่ยิงต่อแถว."""
+    if not activity_ids:
+        return {}
+    rows = session.exec(
+        select(ActivityRequirement.activity_id, ActivityRequirement.requirement_id)
+        .where(ActivityRequirement.activity_id.in_(activity_ids))
+        .order_by(ActivityRequirement.requirement_id)
+    ).all()
+    grouped: dict[int, list[int]] = {}
+    for activity_id, requirement_id in rows:
+        grouped.setdefault(activity_id, []).append(requirement_id)
+    return grouped
+
+
+def _validate_requirement_ids(session: Session, requirement_ids: list[int]) -> list[int]:
+    """ตัดตัวซ้ำ + ยืนยันว่าทุก id มีจริง ไม่งั้นกิจกรรมจะผูกกับเกณฑ์ที่ไม่มีอยู่."""
+    unique = list(dict.fromkeys(requirement_ids))
+    if not unique:
+        return []
+    found = set(
+        session.exec(select(Requirement.id).where(Requirement.id.in_(unique))).all()
+    )
+    missing = [rid for rid in unique if rid not in found]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"ไม่พบรายการเกณฑ์ id {', '.join(str(m) for m in missing)}",
+        )
+    return unique
+
+
+def _set_requirement_links(session: Session, activity_id: int, requirement_ids: list[int]) -> None:
+    """แทนที่ชุดรายการเกณฑ์ของกิจกรรมทั้งชุด (ลบของเดิม ใส่ของใหม่)."""
+    existing = session.exec(
+        select(ActivityRequirement).where(ActivityRequirement.activity_id == activity_id)
+    ).all()
+    for link in existing:
+        session.delete(link)
+    # flush ก่อนใส่ของใหม่ — SQLAlchemy จัด INSERT ไว้ก่อน DELETE ในรอบเดียวกัน
+    # ชุดใหม่ที่ทับกับของเดิมบางตัวจึงชนคีย์ซ้ำถ้าไม่ล้างให้จบก่อน
+    session.flush()
+    for requirement_id in requirement_ids:
+        session.add(
+            ActivityRequirement(activity_id=activity_id, requirement_id=requirement_id)
+        )
+
+
+def _to_read(
+    activity: Activity,
+    participant_count: int = 0,
+    requirement_ids: Optional[list[int]] = None,
+) -> ActivityRead:
+    return ActivityRead(
+        **activity.model_dump(),
+        participant_count=participant_count,
+        requirement_ids=requirement_ids or [],
+    )
 
 
 def _to_read_single(session: Session, activity: Activity) -> ActivityRead:
     count = _participant_counts(session, [activity.id]).get(activity.id, 0)
-    return _to_read(activity, count)
+    requirements = _requirement_ids(session, [activity.id]).get(activity.id, [])
+    return _to_read(activity, count, requirements)
 
 
 @router.get("", response_model=Page[ActivityRead])
@@ -151,8 +210,12 @@ def list_activities(
         # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (เช่น อนุมัติกิจกรรม) ย้ายตำแหน่งในรายการ
         query = query.order_by(Activity.start_at.desc(), Activity.id.desc())
     activities = session.exec(query.offset(skip).limit(limit)).all()
-    counts = _participant_counts(session, [a.id for a in activities])
-    items = [_to_read(a, counts.get(a.id, 0)) for a in activities]
+    activity_ids = [a.id for a in activities]
+    counts = _participant_counts(session, activity_ids)
+    requirements = _requirement_ids(session, activity_ids)
+    items = [
+        _to_read(a, counts.get(a.id, 0), requirements.get(a.id, [])) for a in activities
+    ]
     return Page(items=items, total=total, skip=skip, limit=limit)
 
 
@@ -193,13 +256,16 @@ def create_activity(
     current_user: User = Depends(require_writer),
 ):
     _validate_not_backdated(payload.start_at)
-    activity = Activity.model_validate(payload)
+    requirement_ids = _validate_requirement_ids(session, payload.requirement_ids)
+    activity = Activity.model_validate(payload.model_dump(exclude={"requirement_ids"}))
     activity.created_by = current_user.id
     _apply_initial_approval(activity, current_user)
     session.add(activity)
+    session.flush()  # ต้องได้ activity.id ก่อนผูกรายการเกณฑ์
+    _set_requirement_links(session, activity.id, requirement_ids)
     session.commit()
     session.refresh(activity)
-    return _to_read(activity, 0)
+    return _to_read(activity, 0, requirement_ids)
 
 
 # ---------------------------------------------------------------- นำเข้าทั้งภาคเรียน
@@ -366,6 +432,8 @@ def update_activity(
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     data = payload.model_dump(exclude_unset=True)
+    # ไม่ใช่คอลัมน์ของ activity — เก็บออกมาจัดการเป็นตารางเชื่อมต่างหาก
+    new_requirement_ids = data.pop("requirement_ids", None)
     new_start: Optional[datetime] = data.get("start_at")
     # ตรวจเฉพาะตอน "ย้ายวัน" จริง ๆ — ฟอร์มแก้ไขส่งทุกฟิลด์กลับมาเสมอรวมทั้ง
     # start_at เดิม ถ้าตรวจทุกครั้งกิจกรรมที่จัดไปแล้วจะแก้ชื่อ/สถานที่ไม่ได้เลย
@@ -377,6 +445,11 @@ def update_activity(
 
     for key, value in data.items():
         setattr(activity, key, value)
+
+    if new_requirement_ids is not None:
+        _set_requirement_links(
+            session, activity.id, _validate_requirement_ids(session, new_requirement_ids)
+        )
 
     if current_user.role == UserRole.staff:
         # any edit by the owning staff needs re-approval

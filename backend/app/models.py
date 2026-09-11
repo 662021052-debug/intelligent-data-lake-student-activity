@@ -1,9 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -40,6 +40,97 @@ class OcrDecision(str, Enum):
     flagged = "flagged"               # duplicate file -> never auto-approved
 
 
+class ProgramType(str, Enum):
+    """กลุ่มหลักสูตรของนิสิต — เกณฑ์ชั่วโมงต่างกัน (ปกติ 60 ชม. / ต่อเนื่อง 30 ชม.)."""
+
+    regular = "regular"          # หลักสูตรปกติ 4 ปี
+    continuing = "continuing"    # ต่อเนื่อง/ภาคพิเศษ 2 ปี
+
+
+class CountingRule(str, Enum):
+    """วิธีนับว่านิสิต "ครบเกณฑ์" ของชุดเกณฑ์นั้น
+
+    เดิมเป็น open item ที่ยังไม่ได้ข้อสรุปกับอาจารย์ จึงเก็บไว้ที่ระดับชุดเกณฑ์
+    เพื่อให้ต่างปี/ต่างกลุ่มใช้กติกาต่างกันได้โดยไม่ต้องแก้โค้ด
+    """
+
+    total_per_unit = "total_per_unit"              # ดูยอดรวมของแต่ละหน่วยการเรียนรู้
+    min_per_requirement = "min_per_requirement"    # ต้องได้ขั้นต่ำครบทุกรายการเกณฑ์
+
+
+# ---------- ชุดเกณฑ์กิจกรรม (criteria versioning) ----------
+class CriteriaSet(SQLModel, table=True):
+    """หนึ่งชุดเกณฑ์ = ปีหลักสูตร × กลุ่มนิสิต (เช่น 2567 หลักสูตรปกติ 60 ชม.)
+
+    แยก "นิยามเกณฑ์" ออกจาก "การเข้าร่วมจริง" เกณฑ์จึงเปลี่ยนรายปีได้โดยไม่กระทบ
+    ประวัติของรุ่นก่อน — นิสิตแต่ละคนผูกกับชุดของตัวเองผ่าน `student.criteria_set_id`
+    """
+
+    __tablename__ = "criteria_set"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(unique=True, index=True)          # เช่น "2567-regular", "legacy-2566"
+    academic_year: int                                   # ปีหลักสูตร (พ.ศ.)
+    program_type: ProgramType = ProgramType.regular
+    name: str
+    total_required_hours: float
+    counting_rule: CountingRule = CountingRule.min_per_requirement
+    is_active: bool = True
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+
+
+class Talent(SQLModel, table=True):
+    """กลุ่ม Talent/PLO ภายในชุดเกณฑ์ (โครง 2567) — ชุดเก่าไม่มีก็ได้."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    criteria_set_id: int = Field(foreign_key="criteria_set.id", index=True)
+    code: str                                    # เช่น "glocal", "communication", "social"
+    name: str
+    plo: Optional[str] = None                    # เช่น "PLO 1"
+    # ชื่อคอลัมน์เลี่ยงคำว่า order ซึ่งเป็นคำสงวนของ SQL
+    sort_order: int = 0
+
+
+class LearningUnit(SQLModel, table=True):
+    """หน่วยการเรียนรู้ 5 หน่วย — taxonomy คงที่ ใช้ร่วมกันทุกชุดเกณฑ์."""
+
+    __tablename__ = "learning_unit"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(unique=True, index=True)   # "1".."5"
+    name: str
+
+
+class Requirement(SQLModel, table=True):
+    """รายการเกณฑ์ย่อยที่กิจกรรมผูกถึง — ตัวแทนของ HourSubcategory เดิม."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    criteria_set_id: int = Field(foreign_key="criteria_set.id", index=True)
+    talent_id: Optional[int] = Field(default=None, foreign_key="talent.id", index=True)
+    learning_unit_id: int = Field(foreign_key="learning_unit.id", index=True)
+    name: str
+    is_mandatory: bool = False
+    required_hours: float = 0
+    min_activities: Optional[int] = None
+    # กฎพิเศษที่ยังไม่ได้ทำเป็นโครงสร้าง เช่น "สองด้านรวมกัน ≥ 16 ชม."
+    rule_note: Optional[str] = None
+    organizer: Optional[str] = None
+
+
+class ActivityRequirement(SQLModel, table=True):
+    """ตารางเชื่อม กิจกรรม ↔ รายการเกณฑ์ (many-to-many)
+
+    กิจกรรมหนึ่งงานนับให้ได้หลายรายการเกณฑ์ (และรายการเกณฑ์เดียวมีได้หลายกิจกรรม)
+    ซึ่ง `activity.subcategory_id` เดิมที่เป็นค่าเดียวทำไม่ได้
+    """
+
+    __tablename__ = "activity_requirement"
+
+    activity_id: int = Field(foreign_key="activity.id", primary_key=True)
+    requirement_id: int = Field(foreign_key="requirement.id", primary_key=True)
+
+
 # ---------- Student ----------
 class StudentBase(SQLModel):
     student_id: str = Field(unique=True, index=True)
@@ -48,6 +139,11 @@ class StudentBase(SQLModel):
     major: str
     year_level: int
     status: StudentStatus = StudentStatus.active
+    # ปีที่เข้าศึกษา (พ.ศ.) — เว้นว่างได้ ระบบถอดจากรหัสนิสิตให้เอง (ดู app/criteria.py)
+    cohort: Optional[int] = None
+    program_type: ProgramType = ProgramType.regular
+    # ชุดเกณฑ์ที่นิสิตคนนี้ต้องทำให้ครบ — ระบบเลือกให้จาก cohort + program_type
+    criteria_set_id: Optional[int] = Field(default=None, foreign_key="criteria_set.id", index=True)
 
 
 class Student(StudentBase, table=True):
@@ -91,6 +187,9 @@ class StudentUpdate(SQLModel):
     major: Optional[str] = None
     year_level: Optional[int] = None
     status: Optional[StudentStatus] = None
+    cohort: Optional[int] = None
+    program_type: Optional[ProgramType] = None
+    criteria_set_id: Optional[int] = None
 
 
 class StudentRead(StudentBase):
@@ -160,13 +259,21 @@ class Activity(ActivityBase, table=True):
 
 
 class ActivityCreate(ActivityBase):
-    # subcategory_id is the single source of truth for hour-category classification;
-    # required here (unlike the nullable table column) so every new activity is classified.
-    subcategory_id: int
+    # การจัดหมวดของกิจกรรมมีสองทางระหว่างช่วงเปลี่ยนผ่าน: `requirement_ids` (ชุดเกณฑ์
+    # ใหม่ ผูกได้หลายรายการ) และ `subcategory_id` (โครงหมวดเดิม) — ต้องมีอย่างน้อย
+    # หนึ่งทางเสมอ ไม่งั้นกิจกรรมจะไม่นับชั่วโมงให้ใครเลย
+    subcategory_id: Optional[int] = None
+    requirement_ids: list[int] = Field(default_factory=list)
     hours: float = Field(gt=0)  # every activity must declare how many hours it grants
     # must be positive: a 0 capacity is meaningless and would divide-by-zero in the
     # dashboard's low-participation fill-rate calculation.
     max_participants: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _require_classification(self) -> "ActivityCreate":
+        if not self.requirement_ids and self.subcategory_id is None:
+            raise ValueError("ต้องระบุ requirement_ids หรือ subcategory_id อย่างน้อยหนึ่งอย่าง")
+        return self
 
 
 class ActivityUpdate(SQLModel):
@@ -178,6 +285,8 @@ class ActivityUpdate(SQLModel):
     location: Optional[str] = None
     hours: Optional[float] = Field(default=None, gt=0)
     subcategory_id: Optional[int] = None
+    # ส่งมา = แทนที่รายการเกณฑ์ทั้งชุดของกิจกรรมนี้ · ไม่ส่ง = ไม่แตะของเดิม
+    requirement_ids: Optional[list[int]] = None
 
 
 class ActivityRead(ActivityBase):
@@ -189,6 +298,7 @@ class ActivityRead(ActivityBase):
     participant_count: int = 0
     # staff/admin ใช้ขึ้น badge "ซ่อนอยู่" — นิสิตไม่เคยเห็นแถวที่ซ่อนอยู่แล้ว
     is_hidden: bool = False
+    requirement_ids: list[int] = Field(default_factory=list)
 
 
 # ---------- Participation ----------
@@ -198,6 +308,12 @@ class ParticipationBase(SQLModel):
     check_in_time: Optional[datetime] = None
     hours_earned: float = 0
     evidence_status: EvidenceStatus = EvidenceStatus.pending
+    # snapshot ณ เวลาอนุมัติ — เกณฑ์แก้ทีหลังแล้วประวัติต้องไม่เปลี่ยนตาม
+    # (คู่กับ hours_earned ที่ snapshot ชั่วโมงไว้อยู่แล้ว)
+    learning_unit_id: Optional[int] = Field(
+        default=None, foreign_key="learning_unit.id", index=True
+    )
+    requirement_name: Optional[str] = None
 
 
 class Participation(ParticipationBase, table=True):

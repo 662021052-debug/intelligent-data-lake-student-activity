@@ -6,3 +6,9 @@ dev.db
 frontend/build/
 frontend/.dart_tool/
 *.pyc
+
+# ข้อมูลส่วนบุคคล / ไฟล์ข้อมูลดิบ - ห้าม commit
+backend/seed/*.xlsx
+backend/seed/students_69.xlsx
+backup_before_wipe.sql
+*.sql.bak
