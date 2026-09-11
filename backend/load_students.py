@@ -55,6 +55,7 @@ from app.models import (
     User,
     UserRole,
 )
+from app.timeutil import academic_year_for
 
 # รหัสผ่านเริ่มต้นร่วมกันของบัญชีนิสิตที่สร้างใหม่ — แทนได้ด้วย --password หรือ env
 # ใช้ค่าเดียวกับบัญชีนิสิตในชุดเทสต์ (student123) เพื่อให้เดโมจำง่าย
@@ -106,9 +107,8 @@ class Report:
 
 
 def current_academic_year(today: Optional[date] = None) -> int:
-    """ปีการศึกษา (พ.ศ.) — เริ่มเดือนมิถุนายน ตรงกับกฎเดียวกับ ``academic_year`` ใน gold.py."""
-    today = today or date.today()
-    return today.year + 543 if today.month >= 6 else today.year + 542
+    """ปีการศึกษา (พ.ศ.) ของวันนี้ — กฎอยู่ที่ ``academic_year_for`` ที่เดียว."""
+    return academic_year_for(today or date.today())
 
 
 def year_level_for(cohort: int, academic_year: int) -> int:

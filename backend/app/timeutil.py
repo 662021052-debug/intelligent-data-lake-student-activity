@@ -29,6 +29,11 @@ def today_th() -> date:
     return now_th().date()
 
 
+def academic_year_for(day: date) -> int:
+    """ปีการศึกษา (พ.ศ.) ของวันนั้น — เริ่มเดือนมิถุนายน (กฎเดียวกับ ``academic_year`` ใน gold.py)."""
+    return day.year + 543 if day.month >= 6 else day.year + 542
+
+
 def format_thai_datetime(value: datetime) -> str:
     """`2026-08-10T09:00` → `10 ส.ค. 2569 เวลา 09:00 น.` (ปี พ.ศ. เต็ม)
 
