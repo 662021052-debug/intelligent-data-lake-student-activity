@@ -19,6 +19,7 @@ RUN python -c "import easyocr; easyocr.Reader(['th','en'], gpu=False)" || \
 
 COPY app ./app
 COPY seed.py .
+COPY seed_criteria.py .
 COPY seed_evidence.py .
 COPY wipe_data.py .
 COPY alembic.ini .
