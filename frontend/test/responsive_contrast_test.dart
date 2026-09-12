@@ -138,6 +138,21 @@ void main() {
       expect(contrast(AppColors.ink, card), greaterThanOrEqualTo(4.5));
     });
 
+    test('ตัวอักษรบนเมนู sidebar และแถบบนผ่าน 4.5:1', () {
+      // เมนูพื้นน้ำเงินเข้ม: ตัวอักษรปกติ หัวข้อกลุ่ม และเมนูที่เปิดอยู่ (พื้นขาวตัวฟ้า)
+      expect(contrast(AppColors.onNav, AppColors.blueDark), greaterThanOrEqualTo(4.5));
+      expect(contrast(AppColors.onNavMuted, AppColors.blueDark), greaterThanOrEqualTo(4.5));
+      expect(contrast(Colors.white, AppColors.blueDark), greaterThanOrEqualTo(4.5));
+      expect(contrast(AppColors.blue, Colors.white), greaterThanOrEqualTo(4.5));
+      // แถบบนพื้นฟ้าตัวขาว + ป้ายบทบาทพื้นขาวตัวฟ้า
+      expect(contrast(Colors.white, AppColors.blue), greaterThanOrEqualTo(4.5));
+      // ลำดับความสำคัญบนเมนูยังไล่จากสว่างไปจาง
+      expect(
+        contrast(AppColors.onNav, AppColors.blueDark),
+        greaterThan(contrast(AppColors.onNavMuted, AppColors.blueDark)),
+      );
+    });
+
     test('กราฟิกที่สื่อความหมายผ่าน 3:1 บนพื้นที่มันวางอยู่', () {
       // แถบความคืบหน้า/แท่งกราฟ วางบนรางสีพื้นหน้า
       for (final accent in [

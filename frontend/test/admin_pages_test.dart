@@ -5,7 +5,7 @@ import 'package:activity_tracking_frontend/screens/users_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
-import 'package:activity_tracking_frontend/widgets/app_nav_bar.dart';
+import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -35,7 +35,7 @@ void main() {
       _loginAs('admin');
       await tester.pumpWidget(_app(const ActivitiesScreen()));
 
-      expect(find.byType(AppNavBar), findsOneWidget);
+      expect(find.byType(AppSidebar), findsOneWidget);
       expect(find.text('ระบบผู้ดูแล'), findsOneWidget);
       expect(find.text('จัดการผู้ใช้'), findsOneWidget);
       expect(find.text('หมวดชั่วโมง'), findsOneWidget);
@@ -99,7 +99,7 @@ void main() {
       await tester.pumpWidget(_app(const UsersScreen()));
 
       expect(find.text('คุณไม่มีสิทธิ์เข้าถึงหน้านี้'), findsOneWidget);
-      expect(find.byType(AppNavBar), findsOneWidget);
+      expect(find.byType(AppSidebar), findsOneWidget);
     });
   });
 

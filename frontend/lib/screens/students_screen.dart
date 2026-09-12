@@ -266,11 +266,14 @@ String accountCreatedMessage(String username, {required bool customPassword}) {
       'รหัสผ่านเริ่มต้น: $password (แนะนำให้เปลี่ยนหลังเข้าใช้ครั้งแรก)';
 }
 
-/// ตรวจรูปแบบรหัสนิสิต — ตัวเลขล้วน 9 หลักตามรูปแบบของมหาวิทยาลัย
+/// ตรวจรูปแบบรหัสนิสิต — ตัวเลขล้วน 9-10 หลักตามรูปแบบของมหาวิทยาลัย
+///
+/// ข้อมูลจริงของ ม.ทักษิณ เป็นรหัส **10 หลัก** (เช่น 6820510466) ส่วน 9 หลักเป็น
+/// รูปแบบของรุ่นเก่าที่ยังมีอยู่ในระบบ จึงรับทั้งสองแบบ
 String? studentIdValidator(String? value) {
   final text = (value ?? '').trim();
   if (text.isEmpty) return 'กรอกรหัสนิสิต';
-  if (!RegExp(r'^\d{9}$').hasMatch(text)) return 'รหัสนิสิตต้องเป็นตัวเลข 9 หลัก';
+  if (!RegExp(r'^\d{9,10}$').hasMatch(text)) return 'รหัสนิสิตต้องเป็นตัวเลข 9-10 หลัก';
   return null;
 }
 
@@ -412,7 +415,7 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
         ),
         TextFormField(
           controller: _studentIdController,
-          decoration: _decoration('รหัสนิสิต', required: true, hint: 'ตัวเลข 9 หลัก'),
+          decoration: _decoration('รหัสนิสิต', required: true, hint: 'ตัวเลข 10 หลัก'),
           keyboardType: TextInputType.number,
           validator: studentIdValidator,
         ),

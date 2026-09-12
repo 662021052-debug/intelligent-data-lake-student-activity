@@ -1,7 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
 import 'package:activity_tracking_frontend/widgets/app_card.dart';
-import 'package:activity_tracking_frontend/widgets/app_nav_bar.dart';
+import 'package:activity_tracking_frontend/screens/app_shell.dart';
+import 'package:activity_tracking_frontend/services/auth_service.dart';
+import 'package:activity_tracking_frontend/widgets/app_nav.dart';
+import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 import 'package:activity_tracking_frontend/widgets/empty_state.dart';
 import 'package:activity_tracking_frontend/widgets/status_chip.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +27,21 @@ void _setScreenWidth(WidgetTester tester, double width) {
 
 TextStyle _styleOf(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style!;
+
+/// อัตราส่วน contrast ตามสูตร WCAG 2.1 (เทียบสีที่ปุ่ม "ใช้จริง" หลังธีมกลางผสมแล้ว
+/// ไม่ใช่ค่าคงที่ในธีม — บั๊กขาวบนขาวเกิดจากธีมกลางทับพื้นปุ่ม ไม่ใช่ค่าสีผิด)
+double _contrast(Color a, Color b) {
+  double channel(double v) =>
+      v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+  double luminance(Color c) =>
+      0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+
+  final la = luminance(a);
+  final lb = luminance(b);
+  final hi = math.max(la, lb);
+  final lo = math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
 
 void main() {
   group('เมนูตาม role', () {
@@ -46,42 +66,93 @@ void main() {
     });
   });
 
-  group('AppNavBar', () {
-    testWidgets('จอกว้าง: โลโก้ + ชื่อระบบ + เมนูแนวนอน + ปุ่มออกจากระบบ', (tester) async {
+  group('AppSidebar', () {
+    testWidgets('โลโก้ + ชื่อระบบ + หัวข้อกลุ่ม + เมนู + ผู้ใช้ท้ายแถบ', (tester) async {
       _setScreenWidth(tester, 1200);
-      await tester.pumpWidget(_wrap(AppNavBar(
+      await tester.pumpWidget(_wrap(AppSidebar(
         items: navItemsForRole('student'),
         activeId: 'home',
         username: '662021052',
+        role: 'student',
         subtitle: navSubtitleForRole('student'),
+        groupTitle: navGroupTitleForRole('student'),
         onLogout: () {},
       )));
 
       expect(find.text('TSU'), findsOneWidget);
       expect(find.text(kAppBrandTitle), findsOneWidget);
       expect(find.text('นอกชั้นเรียน'), findsOneWidget);
+      expect(find.text('เมนูนิสิต'), findsOneWidget);
       expect(find.text('หน้าแรก'), findsOneWidget);
       expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
+      // ท้ายแถบบอกว่าใครล็อกอินอยู่ พร้อมทางออกจากระบบ
+      expect(find.text('662021052'), findsOneWidget);
+      expect(find.text('นิสิต'), findsOneWidget);
       expect(find.widgetWithText(OutlinedButton, 'ออกจากระบบ'), findsOneWidget);
       expect(find.text('6'), findsOneWidget, reason: 'avatar ใช้ตัวอักษรแรกของชื่อผู้ใช้');
     });
 
-    testWidgets('เมนูที่เปิดอยู่เป็นสีฟ้าตัวหนา ส่วนเมนูอื่นเป็นเทา', (tester) async {
+    testWidgets('ปุ่มออกจากระบบท้ายแถบอ่านออกบนพื้นน้ำเงินเข้ม และกดแล้วออกจากระบบจริง',
+        (tester) async {
       _setScreenWidth(tester, 1200);
-      await tester.pumpWidget(_wrap(AppNavBar(
+      var loggedOut = false;
+      await tester.pumpWidget(_wrap(AppSidebar(
+        items: navItemsForRole('student'),
+        activeId: 'home',
+        username: '662021052',
+        role: 'student',
+        onLogout: () => loggedOut = true,
+      )));
+
+      final button = find.widgetWithText(OutlinedButton, 'ออกจากระบบ');
+      expect(button, findsOneWidget);
+      expect(find.descendant(of: button, matching: find.byIcon(Icons.logout)), findsOneWidget);
+
+      // ธีมกลางตั้งพื้นปุ่มเป็นสีขาว ปุ่มบนแถบเข้มจึงต้องล้างเป็นโปร่งใส ไม่งั้นได้
+      // ตัวอักษร/ไอคอนขาวบนกล่องขาว = อัตราส่วน 1:1 มองไม่เห็นอะไรเลย
+      //
+      // ต้องอ่านจากสิ่งที่วาดออกมาจริง ไม่ใช่ `OutlinedButton.style` — ค่านั้นเก็บแค่
+      // style ที่ตัวปุ่มส่งเข้ามา ส่วนของธีมกลางถูกผสมทีหลังตอน build จึงไม่โผล่ในนั้น
+      final icon = find.descendant(of: button, matching: find.byIcon(Icons.logout));
+      final foreground = IconTheme.of(tester.element(icon)).color!;
+      final painted = tester
+          .widget<Material>(find.descendant(of: button, matching: find.byType(Material)).first)
+          .color!;
+      final behind = Color.alphaBlend(painted, AppColors.blueDark);
+      expect(
+        _contrast(foreground, behind),
+        greaterThanOrEqualTo(4.5),
+        reason: 'ไอคอน/ข้อความสี $foreground บนพื้นปุ่มที่วาดจริง $behind',
+      );
+
+      await tester.tap(button);
+      await tester.pump();
+      expect(loggedOut, isTrue);
+    });
+
+    testWidgets('เมนูที่เปิดอยู่เป็นพื้นขาวตัวน้ำเงิน ส่วนตัวอื่นเป็นตัวอักษรสว่างบนพื้นน้ำเงิน',
+        (tester) async {
+      _setScreenWidth(tester, 1200);
+      await tester.pumpWidget(_wrap(AppSidebar(
         items: navItemsForRole('student'),
         activeId: 'register',
       )));
 
       expect(_styleOf(tester, 'สมัครกิจกรรม').color, AppColors.blue);
       expect(_styleOf(tester, 'สมัครกิจกรรม').fontWeight, FontWeight.w600);
-      expect(_styleOf(tester, 'หน้าแรก').color, AppColors.sub);
+      expect(_styleOf(tester, 'หน้าแรก').color, AppColors.onNav);
+
+      final active = tester.widget<Material>(find.ancestor(
+        of: find.text('สมัครกิจกรรม'),
+        matching: find.byType(Material),
+      ).first);
+      expect(active.color, Colors.white);
     });
 
     testWidgets('กดเมนูแล้วส่ง item ที่กดกลับไปให้หน้าที่เรียกใช้', (tester) async {
       _setScreenWidth(tester, 1200);
       AppNavItem? picked;
-      await tester.pumpWidget(_wrap(AppNavBar(
+      await tester.pumpWidget(_wrap(AppSidebar(
         items: navItemsForRole('admin'),
         activeId: 'activities',
         onSelect: (item) => picked = item,
@@ -92,19 +163,185 @@ void main() {
       expect(picked?.id, 'dashboard');
     });
 
-    testWidgets('จอแคบ: ยุบเมนูเป็นปุ่มเมนู ไม่ปล่อยให้ล้นแถบ', (tester) async {
-      _setScreenWidth(tester, 600);
-      await tester.pumpWidget(_wrap(
-        AppNavBar(items: navItemsForRole('admin'), activeId: 'users', onLogout: () {}),
-      ));
+    testWidgets('เมนูที่มีหน้าย่อยพับ/กางได้ และเปิดหน้าของตัวเองไปพร้อมกัน', (tester) async {
+      _setScreenWidth(tester, 1200);
+      const parent = AppNavItem(
+        id: 'dashboard',
+        label: 'แดชบอร์ด',
+        icon: Icons.dashboard_outlined,
+        children: [
+          AppNavItem(id: 'dash_overview', label: 'ภาพรวม', icon: Icons.pie_chart_outline),
+        ],
+      );
+
+      AppNavItem? picked;
+      await tester.pumpWidget(_wrap(AppSidebar(
+        items: const [parent],
+        activeId: 'activities',
+        onSelect: (item) => picked = item,
+      )));
+
+      // ยังไม่กาง: เห็นแค่เมนูแม่ พร้อมลูกศรบอกว่ากางได้
+      expect(find.text('ภาพรวม'), findsNothing);
+      expect(find.byIcon(Icons.expand_more), findsOneWidget);
+
+      await tester.tap(find.text('แดชบอร์ด'));
+      await tester.pump();
+      expect(find.text('ภาพรวม'), findsOneWidget);
+      expect(find.byIcon(Icons.expand_less), findsOneWidget);
+      expect(picked?.id, 'dashboard');
+
+      await tester.tap(find.text('ภาพรวม'));
+      await tester.pump();
+      expect(picked?.id, 'dash_overview');
+
+      // พับกลับได้
+      await tester.tap(find.text('แดชบอร์ด'));
+      await tester.pump();
+      expect(find.text('ภาพรวม'), findsNothing);
+    });
+
+    testWidgets('หน้าย่อยที่เปิดอยู่ทำให้เมนูแม่กางเองตั้งแต่แรก', (tester) async {
+      _setScreenWidth(tester, 1200);
+      const parent = AppNavItem(
+        id: 'dashboard',
+        label: 'แดชบอร์ด',
+        icon: Icons.dashboard_outlined,
+        children: [
+          AppNavItem(id: 'dash_stats', label: 'สถิติ', icon: Icons.query_stats),
+        ],
+      );
+
+      await tester.pumpWidget(_wrap(const AppSidebar(
+        items: [parent],
+        activeId: 'dash_stats',
+      )));
+
+      expect(find.text('สถิติ'), findsOneWidget);
+      expect(_styleOf(tester, 'สถิติ').color, AppColors.blue);
+    });
+  });
+
+  group('AppTopBar', () {
+    testWidgets('ปุ่มเมนู + ชื่อระบบ + กระดิ่ง + ชื่อผู้ใช้ + ป้ายบทบาท', (tester) async {
+      _setScreenWidth(tester, 1200);
+      var toggled = 0;
+      await tester.pumpWidget(_wrap(AppTopBar(
+        username: 'admin',
+        role: 'admin',
+        onToggleSidebar: () => toggled++,
+      )));
+
+      expect(find.byIcon(Icons.menu), findsOneWidget);
+      // ไม่ได้ส่งชื่อหน้ามา แถบบนจึงขึ้นชื่อระบบแทน
+      expect(find.text(kAppBrandTitle), findsOneWidget);
+      expect(find.byIcon(Icons.notifications_none), findsOneWidget);
+      expect(find.text('admin'), findsOneWidget);
+      expect(find.text('ผู้ดูแลระบบ'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.menu));
+      await tester.pump();
+      expect(toggled, 1);
+    });
+
+    testWidgets('หน้าที่ไม่มีหัวข้อของตัวเองส่งชื่อหน้ามาขึ้นบนแถบได้', (tester) async {
+      _setScreenWidth(tester, 1200);
+      await tester.pumpWidget(_wrap(const AppTopBar(title: 'ผู้ช่วยอัจฉริยะ')));
+
+      expect(find.text('ผู้ช่วยอัจฉริยะ'), findsOneWidget);
+      expect(find.text(kAppBrandTitle), findsNothing);
+    });
+
+    testWidgets('กระดิ่งบอกตรง ๆ ว่ายังไม่มีการแจ้งเตือน ไม่ใช่ปุ่มที่กดแล้วเงียบ',
+        (tester) async {
+      _setScreenWidth(tester, 1200);
+      await tester.pumpWidget(_wrap(const AppTopBar()));
+
+      await tester.tap(find.byIcon(Icons.notifications_none));
+      await tester.pumpAndSettle();
+      expect(find.text('ยังไม่มีการแจ้งเตือน'), findsOneWidget);
+    });
+
+    testWidgets('จอแคบซ่อนชื่อผู้ใช้ เหลือป้ายบทบาท ไม่ปล่อยให้ล้นแถบ', (tester) async {
+      _setScreenWidth(tester, 360);
+      await tester.pumpWidget(_wrap(AppTopBar(
+        username: '662021052',
+        role: 'student',
+        onToggleSidebar: () {},
+      )));
 
       expect(tester.takeException(), isNull);
-      expect(find.byIcon(Icons.menu), findsOneWidget);
-      expect(find.text('หมวดชั่วโมง'), findsNothing, reason: 'เมนูย้ายไปอยู่ใน popup');
+      expect(find.text('662021052'), findsNothing);
+      expect(find.text('นิสิต'), findsOneWidget);
+    });
+  });
+
+  group('AppShell', () {
+    setUp(() {
+      authService.token = 'fake-token';
+      authService.username = 'admin';
+      authService.role = 'admin';
+    });
+    tearDown(() => authService.logout());
+
+    Widget shell() => MaterialApp(
+          theme: AppTheme.light,
+          home: const AppShell(activeId: 'activities', body: Text('เนื้อหา')),
+        );
+
+    testWidgets('จอกว้าง: sidebar กางค้างข้างเนื้อหา และพับเก็บได้ด้วยปุ่มบนแถบบน',
+        (tester) async {
+      _setScreenWidth(tester, 1280);
+      await tester.pumpWidget(shell());
+
+      expect(find.byType(AppSidebar), findsOneWidget);
+      expect(find.text('เมนูผู้ดูแลระบบ'), findsOneWidget);
 
       await tester.tap(find.byIcon(Icons.menu));
       await tester.pumpAndSettle();
-      expect(find.text('หมวดชั่วโมง'), findsOneWidget);
+      expect(find.byType(AppSidebar), findsNothing, reason: 'พับแล้วต้องคืนพื้นที่ให้เนื้อหา');
+      expect(find.text('เนื้อหา'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.menu));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppSidebar), findsOneWidget);
+    });
+
+    testWidgets('จอแคบ: sidebar ยุบซ่อน กดปุ่มเมนูแล้วเลื่อนออกมาเป็น drawer',
+        (tester) async {
+      _setScreenWidth(tester, 360);
+      await tester.pumpWidget(shell());
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(AppSidebar), findsNothing);
+
+      await tester.tap(find.byIcon(Icons.menu));
+      await tester.pumpAndSettle();
+      expect(find.byType(Drawer), findsOneWidget);
+      expect(find.byType(AppSidebar), findsOneWidget);
+      expect(find.text('จัดการผู้ใช้'), findsOneWidget);
+    });
+
+    testWidgets('ออกจากระบบได้เสมอ แม้พับ sidebar หรืออยู่บนจอแคบ', (tester) async {
+      // ปุ่มท้าย sidebar อย่างเดียวไม่พอ — sidebar พับเก็บได้และจอแคบมันซ่อนเป็น drawer
+      _setScreenWidth(tester, 1280);
+      await tester.pumpWidget(shell());
+      await tester.tap(find.byIcon(Icons.menu));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppSidebar), findsNothing);
+      expect(find.byTooltip('ออกจากระบบ'), findsOneWidget);
+
+      _setScreenWidth(tester, 360);
+      await tester.pumpWidget(shell());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(AppSidebar), findsNothing, reason: 'จอแคบ sidebar ซ่อนอยู่ใน drawer');
+      expect(find.byTooltip('ออกจากระบบ'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('ออกจากระบบ'));
+      await tester.pumpAndSettle();
+      expect(authService.isLoggedIn, isFalse);
     });
   });
 

@@ -6,7 +6,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
-import '../widgets/app_nav_bar.dart';
+import '../widgets/app_nav.dart';
 import '../widgets/checkin_result.dart';
 import 'app_shell.dart';
 

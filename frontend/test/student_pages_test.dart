@@ -6,7 +6,8 @@ import 'package:activity_tracking_frontend/screens/register_activities_screen.da
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/utils/format.dart';
-import 'package:activity_tracking_frontend/widgets/app_nav_bar.dart';
+import 'package:activity_tracking_frontend/widgets/app_nav.dart';
+import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -37,7 +38,7 @@ void main() {
       _wideScreen(tester);
       await tester.pumpWidget(_app(const HomeScreen()));
 
-      expect(find.byType(AppNavBar), findsOneWidget);
+      expect(find.byType(AppSidebar), findsOneWidget);
       expect(find.text('TSU'), findsOneWidget);
       expect(find.text('นอกชั้นเรียน'), findsOneWidget);
 
@@ -125,7 +126,7 @@ void main() {
       _wideScreen(tester);
       await tester.pumpWidget(_app(const RegisterActivitiesScreen()));
 
-      expect(find.byType(AppNavBar), findsOneWidget);
+      expect(find.byType(AppSidebar), findsOneWidget);
       expect(find.text('สมัครกิจกรรม'), findsNWidgets(2)); // เมนูบน + หัวข้อหน้า
       expect(find.widgetWithText(FilterChip, 'รวมกิจกรรมที่จัดไปแล้ว'), findsOneWidget);
       expect(find.text('ค้นหากิจกรรม/หมวด/สถานที่'), findsOneWidget);
@@ -141,9 +142,11 @@ void main() {
     });
 
     testWidgets('นิสิตเห็นการ์ดเช็กอินพร้อมโลโก้ TSU และปุ่มเปิดกล้อง', (tester) async {
+      _wideScreen(tester);
       await tester.pumpWidget(_app(const CheckinScanScreen()));
 
-      // โลโก้สองอัน: อันบนแถบนำทาง กับอันบนการ์ดเช็กอินตาม mockup
+      // โลโก้สองอัน: อันบนเมนู sidebar กับอันบนการ์ดเช็กอินตาม mockup
+      // (จอแคบ sidebar ยุบเป็น drawer จะเหลืออันเดียว จึงต้องตรึงความกว้างไว้)
       expect(find.byType(TsuLogo), findsNWidgets(2));
       expect(find.text('สแกน QR ของกิจกรรมที่หน้างาน'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'เปิดกล้องสแกน QR'), findsOneWidget);

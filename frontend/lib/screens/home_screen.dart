@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_nav.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'app_shell.dart';
@@ -11,14 +12,6 @@ import 'participations_screen.dart';
 import 'student_home_view.dart';
 import 'students_screen.dart';
 import 'users_screen.dart';
-
-/// ป้ายชื่อ role ภาษาไทย (นิสิต / เจ้าหน้าที่ / ผู้ดูแลระบบ)
-String roleLabel(String? role) => switch (role) {
-      'student' => 'นิสิต',
-      'staff' => 'เจ้าหน้าที่',
-      'admin' => 'ผู้ดูแลระบบ',
-      _ => '-',
-    };
 
 /// หน้าแรก — หน้าตาต่างกันตาม role
 ///

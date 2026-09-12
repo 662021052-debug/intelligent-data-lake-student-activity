@@ -5,7 +5,7 @@ import 'package:activity_tracking_frontend/screens/home_screen.dart';
 import 'package:activity_tracking_frontend/screens/students_screen.dart';
 import 'package:activity_tracking_frontend/screens/users_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
-import 'package:activity_tracking_frontend/widgets/app_nav_bar.dart';
+import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 
 void main() {
   tearDown(() => authService.logout());
@@ -42,7 +42,7 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    expect(find.byType(AppNavBar), findsOneWidget);
+    expect(find.byType(AppSidebar), findsOneWidget);
     expect(find.text('หน้าแรก'), findsOneWidget);
     expect(find.text('สมัครกิจกรรม'), findsOneWidget);
     expect(find.text('รายละเอียดชั่วโมง'), findsOneWidget);

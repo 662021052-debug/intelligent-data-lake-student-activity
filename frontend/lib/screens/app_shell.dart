@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_card.dart';
-import '../widgets/app_nav_bar.dart';
+import '../widgets/app_nav.dart';
+import '../widgets/app_sidebar.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'chatbot_screen.dart';
@@ -32,12 +33,15 @@ Widget? screenForNavItem(AppNavItem item) => switch (item.id) {
       _ => null,
     };
 
-/// โครงหน้าจอกลางของทุกหน้า: แถบนำทางด้านบน + เนื้อหาของหน้านั้น
+/// โครงหน้าจอกลางของทุกหน้า: เมนู sidebar ด้านซ้าย + แถบบนบาง ๆ + เนื้อหาของหน้านั้น
 ///
-/// ทุกหน้าที่ผู้ใช้เข้าถึงจากเมนูให้ห่อด้วยตัวนี้ เพื่อให้แถบบนเหมือนกันหมดและ
-/// เมนูรู้เสมอว่าตอนนี้อยู่หน้าไหน (เดิมแต่ละหน้าสร้าง [AppBar] ของตัวเอง
-/// นิสิตจึงต้องกดย้อนกลับมาหน้าแรกก่อนถึงจะไปหน้าอื่นได้)
-class AppShell extends StatelessWidget {
+/// ทุกหน้าที่ผู้ใช้เข้าถึงจากเมนูให้ห่อด้วยตัวนี้ เพื่อให้โครงเหมือนกันหมดและเมนู
+/// รู้เสมอว่าตอนนี้อยู่หน้าไหน (เดิมแต่ละหน้าสร้าง [AppBar] ของตัวเอง นิสิตจึงต้อง
+/// กดย้อนกลับมาหน้าแรกก่อนถึงจะไปหน้าอื่นได้)
+///
+/// จอกว้าง sidebar กางค้างอยู่ข้างเนื้อหาและพับเก็บได้ด้วยปุ่มบนแถบบน ส่วนจอแคบ
+/// sidebar ยุบเป็น drawer ที่เลื่อนออกมาเมื่อกดปุ่มเดียวกัน
+class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.activeId,
@@ -50,17 +54,36 @@ class AppShell extends StatelessWidget {
 
   final Widget body;
 
-  /// ชื่อหน้าที่จะขึ้นบนแถบบนตอนจอแคบ — ใส่เฉพาะหน้าที่ "ไม่มี" หัวข้อของตัวเอง
-  /// ในเนื้อหา (เช่นหน้าแชต) หน้าที่มี SectionHeader อยู่แล้วไม่ต้องใส่
-  /// ไม่งั้นจอแคบจะเห็นชื่อหน้าซ้ำสองที่ติดกัน
+  /// ชื่อหน้าที่จะขึ้นบนแถบบน — ใส่เฉพาะหน้าที่ "ไม่มี" หัวข้อของตัวเองในเนื้อหา
+  /// (เช่นหน้าแชต) หน้าที่มี SectionHeader อยู่แล้วไม่ต้องใส่ ไม่งั้นจะเห็นชื่อหน้า
+  /// ซ้ำสองที่ติดกัน — แถบบนจะขึ้นชื่อระบบแทน
   final String? title;
+
+  /// แคบกว่านี้ sidebar ยุบเป็น drawer (แท็บเล็ตแนวตั้ง 768 ก็ยุบ เพราะเมนู 210px
+  /// กินพื้นที่เนื้อหาจนตารางเบียด)
+  static const double wideBreakpoint = 900;
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  /// จอกว้าง: ผู้ใช้พับ sidebar เก็บได้เพื่อเอาพื้นที่ให้ตารางกว้าง ๆ
+  bool _sidebarOpen = true;
 
   /// ไปหน้าที่เลือกโดยไม่ให้ stack ลึกขึ้นเรื่อย ๆ
   ///
   /// กลับไปหน้าแรกก่อนเสมอแล้วค่อยเปิดหน้าใหม่ทับ — กดสลับเมนูกี่ครั้งความลึกก็
   /// ไม่เกินสองชั้น และปุ่มย้อนกลับพากลับหน้าแรกได้ตามที่ผู้ใช้คาด
-  void _open(BuildContext context, AppNavItem item) {
-    if (item.id == activeId) return;
+  void _open(AppNavItem item) {
+    // กดเมนูจาก drawer ต้องปิด drawer ก่อน ไม่งั้นเมนูค้างคาหน้าใหม่
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      _scaffoldKey.currentState?.closeDrawer();
+    }
+    if (item.id == widget.activeId) return;
+
     final navigator = Navigator.of(context);
     navigator.popUntil((route) => route.isFirst);
     final screen = screenForNavItem(item);
@@ -69,23 +92,49 @@ class AppShell extends StatelessWidget {
     }
   }
 
+  Widget _sidebar() => AppSidebar(
+        items: navItemsForRole(authService.role),
+        activeId: widget.activeId,
+        onSelect: _open,
+        username: authService.username,
+        role: authService.role,
+        subtitle: navSubtitleForRole(authService.role),
+        groupTitle: navGroupTitleForRole(authService.role),
+        onLogout: authService.logout,
+        onBrandTap: widget.activeId == 'home' ? null : () => _open(AppNavItem.home),
+      );
+
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
 
-    return Scaffold(
-      appBar: AppNavBar(
-        items: navItemsForRole(authService.role),
-        activeId: activeId,
-        onSelect: (item) => _open(context, item),
-        username: authService.username,
-        subtitle: navSubtitleForRole(authService.role),
-        onLogout: authService.logout,
-        onBack: canPop ? () => Navigator.of(context).maybePop() : null,
-        onHome: activeId == 'home' ? null : () => _open(context, AppNavItem.home),
-        title: title,
-      ),
-      body: body,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= AppShell.wideBreakpoint;
+        final pinned = wide && _sidebarOpen;
+
+        return Scaffold(
+          key: _scaffoldKey,
+          drawer: wide ? null : Drawer(width: AppSidebar.width, child: _sidebar()),
+          appBar: AppTopBar(
+            title: widget.title,
+            username: authService.username,
+            role: authService.role,
+            onLogout: authService.logout,
+            onToggleSidebar: wide
+                ? () => setState(() => _sidebarOpen = !_sidebarOpen)
+                : () => _scaffoldKey.currentState?.openDrawer(),
+            onBack: canPop ? () => Navigator.of(context).maybePop() : null,
+          ),
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (pinned) _sidebar(),
+              Expanded(child: widget.body),
+            ],
+          ),
+        );
+      },
     );
   }
 }

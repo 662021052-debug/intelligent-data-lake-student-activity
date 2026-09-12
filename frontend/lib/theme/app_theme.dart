@@ -22,6 +22,13 @@ abstract final class AppColors {
   /// ฟ้าอ่อน — พื้นหลังอ่อน ๆ ของชิป/ไอคอน
   static const Color blueBg = Color(0xFFE8F1FA);
 
+  /// ตัวอักษรบนพื้นน้ำเงินเข้มของเมนู sidebar — ขาวอมฟ้า อ่านสบายแต่ไม่แย่ง
+  /// สายตากับเมนูที่เปิดอยู่ (ซึ่งเป็นพื้นขาวตัวฟ้า) ได้ contrast 6.6:1
+  static const Color onNav = Color(0xFFDCE9F5);
+
+  /// ตัวอักษรจางบนพื้นน้ำเงินเข้ม (หัวข้อกลุ่มเมนู) — 4.7:1 ยังผ่าน AA
+  static const Color onNavMuted = Color(0xFFA9C7E4);
+
   /// เทารอง (secondary)
   static const Color grey = Color(0xFF5B6470);
 

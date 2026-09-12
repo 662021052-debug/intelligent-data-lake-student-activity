@@ -28,10 +28,11 @@ void main() {
       expect(studentIdValidator(null), 'กรอกรหัสนิสิต');
     });
 
-    test('ต้องเป็นตัวเลข 9 หลักเท่านั้น', () {
-      expect(studentIdValidator('652021002'), isNull);
+    test('รับตัวเลข 9-10 หลัก (ข้อมูลจริงเป็น 10 หลัก รุ่นเก่าเป็น 9)', () {
+      expect(studentIdValidator('6820510466'), isNull, reason: 'รหัสจริง 10 หลัก');
+      expect(studentIdValidator('652021002'), isNull, reason: 'รุ่นเก่า 9 หลัก');
       expect(studentIdValidator('65202100'), isNotNull, reason: 'สั้นไป');
-      expect(studentIdValidator('6520210022'), isNotNull, reason: 'ยาวไป');
+      expect(studentIdValidator('68205104660'), isNotNull, reason: 'ยาวไป');
       expect(studentIdValidator('65202100a'), isNotNull, reason: 'มีตัวอักษร');
       expect(studentIdValidator('652-021-0'), isNotNull, reason: 'มีขีด');
     });
@@ -181,7 +182,7 @@ void main() {
       await tester.tap(find.text('บันทึก'));
       await tester.pumpAndSettle();
 
-      expect(find.text('รหัสนิสิตต้องเป็นตัวเลข 9 หลัก'), findsOneWidget);
+      expect(find.text('รหัสนิสิตต้องเป็นตัวเลข 9-10 หลัก'), findsOneWidget);
     });
   });
 }
