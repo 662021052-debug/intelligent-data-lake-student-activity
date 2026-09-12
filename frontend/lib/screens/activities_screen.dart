@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/activity.dart';
+import '../models/criteria_set.dart';
 import '../models/hour_category.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -13,6 +14,7 @@ import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
+import '../widgets/requirement_picker.dart';
 import '../widgets/search_field.dart';
 import '../widgets/status_chip.dart';
 import '../widgets/subcategory_dropdown.dart';
@@ -56,6 +58,28 @@ bool isActivityDateError(String message) => message.contains('วันเวล
 /// นิสิตได้ไปแล้วหายตามไปด้วย — UI ต้องตัดสินให้ตรงกัน ไม่งั้นคำเตือนจะโกหกผู้ใช้
 bool activityWillBeHiddenOnDelete(Activity a) => a.participantCount > 0;
 
+/// สิ่งที่กิจกรรมนับชั่วโมงให้ ในรูปสั้น ๆ พอใส่ช่องตารางได้
+///
+/// กิจกรรมที่ผูกรายการเกณฑ์ไว้แสดงชื่อรายการ (เกินหนึ่งรายการต่อท้ายว่า +n) ส่วนกิจกรรม
+/// โครงเดิมที่มีแต่หมวดย่อยยังแสดงเป็น "หมวดแม่ › หมวดย่อย" เหมือนเดิม — ไม่งั้นกิจกรรม
+/// ที่สร้างด้วยชุดเกณฑ์ใหม่จะขึ้นว่า "-" ทั้งที่ผูกเกณฑ์ไว้ครบ
+String activityCriteriaLabel(
+  List<HourCategory> categories,
+  List<CriteriaSet> criteriaSets,
+  Activity activity,
+) {
+  if (activity.requirementIds.isEmpty) {
+    return subcategoryPath(categories, activity.subcategoryId);
+  }
+  final byId = requirementsById(criteriaSets);
+  final names = [
+    for (final id in activity.requirementIds)
+      if (byId[id] != null) byId[id]!.name,
+  ];
+  if (names.isEmpty) return '${activity.requirementIds.length} รายการเกณฑ์';
+  return names.length == 1 ? names.first : '${names.first} +${names.length - 1}';
+}
+
 /// คอลัมน์ของตารางกิจกรรม — แยกเป็นฟังก์ชันบนสุดเพื่อให้เทสต์ยืนยันได้ว่ามุมมอง
 /// นิสิตไม่มีคอลัมน์ "สถานะอนุมัติ" (หน้าจอเต็มต้องยิง API จริงจึงเทสต์ตรง ๆ ไม่ได้)
 List<DataColumn> activityTableColumns(bool isStudent) => [
@@ -85,6 +109,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
 
   List<Activity> _activities = [];
   List<HourCategory> _categories = [];
+  List<CriteriaSet> _criteriaSets = [];
   int _total = 0;
   int _skip = 0;
   bool _loading = false;
@@ -102,6 +127,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     super.initState();
     _load();
     _loadCategories();
+    _loadCriteriaSets();
   }
 
   Future<void> _loadCategories() async {
@@ -110,6 +136,16 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       if (mounted) setState(() => _categories = categories);
     } catch (_) {
       // non-fatal: table falls back to "-" and the form dialog shows an empty picker
+    }
+  }
+
+  /// ชุดเกณฑ์สำหรับช่องเลือกรายการเกณฑ์ในฟอร์ม — ล้มก็ยังสร้างกิจกรรมด้วยหมวดเดิมได้
+  Future<void> _loadCriteriaSets() async {
+    try {
+      final sets = await ApiService.fetchList('/criteria-sets', CriteriaSet.fromJson);
+      if (mounted) setState(() => _criteriaSets = sets);
+    } catch (_) {
+      // non-fatal: ฟอร์มจะขึ้นหมายเหตุว่ายังไม่มีชุดเกณฑ์ และบังคับเลือกหมวดชั่วโมงเดิมแทน
     }
   }
 
@@ -150,7 +186,11 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   Future<void> _openForm({Activity? existing}) async {
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => ActivityFormDialog(existing: existing, categories: _categories),
+      builder: (_) => ActivityFormDialog(
+        existing: existing,
+        categories: _categories,
+        criteriaSets: _criteriaSets,
+      ),
     );
     if (result == true) _load();
   }
@@ -329,7 +369,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
           [
             DataCell(Text(a.name)),
             DataCell(Text(a.activityType, style: _mutedCell(context))),
-            DataCell(Text(subcategoryPath(_categories, a.subcategoryId),
+            DataCell(Text(activityCriteriaLabel(_categories, _criteriaSets, a),
                 style: _mutedCell(context))),
             DataCell(Text(_trimHours(a.hours))),
             DataCell(Tooltip(
@@ -458,7 +498,17 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
 class ActivityFormDialog extends StatefulWidget {
   final Activity? existing;
   final List<HourCategory> categories;
-  const ActivityFormDialog({super.key, this.existing, required this.categories});
+
+  /// ชุดเกณฑ์ที่เลือกรายการได้ — ว่างได้ (ระบบที่ยังไม่ได้ seed เกณฑ์) แล้วฟอร์มจะ
+  /// กลับไปบังคับเลือกหมวดชั่วโมงโครงเดิมแทน
+  final List<CriteriaSet> criteriaSets;
+
+  const ActivityFormDialog({
+    super.key,
+    this.existing,
+    required this.categories,
+    this.criteriaSets = const [],
+  });
 
   @override
   State<ActivityFormDialog> createState() => _ActivityFormDialogState();
@@ -472,6 +522,7 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
   late final TextEditingController _hoursController;
   String _activityType = _activityTypes.first;
   int? _subcategoryId;
+  Set<int> _requirementIds = {};
   bool _isRequired = false;
   late DateTime _startAt;
   bool _saving = false;
@@ -492,8 +543,13 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
       text: e != null && e.hours > 0 ? _trimHours(e.hours) : '3',
     );
     _activityType = e?.activityType ?? _activityTypes.first;
+    _requirementIds = {...?e?.requirementIds};
+    // มีชุดเกณฑ์ให้เลือกแล้ว = ทางหลักคือรายการเกณฑ์ ไม่เดาหมวดชั่วโมงเดิมให้
+    // (เดาไว้จะได้กิจกรรมที่ผูกหมวดของรุ่นเก่าติดมาโดยที่ผู้ใช้ไม่ได้ตั้งใจ)
     _subcategoryId = e?.subcategoryId ??
-        (widget.categories.isNotEmpty && widget.categories.first.subcategories.isNotEmpty
+        (widget.criteriaSets.isEmpty &&
+                widget.categories.isNotEmpty &&
+                widget.categories.first.subcategories.isNotEmpty
             ? widget.categories.first.subcategories.first.id
             : null);
     _isRequired = e?.isRequired ?? false;
@@ -541,8 +597,11 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_subcategoryId == null) {
-      setState(() => _error = 'กรุณาเลือกหมวดชั่วโมง');
+    // กติกาเดียวกับ backend: ต้องจัดหมวดอย่างน้อยหนึ่งทาง ไม่งั้นกิจกรรมนี้จะไม่นับ
+    // ชั่วโมงให้ใครเลย
+    if (_requirementIds.isEmpty && _subcategoryId == null) {
+      setState(() => _error = 'กรุณาเลือกรายการเกณฑ์อย่างน้อยหนึ่งรายการ '
+          'หรือเลือกหมวดชั่วโมงโครงเดิม');
       return;
     }
     final hours = double.tryParse(_hoursController.text.trim());
@@ -566,6 +625,7 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
       'name': _nameController.text.trim(),
       'activity_type': _activityType,
       'subcategory_id': _subcategoryId,
+      'requirement_ids': _requirementIds.toList()..sort(),
       'hours': hours,
       'is_required': _isRequired,
       'max_participants': int.parse(_maxParticipantsController.text.trim()),
@@ -615,11 +675,24 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
           items: _activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
           onChanged: (v) => setState(() => _activityType = v ?? _activityTypes.first),
         ),
+        RequirementPicker(
+          criteriaSets: widget.criteriaSets,
+          selected: _requirementIds,
+          onChanged: (ids) => setState(() {
+            _requirementIds = ids;
+            if (ids.isNotEmpty) _error = null;
+          }),
+        ),
         // E3: dropdown หมวดชั่วโมง — ชื่อสั้นในช่อง ชื่อเต็มในรายการ ไม่ล้นกรอบ
+        // ไม่บังคับเมื่อเลือกรายการเกณฑ์แล้ว: มีไว้สำหรับนิสิตที่ยังไม่ผูกชุดเกณฑ์
         SubcategoryDropdown(
           categories: widget.categories,
           value: _subcategoryId,
           onChanged: (v) => setState(() => _subcategoryId = v),
+          labelText: widget.criteriaSets.isEmpty
+              ? 'หมวดชั่วโมง'
+              : 'หมวดชั่วโมงโครงเดิม (ไม่บังคับ)',
+          required: widget.criteriaSets.isEmpty,
         ),
         TextFormField(
           controller: _hoursController,

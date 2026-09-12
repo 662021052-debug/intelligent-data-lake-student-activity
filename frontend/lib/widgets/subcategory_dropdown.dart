@@ -14,11 +14,16 @@ class SubcategoryDropdown extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.labelText = 'หมวดชั่วโมง',
+    this.required = true,
   });
 
   final List<HourCategory> categories;
   final int? value;
   final ValueChanged<int?> onChanged;
+
+  /// ต้องเลือกไหม — ฟอร์มกิจกรรมที่เลือกรายการเกณฑ์ชุดใหม่ได้แล้วไม่บังคับช่องนี้
+  /// และเปิดตัวเลือก "ไม่ระบุ" ให้ล้างค่าที่เผลอเลือกไว้ได้
+  final bool required;
   final String labelText;
 
   /// คู่ (หมวดแม่, หมวดย่อย) ทั้งหมด เรียงตามลำดับที่ API ส่งมา
@@ -43,10 +48,18 @@ class SubcategoryDropdown extends StatelessWidget {
       decoration: InputDecoration(
         labelText: labelText,
         // ชื่อหมวดแม่ย้ายมาอยู่ใต้ช่อง แทนที่จะยัดรวมในบรรทัดเดียวจนล้น
-        helperText: parentOfSelected?.name ?? 'เลือกหมวดย่อยที่กิจกรรมนี้นับชั่วโมงให้',
+        helperText: parentOfSelected?.name ??
+            (required
+                ? 'เลือกหมวดย่อยที่กิจกรรมนี้นับชั่วโมงให้'
+                : 'สำหรับนิสิตที่ยังไม่ผูกชุดเกณฑ์เท่านั้น'),
         helperMaxLines: 1,
       ),
       items: [
+        if (!required)
+          DropdownMenuItem(
+            value: null,
+            child: Text('— ไม่ระบุ —', style: theme.textTheme.bodyMedium),
+          ),
         for (final (category, sub) in options)
           DropdownMenuItem(
             value: sub.id,
@@ -61,6 +74,11 @@ class SubcategoryDropdown extends StatelessWidget {
       ],
       // ช่องที่ปิดอยู่แสดงเฉพาะชื่อสั้น ไม่ใช่ path เต็ม
       selectedItemBuilder: (context) => [
+        if (!required)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Text('— ไม่ระบุ —', style: theme.textTheme.bodyMedium),
+          ),
         for (final (_, sub) in options)
           Align(
             alignment: AlignmentDirectional.centerStart,
@@ -74,7 +92,7 @@ class SubcategoryDropdown extends StatelessWidget {
           ),
       ],
       onChanged: onChanged,
-      validator: (v) => v == null ? 'กรุณาเลือกหมวดชั่วโมง' : null,
+      validator: (v) => required && v == null ? 'กรุณาเลือกหมวดชั่วโมง' : null,
     );
   }
 }

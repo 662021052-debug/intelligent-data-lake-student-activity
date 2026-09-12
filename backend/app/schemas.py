@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -131,3 +131,41 @@ class HourSubcategoryWrite(HourCategoryWrite):
     """
 
     category_id: int
+
+
+class CriteriaRequirementRead(BaseModel):
+    """รายการเกณฑ์หนึ่งรายการที่กิจกรรมผูกถึงได้ (ตัวเลือกในฟอร์มกิจกรรม)"""
+
+    id: int
+    name: str
+    required_hours: float
+    is_mandatory: bool
+    # หน่วยการเรียนรู้ที่รายการนี้สังกัด — ชุด 2567 จัดกลุ่มด้วย Talent จึงเอาหน่วย
+    # มาแสดงเป็นคำอธิบายกำกับแทน
+    learning_unit_name: Optional[str] = None
+    # อยู่ในกลุ่มที่แชร์เป้าชั่วโมงไหม (เช่น Social รวม ≥ 16) — บอกผู้ใช้ว่ารายการนี้
+    # ตรวจความครบที่ยอดรวมของกลุ่ม ไม่ใช่ที่ตัวมันเอง
+    group_name: Optional[str] = None
+
+
+class CriteriaGroupRead(BaseModel):
+    """หัวข้อกลุ่มในฟอร์ม — Talent (ชุด 2567) หรือหน่วยการเรียนรู้ (ชุด legacy)"""
+
+    key: str                      # "talent:1" / "unit:3" — ไม่ชนกันข้ามชนิด
+    name: str
+    subtitle: Optional[str] = None   # เช่น "PLO 1" หรือ "หน่วยที่ 3"
+    requirements: list[CriteriaRequirementRead]
+
+
+class CriteriaSetRead(BaseModel):
+    """ชุดเกณฑ์พร้อมรายการเกณฑ์ที่จัดกลุ่มไว้แล้ว — ฟอร์มกิจกรรมเอาไปขึ้นตัวเลือกได้ตรง ๆ"""
+
+    id: int
+    code: str
+    name: str
+    academic_year: int
+    total_required_hours: float
+    counting_rule: str
+    # จัดกลุ่มด้วยอะไร: "talent" (ชุดที่มี Talent/PLO) หรือ "learning_unit" (ชุดเก่า)
+    grouped_by: str
+    groups: list[CriteriaGroupRead]

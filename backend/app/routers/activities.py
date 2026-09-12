@@ -565,6 +565,9 @@ def delete_activity(
         session.commit()
         return None
 
+    # ตารางเชื่อมกับรายการเกณฑ์ไม่มีความหมายเมื่อไม่มีกิจกรรมแล้ว และเป็น FK ที่ค้าง
+    # ขวางการลบ — เก็บกวาดก่อน (ต่างจาก participation ที่เป็นเหตุผลให้ "ซ่อน" แทนลบ)
+    _set_requirement_links(session, activity_id, [])
     session.delete(activity)
     try:
         session.commit()

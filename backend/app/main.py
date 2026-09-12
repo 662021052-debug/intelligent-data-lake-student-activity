@@ -12,6 +12,7 @@ from app.routers import (
     activities,
     auth,
     chatbot,
+    criteria,
     dashboard,
     gold,
     hour_categories,
@@ -90,6 +91,7 @@ app.include_router(activities.router)
 app.include_router(participations.router)
 app.include_router(hour_categories.router)
 app.include_router(hour_categories.subcategory_router)
+app.include_router(criteria.router)
 app.include_router(gold.router)
 app.include_router(dashboard.router)
 app.include_router(notifications.router)
