@@ -9,24 +9,25 @@ import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../utils/format.dart';
-import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
-import '../widgets/app_data_table.dart';
 import '../widgets/empty_state.dart';
-import '../widgets/status_chip.dart';
+import '../widgets/kpi_card.dart';
+import '../widgets/student_dashboard.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'checkin_scan_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
 
-/// หน้าแรกของนิสิตตาม mockup: ข้อมูลส่วนตัว + ชั่วโมงสะสมแยกหมวด ทางซ้าย
-/// และประวัติกิจกรรมที่เข้าร่วมทางขวา
+/// หน้าแรกของนิสิต = แดชบอร์ดส่วนตัวตาม mockup หน้า 2
+///
+/// แถวต้อนรับ · KPI 4 ใบ · ชั่วโมงตาม Talent/PLO · การ์ดแนะนำกิจกรรม · ทางลัด
+/// ตาราง "กิจกรรมที่เข้าร่วม" ย้ายไปหน้ารายละเอียดชั่วโมงแล้ว (ไม่ได้ลบทิ้ง)
 ///
 /// ทุกอย่างมาจาก endpoint ที่มีอยู่แล้ว ไม่ได้เพิ่ม/แก้ API:
-/// - `/students/me/hours-summary` ชั่วโมงแยกหมวด
+/// - `/students/me/hours-summary` ชั่วโมงแยกตาม Talent → รายการเกณฑ์
+/// - `/activities` กิจกรรมทั้งหมด (ใช้หาว่ากิจกรรมที่สมัครไว้จัดวันไหน)
 /// - `/participations` รายการที่ตัวเองเข้าร่วม
-/// - `/activities` เอาไว้เติมสถานที่/วันที่ให้แต่ละรายการ
 /// - `/students/{id}` ชื่อ-คณะ (นิสิตอ่านของตัวเองได้) โดยรู้ id จาก participation
 class StudentHomeView extends StatefulWidget {
   const StudentHomeView({super.key});
@@ -36,9 +37,9 @@ class StudentHomeView extends StatefulWidget {
 }
 
 class _StudentHomeViewState extends State<StudentHomeView> {
-  List<HourCategorySummary> _hours = [];
+  List<HourCategorySummary> _talents = [];
   List<Participation> _participations = [];
-  Map<int, Activity> _activityById = {};
+  List<Activity> _activities = [];
   Student? _profile;
   bool _loading = true;
   String? _error;
@@ -55,26 +56,17 @@ class _StudentHomeViewState extends State<StudentHomeView> {
       _error = null;
     });
     try {
-      final hours = await ApiService.fetchList(
+      final talents = await ApiService.fetchList(
         '/students/me/hours-summary',
         HourCategorySummary.fromJson,
       );
       final participations = await ApiService.fetchAll('/participations', Participation.fromJson);
       final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
       if (!mounted) return;
-      final byId = {
-        for (final a in activities)
-          if (a.id != null) a.id!: a,
-      };
-      // ล่าสุดขึ้นก่อน — นิสิตสนใจของที่เพิ่งไปมามากกว่าของเมื่อปีที่แล้ว
-      // กิจกรรมที่หาไม่เจอ (ถูกซ่อน/ลบ) ให้ไปอยู่ท้ายสุดแทนที่จะทำให้ลำดับพัง
-      DateTime startAt(Participation p) =>
-          byId[p.activityId]?.startAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      participations.sort((a, b) => startAt(b).compareTo(startAt(a)));
       setState(() {
-        _hours = hours;
+        _talents = talents;
         _participations = participations;
-        _activityById = byId;
+        _activities = activities;
       });
       await _loadProfile(participations);
     } catch (e) {
@@ -87,7 +79,7 @@ class _StudentHomeViewState extends State<StudentHomeView> {
   /// ชื่อ-คณะของตัวเอง — ระบบไม่มี `/students/me` และ JWT พกมาแค่ username กับ role
   /// จึงต้องรู้ id ของตัวเองจาก participation ก่อน
   ///
-  /// ยังไม่เคยเข้าร่วมกิจกรรมเลยก็จะไม่มี id ให้ถาม — การ์ดจะโชว์เท่าที่รู้
+  /// ยังไม่เคยเข้าร่วมกิจกรรมเลยก็จะไม่มี id ให้ถาม — แถวต้อนรับจะโชว์เท่าที่รู้
   /// (รหัสนิสิตจาก username) ซึ่งยังใช้งานได้ ไม่ใช่เหตุให้ทั้งหน้าพัง
   Future<void> _loadProfile(List<Participation> participations) async {
     if (participations.isEmpty) return;
@@ -115,7 +107,7 @@ class _StudentHomeViewState extends State<StudentHomeView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildPanels(),
+                _buildDashboard(),
                 const SizedBox(height: AppSpacing.xl),
                 // ทางลัดไม่ขึ้นกับข้อมูลที่ต้องโหลด จึงอยู่นอกส่วนที่รอโหลด —
                 // นิสิตกดไปหน้าอื่นได้ทันทีแม้ตอนนั้นเครือข่ายจะยังไม่ตอบ
@@ -128,7 +120,7 @@ class _StudentHomeViewState extends State<StudentHomeView> {
     );
   }
 
-  Widget _buildPanels() {
+  Widget _buildDashboard() {
     // ใช้ความสูง "อย่างน้อย" ไม่ใช่ความสูงตายตัว — บนจอแคบข้อความจะขึ้นหลายบรรทัด
     // แล้วล้นกรอบที่ตั้งไว้
     if (_loading) {
@@ -144,29 +136,125 @@ class _StudentHomeViewState extends State<StudentHomeView> {
       );
     }
 
+    final progress = StudentProgressSummary.from(_talents);
+    final upcomingMine = upcomingRegistered(_participations, _activities);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildWelcome(),
+        const SizedBox(height: AppSpacing.lg),
+        _buildKpiRow(progress, upcomingMine.length),
+        const SizedBox(height: AppSpacing.lg),
+        _buildPanels(progress),
+      ],
+    );
+  }
+
+  /// "สวัสดี, {ชื่อ}" + รหัส/คณะ/ชั้นปี ตาม mockup
+  Widget _buildWelcome() {
+    final theme = Theme.of(context);
+    final code = _profile?.studentId ?? authService.username ?? '-';
+    final facts = [
+      'รหัส $code',
+      if (_profile != null) _profile!.faculty,
+      if (_profile != null) 'ชั้นปีที่ ${_profile!.yearLevel}',
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'สวัสดี, ${_profile?.fullName ?? authService.username ?? ''}',
+          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          facts.join(' · '),
+          style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
+      ],
+    );
+  }
+
+  /// KPI 4 ใบตาม mockup — ไม่มีไอคอน จอแคบยุบ 4 → 2 → 1
+  Widget _buildKpiRow(StudentProgressSummary progress, int upcomingCount) {
+    final cards = [
+      KpiCard(
+        label: 'ชั่วโมงสะสม',
+        value: '${formatHours(progress.earned)}/${formatHours(progress.required_)}',
+        tone: progress.completed ? KpiTone.good : KpiTone.neutral,
+      ),
+      KpiCard(
+        label: 'ครบแล้ว',
+        value: '${progress.percent.round()}%',
+        tone: progress.completed ? KpiTone.good : KpiTone.neutral,
+      ),
+      KpiCard(
+        label: 'รายการที่ยังไม่ครบ',
+        value: '${progress.gaps.length}',
+        tone: progress.gaps.isEmpty ? KpiTone.good : KpiTone.warning,
+      ),
+      KpiCard(
+        label: 'กิจกรรมที่กำลังจะถึง',
+        value: '$upcomingCount',
+        sub: 'ที่คุณสมัครไว้',
+      ),
+    ];
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        // จอกว้างวางสองคอลัมน์แบบ mockup จอแคบเรียงลงมาเป็นแถวเดียว
-        final wide = constraints.maxWidth >= 860;
-        final profile = _ProfilePanel(profile: _profile, hours: _hours);
-        final history = _HistoryPanel(
-          participations: _participations,
-          activityById: _activityById,
-          onReload: _load,
+        final columns = switch (constraints.maxWidth) {
+          >= 900 => 4,
+          >= 560 => 2,
+          _ => 1,
+        };
+        final width = (constraints.maxWidth - AppSpacing.md * (columns - 1)) / columns;
+        return Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.md,
+          children: [for (final card in cards) SizedBox(width: width, child: card)],
         );
+      },
+    );
+  }
 
-        if (!wide) {
+  /// การ์ดชั่วโมงตาม Talent/PLO (ซ้าย) + แนะนำให้เข้าร่วม (ขวา) ตาม mockup
+  Widget _buildPanels(StudentProgressSummary progress) {
+    final talents = TalentProgressCard(
+      talents: _talents,
+      onOpenDetail: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const MyHoursScreen()),
+      ),
+    );
+    final suggestions = SuggestedActivitiesCard(
+      activities: recommendedActivities(
+        activities: _activities,
+        participations: _participations,
+        gapItemIds: progress.gapItemIds,
+      ),
+      matchedGaps: progress.gaps.isNotEmpty,
+      onSeeAll: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ActivitiesScreen()),
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 860) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [profile, const SizedBox(height: AppSpacing.lg), history],
+            children: [talents, const SizedBox(height: AppSpacing.lg), suggestions],
           );
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: 300, child: profile),
+            Expanded(child: talents),
             const SizedBox(width: AppSpacing.lg),
-            Expanded(child: history),
+            SizedBox(width: 280, child: suggestions),
           ],
         );
       },
@@ -174,175 +262,7 @@ class _StudentHomeViewState extends State<StudentHomeView> {
   }
 }
 
-/// การ์ดซ้าย: ข้อมูลส่วนตัว + ชั่วโมงสะสมแยกหมวด
-class _ProfilePanel extends StatelessWidget {
-  const _ProfilePanel({required this.profile, required this.hours});
-
-  final Student? profile;
-  final List<HourCategorySummary> hours;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: AppSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('ข้อมูลส่วนตัว', style: theme.textTheme.titleSmall?.copyWith(fontSize: 14)),
-          const SizedBox(height: AppSpacing.md),
-          const Divider(height: 1),
-          const SizedBox(height: AppSpacing.md),
-          _InfoRow(label: 'รหัสนิสิต', value: profile?.studentId ?? authService.username ?? '-'),
-          _InfoRow(label: 'ชื่อ', value: profile?.fullName ?? '-'),
-          _InfoRow(label: 'คณะ', value: profile?.faculty ?? '-'),
-          if (profile != null) _InfoRow(label: 'ชั้นปี', value: '${profile!.yearLevel}'),
-          const SizedBox(height: AppSpacing.md),
-          // ยังไม่มีทางออกใบประมวลผลให้นิสิตเอง (รายงานที่มีเป็นของแอดมิน)
-          // ระหว่างนี้ปุ่มจึงพาไปหน้าที่ดูชั่วโมงแยกหมวดได้ละเอียดที่สุด
-          FilledButton.icon(
-            style: AppButtonStyles.dark(context),
-            icon: const Icon(Icons.description_outlined, size: 18),
-            label: const Text('ใบประมวลผลกิจกรรม'),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const MyHoursScreen()),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          Text('ชั่วโมงสะสม', style: theme.textTheme.titleSmall),
-          const SizedBox(height: AppSpacing.md),
-          if (hours.isEmpty)
-            Text(
-              'ยังไม่มีชั่วโมงสะสม — ชั่วโมงจะขึ้นเมื่อหลักฐานได้รับการอนุมัติ',
-              style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-            )
-          else
-            for (final c in hours) ...[
-              ProgressRow(
-                label: c.name,
-                value: '${formatHours(c.earnedHours)}/${formatHours(c.requiredHours)}',
-                progress: c.requiredHours == 0 ? 1 : c.earnedHours / c.requiredHours,
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-        ],
-      ),
-    );
-  }
-}
-
-/// บรรทัด "ป้ายชื่อ ... ค่า" ของการ์ดข้อมูลส่วนตัว
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub)),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// การ์ดขวา: ตารางกิจกรรมที่เข้าร่วม
-class _HistoryPanel extends StatelessWidget {
-  const _HistoryPanel({
-    required this.participations,
-    required this.activityById,
-    required this.onReload,
-  });
-
-  final List<Participation> participations;
-  final Map<int, Activity> activityById;
-  final VoidCallback onReload;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: AppSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SectionHeader(
-            title: 'กิจกรรมที่เข้าร่วม',
-            subtitle: 'ทั้งหมด ${participations.length} รายการ',
-            actions: [
-              AppIconButton(
-                icon: Icons.refresh,
-                tooltip: 'โหลดใหม่',
-                onPressed: onReload,
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (participations.isEmpty)
-            const EmptyState(
-              icon: Icons.event_note_outlined,
-              title: 'ยังไม่มีกิจกรรมที่เข้าร่วม',
-              message: 'เมื่อสมัครและเข้าร่วมกิจกรรม รายการจะแสดงที่นี่',
-            )
-          else
-            AppDataTable(
-              columns: const [
-                DataColumn(label: Text('#')),
-                DataColumn(label: Text('กิจกรรม')),
-                DataColumn(label: Text('สถานที่')),
-                DataColumn(label: Text('วันที่จัด')),
-                DataColumn(label: Text('สถานะ')),
-              ],
-              rows: [
-                for (final (index, p) in participations.indexed)
-                  _row(context, index, p, activityById[p.activityId]),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
-
-  List<DataCell> _row(BuildContext context, int index, Participation p, Activity? activity) {
-    final muted = Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.sub);
-    return [
-      DataCell(Text('${index + 1}', style: muted)),
-      DataCell(
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 260),
-          child: Text(
-            p.activityName ?? activity?.name ?? '-',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ),
-      DataCell(Text(activity?.location ?? '-', style: muted)),
-      DataCell(Text(activity == null ? '-' : formatThaiDate(activity.startAt), style: muted)),
-      DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
-    ];
-  }
-}
-
-/// ทางลัดไปหน้าที่ไม่ได้อยู่บนแถบเมนูด้านบน (เมนูบนจำกัดไว้ 4 ช่องตาม mockup)
+/// ทางลัดไปหน้าที่ไม่ได้อยู่บนเมนู sidebar ของนิสิต
 class _ShortcutSection extends StatelessWidget {
   const _ShortcutSection();
 

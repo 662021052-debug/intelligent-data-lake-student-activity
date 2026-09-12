@@ -12,7 +12,7 @@ enum KpiTone { neutral, good, warning, critical }
 class KpiCard extends StatelessWidget {
   const KpiCard({
     super.key,
-    required this.icon,
+    this.icon,
     required this.label,
     required this.value,
     this.sub,
@@ -21,7 +21,8 @@ class KpiCard extends StatelessWidget {
     this.emphasized = false,
   });
 
-  final IconData icon;
+  /// ไอคอนวงกลมมุมขวา — ไม่ใส่ก็ได้ (แดชบอร์ดนิสิตตาม mockup เป็นการ์ดตัวเลขล้วน)
+  final IconData? icon;
   final String label;
   final String value;
   final String? sub;
@@ -81,14 +82,17 @@ class KpiCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Container(
-                  width: 44,
-                  height: 44,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(color: palette.background, shape: BoxShape.circle),
-                  child: Icon(icon, size: 21, color: palette.foreground),
-                ),
+                if (icon != null) ...[
+                  const SizedBox(width: AppSpacing.md),
+                  Container(
+                    width: 44,
+                    height: 44,
+                    alignment: Alignment.center,
+                    decoration:
+                        BoxDecoration(color: palette.background, shape: BoxShape.circle),
+                    child: Icon(icon, size: 21, color: palette.foreground),
+                  ),
+                ],
               ],
             ),
             if (sub != null) ...[

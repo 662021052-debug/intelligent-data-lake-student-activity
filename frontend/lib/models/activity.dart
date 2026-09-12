@@ -15,6 +15,9 @@ class Activity {
   final DateTime? approvedAt;
   final int participantCount;
 
+  /// รายการเกณฑ์ที่กิจกรรมนี้นับชั่วโมงให้ — ใช้แนะนำกิจกรรมที่ตรงกับที่นิสิตยังขาด
+  final List<int> requirementIds;
+
   /// ถูก "ซ่อน" แทนการลบ (กิจกรรมที่มีผู้เข้าร่วมแล้ว) — นิสิตไม่เห็น
   /// staff/admin ยังเห็นพร้อม badge และกดเลิกซ่อนได้
   final bool isHidden;
@@ -33,6 +36,7 @@ class Activity {
     this.approvalStatus = 'pending',
     this.approvedAt,
     this.participantCount = 0,
+    this.requirementIds = const [],
     this.isHidden = false,
   });
 
@@ -54,6 +58,7 @@ class Activity {
             ? null
             : DateTime.parse(json['approved_at'] as String),
         participantCount: json['participant_count'] as int? ?? 0,
+        requirementIds: (json['requirement_ids'] as List?)?.cast<int>() ?? const [],
         isHidden: json['is_hidden'] as bool? ?? false,
       );
 

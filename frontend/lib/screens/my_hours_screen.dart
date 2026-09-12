@@ -1,7 +1,9 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
+import '../models/activity.dart';
 import '../models/hour_summary.dart';
+import '../models/participation.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/chart_style.dart';
@@ -12,6 +14,7 @@ import '../widgets/app_card.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/hour_summary_view.dart';
 import '../widgets/kpi_card.dart';
+import '../widgets/participation_history.dart';
 import 'app_shell.dart';
 import 'chatbot_screen.dart';
 import 'register_activities_screen.dart';
@@ -30,6 +33,11 @@ class MyHoursScreen extends StatefulWidget {
 
 class _MyHoursScreenState extends State<MyHoursScreen> {
   List<HourCategorySummary> _categories = [];
+
+  /// ประวัติการเข้าร่วม — ย้ายมาจากหน้าแรกของนิสิตตอนที่หน้าแรกกลายเป็นแดชบอร์ด
+  List<Participation> _participations = [];
+  Map<int, Activity> _activityById = {};
+
   bool _loading = false;
   String? _error;
 
@@ -54,6 +62,28 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
       setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+    await _loadHistory();
+  }
+
+  /// ประวัติการเข้าร่วมเป็นข้อมูลเสริมของหน้านี้ — โหลดไม่ได้ก็ยังดูชั่วโมงได้
+  Future<void> _loadHistory() async {
+    try {
+      final participations =
+          await ApiService.fetchAll('/participations', Participation.fromJson);
+      final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
+      final byId = {
+        for (final a in activities)
+          if (a.id != null) a.id!: a,
+      };
+      sortParticipationsByRecent(participations, byId);
+      if (!mounted) return;
+      setState(() {
+        _participations = participations;
+        _activityById = byId;
+      });
+    } catch (_) {
+      // ไม่ล้มทั้งหน้าเพราะโหลดประวัติไม่ได้
     }
   }
 
@@ -120,6 +150,12 @@ class _MyHoursScreenState extends State<MyHoursScreen> {
         Text('รายละเอียดแต่ละหมวด', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: AppSpacing.md),
         HourSummaryView(categories: _categories, embedded: true),
+        const SizedBox(height: AppSpacing.lg),
+        ParticipationHistoryCard(
+          participations: _participations,
+          activityById: _activityById,
+          onReload: _load,
+        ),
       ],
     );
   }
