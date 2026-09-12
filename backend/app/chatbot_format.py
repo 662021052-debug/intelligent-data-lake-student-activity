@@ -90,7 +90,14 @@ def my_hours(rows: Sequence[dict], total_required: float) -> str:
 
     total_earned = sum(float(r["earned_hours"]) for r in rows)
     done = [r for r in rows if r["completed"]]
-    remaining_total = max(0.0, float(total_required) - total_earned)
+    # ชั่วโมงเกินในรายการหนึ่งไม่ชดเชยรายการที่ยังขาด — ยอดที่ยังต้องเก็บจึงไม่น้อยกว่า
+    # ผลรวมส่วนที่ขาดของแต่ละรายการ และจะ "ครบ" ได้ก็ต่อเมื่อครบทุกรายการ
+    gaps = sum(
+        max(0.0, float(r["required_hours"]) - float(r["earned_hours"]))
+        for r in rows
+        if not r["completed"]
+    )
+    remaining_total = max(0.0, float(total_required) - total_earned, gaps)
 
     header = (
         f"ตอนนี้คุณสะสมชั่วโมงที่อนุมัติแล้ว {fmt_hours(total_earned)} "

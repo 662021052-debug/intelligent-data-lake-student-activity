@@ -52,19 +52,13 @@ from app.models import (
     ImportedCompletion,
     Participation,
     Requirement,
+    RequirementGroup,
     Student,
     StudentStatus,
 )
 from app.timeutil import today_th
-from seed_criteria import REQUIREMENTS_2567_REGULAR
 
 DEFAULT_SEED = 2569
-
-# รายการที่ "แชร์เป้าชั่วโมงเดียวกัน" — ฐานยังเก็บกฎนี้เป็นแค่ข้อความ rule_note จึงอ่านจาก
-# นิยามใน seed_criteria ที่เป็นต้นทางของรายการเกณฑ์ (เฟส 6 จะทำให้เป็นโครงสร้างในฐาน)
-SHARED_GROUP_BY_NAME: dict[str, str] = {
-    spec.name: spec.shared_group for spec in REQUIREMENTS_2567_REGULAR if spec.shared_group
-}
 
 
 class SeedAborted(Exception):
@@ -137,13 +131,15 @@ class Report:
     warnings: list[str] = field(default_factory=list)
 
 
-def _units_for(requirements: list[Requirement]) -> list[Unit]:
-    grouped: dict[str, list[Requirement]] = defaultdict(list)
+def _units_for(
+    requirements: list[Requirement], groups: dict[int, RequirementGroup]
+) -> list[Unit]:
+    """รายการที่ต้องทำให้ครบ — รายการในกลุ่มแชร์เป้าชั่วโมง (requirement_group) รวมเป็นหน่วยเดียว."""
+    grouped: dict[int, list[Requirement]] = defaultdict(list)
     units: list[Unit] = []
     for requirement in sorted(requirements, key=lambda r: r.id):
-        group = SHARED_GROUP_BY_NAME.get(requirement.name)
-        if group:
-            grouped[group].append(requirement)
+        if requirement.group_id in groups:
+            grouped[requirement.group_id].append(requirement)
         else:
             units.append(
                 Unit(
@@ -153,13 +149,13 @@ def _units_for(requirements: list[Requirement]) -> list[Unit]:
                     requirement.is_mandatory,
                 )
             )
-    for members in grouped.values():
+    for group_id, members in grouped.items():
+        group = groups[group_id]
         units.append(
             Unit(
-                " + ".join(m.name for m in members),
+                group.name,
                 tuple(m.id for m in members),
-                # สมาชิกทุกตัวเก็บเป้าเท่ากัน (แต่ละด้านทำคนเดียวให้ครบได้) — ยอดของกลุ่มคือค่านั้น
-                max(m.required_hours for m in members),
+                group.required_hours,
                 any(m.is_mandatory for m in members),
             )
         )
@@ -228,9 +224,15 @@ def _build_plan(
             f"[{criteria_set.code}] ข้ามกิจกรรม {ambiguous} รายการที่ผูกหลายรายการเกณฑ์ในชุดเดียวกัน"
         )
 
+    groups = {
+        g.id: g
+        for g in session.exec(
+            select(RequirementGroup).where(RequirementGroup.criteria_set_id == criteria_set.id)
+        ).all()
+    }
     return CriteriaPlan(
         criteria_set=criteria_set,
-        units=_units_for(requirements),
+        units=_units_for(requirements, groups),
         pools=pools,
         snapshots={
             a.id: requirement_snapshot(links[a.id], criteria_set.id) for a in activities

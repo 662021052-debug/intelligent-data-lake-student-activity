@@ -36,6 +36,7 @@ from app.models import (
     LearningUnit,
     ProgramType,
     Requirement,
+    RequirementGroup,
     Student,
     Talent,
 )
@@ -78,11 +79,19 @@ class RequirementSpec:
     is_mandatory: bool
     required_hours: float
     talent_code: Optional[str] = None
-    # ชื่อกลุ่มของรายการที่ "แชร์เป้าหมายชั่วโมงเดียวกัน" — ไม่ได้เก็บลงฐาน ใช้สองอย่าง:
-    # ประกอบข้อความ rule_note และกันไม่ให้การตรวจยอดรวมนับชั่วโมงก้อนเดียวกันซ้ำ
+    # code ของ requirement_group ที่รายการนี้ "แชร์เป้าชั่วโมง" อยู่ด้วย — ระบบตรวจความครบ
+    # ที่ยอดรวมของกลุ่ม และการตรวจยอดของชุดเกณฑ์นับเป้าก้อนนี้เพียงครั้งเดียว
     shared_group: Optional[str] = None
     rule_note: Optional[str] = None
     organizer: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class GroupSpec:
+    code: str
+    name: str
+    required_hours: float
+    rule_note: Optional[str] = None
 
 
 # ---------- ชุดเกณฑ์ 2567 หลักสูตรปกติ (60 ชม.) — §9 ----------
@@ -133,6 +142,15 @@ REQUIREMENTS_2567_REGULAR: list[RequirementSpec] = [
         "social_innovation",
         shared_group="social-16",
         rule_note=_SOCIAL_PAIR_NOTE,
+    ),
+]
+
+GROUPS_2567_REGULAR: list[GroupSpec] = [
+    GroupSpec(
+        "social-16",
+        "ด้านนวัตกรรมสังคม/ผู้ประกอบการ (เลือกด้านเดียวหรือรวมสองด้าน)",
+        16,
+        _SOCIAL_PAIR_NOTE,
     ),
 ]
 
@@ -231,6 +249,7 @@ def _upsert_requirement(
     is_mandatory: bool,
     required_hours: float,
     talent_id: Optional[int] = None,
+    group_id: Optional[int] = None,
     rule_note: Optional[str] = None,
     organizer: Optional[str] = None,
 ) -> Requirement:
@@ -242,6 +261,7 @@ def _upsert_requirement(
     ).first()
     fields = {
         "talent_id": talent_id,
+        "group_id": group_id,
         "learning_unit_id": unit.id,
         "is_mandatory": is_mandatory,
         "required_hours": required_hours,
@@ -374,6 +394,11 @@ def seed_2567_regular(
         session.flush()
         talent_ids[spec.code] = talent.id
 
+    group_ids = {
+        spec.code: _upsert_group(session, report, criteria_set, spec).id
+        for spec in GROUPS_2567_REGULAR
+    }
+
     for spec in REQUIREMENTS_2567_REGULAR:
         _upsert_requirement(
             session,
@@ -384,11 +409,39 @@ def seed_2567_regular(
             is_mandatory=spec.is_mandatory,
             required_hours=spec.required_hours,
             talent_id=talent_ids[spec.talent_code] if spec.talent_code else None,
+            group_id=group_ids[spec.shared_group] if spec.shared_group else None,
             rule_note=spec.rule_note,
             organizer=spec.organizer,
         )
 
     return criteria_set
+
+
+def _upsert_group(
+    session: Session, report: Report, criteria_set: CriteriaSet, spec: GroupSpec
+) -> RequirementGroup:
+    """สร้าง/อัปเดตกลุ่มที่แชร์เป้าชั่วโมง โดยใช้ (ชุดเกณฑ์, code) เป็นกุญแจธรรมชาติ."""
+    group = session.exec(
+        select(RequirementGroup)
+        .where(RequirementGroup.criteria_set_id == criteria_set.id)
+        .where(RequirementGroup.code == spec.code)
+    ).first()
+    fields = {"name": spec.name, "required_hours": spec.required_hours, "rule_note": spec.rule_note}
+    if group is None:
+        group = RequirementGroup(criteria_set_id=criteria_set.id, code=spec.code, **fields)
+        session.add(group)
+        report.created.append(
+            f"requirement_group [{criteria_set.code}] {spec.code} ({spec.required_hours:g} ชม.)"
+        )
+    else:
+        changed = [k for k, v in fields.items() if getattr(group, k) != v]
+        for key in changed:
+            setattr(group, key, fields[key])
+        if changed:
+            session.add(group)
+            report.updated.append(f"requirement_group [{criteria_set.code}] {spec.code}: {', '.join(changed)}")
+    session.flush()
+    return group
 
 
 def _check_2567_totals(report: Report) -> None:

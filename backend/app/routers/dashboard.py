@@ -4,9 +4,12 @@ Every endpoint is admin-only and reads exclusively from the ``gold_*`` views
 (never the operational tables). All endpoints accept the optional drill-down
 filters ``faculty``, ``year_level`` and ``semester``.
 
-"Passing" is defined as a student's total APPROVED hours reaching the overall
-requirement, which is the sum of every hour-category's ``required_hours``
-(60 hours under the current TSU structure).
+"Passing" = every criteria item of the student's own criteria set is complete
+(``gold_student_hours``, rules in :mod:`app.completion`) — not "total hours ≥ 60":
+60 hours earned in a single item used to count as passing. Progress/at-risk use
+the hours that count toward the criteria (capped per item), so 100% == passed.
+With a ``semester`` filter every figure is recomputed from that semester's hours
+only (``gold_fact_item_hours``).
 """
 
 from typing import Optional
@@ -17,6 +20,7 @@ from sqlalchemy import text
 from sqlmodel import Session
 
 from app.auth import require_admin
+from app.completion import StudentProgress, progress_by_student
 from app.database import get_session
 
 router = APIRouter(
@@ -122,6 +126,50 @@ def _filtered_students(session: Session, faculty, year_level) -> list:
     ).all()
 
 
+def _student_items(
+    session: Session, faculty: Optional[str], year_level: Optional[int], semester: Optional[int]
+) -> list[tuple]:
+    """(student_key, item_key, item_name, required, earned, unit_key, unit_name) ของทุกรายการ
+
+    ไม่กรองภาคเรียน = ชั่วโมงจาก gold_student_hours ตรง ๆ · กรองภาคเรียน = คำนวณชั่วโมงของ
+    แต่ละรายการใหม่จากการเข้าร่วมในภาคนั้นเท่านั้น
+    """
+    where, params = _student_where(faculty, year_level)
+    rows = session.execute(
+        text(
+            "SELECT student_key, category_key, category_name, required_hours, earned_hours, "
+            "learning_unit_key, learning_unit_name "
+            f"FROM gold_student_hours{where} ORDER BY student_key, category_key"
+        ),
+        params,
+    ).all()
+    if semester is None:
+        return [tuple(r) for r in rows]
+
+    earned = {
+        (student_key, item_key): float(hours or 0)
+        for student_key, item_key, hours in session.execute(
+            text(
+                "SELECT f.student_key, f.item_key, SUM(f.hours_earned) "
+                "FROM gold_fact_item_hours f "
+                "JOIN gold_dim_date d ON d.date_key = f.date_key "
+                "WHERE d.semester = :semester GROUP BY f.student_key, f.item_key"
+            ),
+            {"semester": semester},
+        ).all()
+    }
+    return [
+        (sk, ik, name, required, earned.get((sk, ik), 0.0), unit_key, unit_name)
+        for sk, ik, name, required, _all_time, unit_key, unit_name in rows
+    ]
+
+
+def _progress(items: list[tuple]) -> dict[int, StudentProgress]:
+    return progress_by_student(
+        (sk, ik, name, required, earned) for sk, ik, name, required, earned, _uk, _un in items
+    )
+
+
 # --------------------------- endpoints ---------------------------
 @router.get("/overview", response_model=OverviewStats)
 def overview(
@@ -130,15 +178,21 @@ def overview(
     semester: Optional[int] = None,
     session: Session = Depends(get_session),
 ):
-    required_total = _required_total(session)
     students = _filtered_students(session, faculty, year_level)
     earned = _earned_by_student(session, semester)
+    progress = _progress(_student_items(session, faculty, year_level, semester))
 
     totals = [earned.get(s[0], 0.0) for s in students]
     total_students = len(students)
-    passed = sum(1 for t in totals if t >= required_total and required_total > 0)
+    passed = sum(1 for s in students if s[0] in progress and progress[s[0]].completed)
     avg_hours = (sum(totals) / total_students) if total_students else 0.0
     passed_percent = (passed / total_students * 100) if total_students else 0.0
+    # เกณฑ์ต่างกันได้ตามชุดเกณฑ์ของแต่ละคน — การ์ดบนหน้าจอโชว์ค่าเฉลี่ยของคนที่มีเกณฑ์
+    # (ทุกคนอยู่ชุดเดียวกันก็คือเกณฑ์ของชุดนั้นตรง ๆ) ไม่มีใครเลยค่อยใช้หมวดชั่วโมงเดิม
+    requirements = [p.required_hours for p in progress.values() if p.required_hours > 0]
+    required_total = (
+        round(sum(requirements) / len(requirements), 2) if requirements else _required_total(session)
+    )
 
     act_sql = "SELECT COUNT(*) FROM gold_dim_activity a"
     act_params: dict = {}
@@ -169,10 +223,40 @@ def by_category(
     semester: Optional[int] = None,
     session: Session = Depends(get_session),
 ):
+    """ชั่วโมงเฉลี่ยต่อคนเทียบเป้าเฉลี่ยต่อคน แยกตามหน่วยการเรียนรู้
+
+    หน่วยการเรียนรู้ 5 หน่วยเป็น taxonomy ที่ทุกชุดเกณฑ์ใช้ร่วมกัน กราฟจึงเทียบกันได้แม้นิสิต
+    อยู่คนละชุด (นิสิตที่ยังไม่มีชุดเกณฑ์ใช้หมวดชั่วโมงเดิม ซึ่งชื่อตรงกับหน่วยอยู่แล้ว
+    — แท่งชื่อเดียวกันจึงรวมเป็นแท่งเดียว)
+    """
     students = _filtered_students(session, faculty, year_level)
     total_students = len(students)
+    items = _student_items(session, faculty, year_level, semester)
 
-    # Sum approved hours per category across the filtered student set.
+    buckets: dict[str, dict] = {}
+    for _sk, item_key, _name, required, earned, unit_key, unit_name in items:
+        name = unit_name or "ไม่ระบุหน่วย"
+        key = unit_key if unit_key is not None else item_key
+        bucket = buckets.setdefault(name, {"key": key, "required": 0.0, "earned": 0.0})
+        bucket["key"] = min(bucket["key"], key)
+        bucket["required"] += float(required or 0)
+        bucket["earned"] += float(earned or 0)
+
+    def _avg(total: float) -> float:
+        return round((total / total_students) if total_students else 0.0, 2)
+
+    result = [
+        CategoryStat(
+            category_key=b["key"],
+            category_name=name,
+            required_hours=_avg(b["required"]),
+            avg_earned_hours=_avg(b["earned"]),
+        )
+        for name, b in sorted(buckets.items(), key=lambda kv: kv[1]["key"])
+    ]
+
+    # ชั่วโมงที่อนุมัติแล้วแต่ไม่นับเข้ารายการใดของเกณฑ์นิสิตคนนั้น (เช่น กิจกรรมที่ยังไม่ได้
+    # ผูกรายการเกณฑ์) — แยกเป็นแท่งของตัวเองให้เห็น แทนที่จะหายไปเงียบ ๆ
     clauses = ["1 = 1"]
     params: dict = {}
     if faculty:
@@ -184,53 +268,24 @@ def by_category(
     if semester is not None:
         clauses.append("d.semester = :semester")
         params["semester"] = semester
-
-    # LEFT JOIN so approved hours on activities with no (or an orphaned)
-    # subcategory are not silently dropped: they fall into a NULL category_key
-    # bucket surfaced as "ไม่ระบุหมวด". This keeps the sum of per-category
-    # averages equal to /overview's avg_hours (every approved hour is counted once).
-    rows = session.execute(
+    unmapped = session.execute(
         text(
-            "SELECT sub.category_key, SUM(f.hours_earned) "
+            "SELECT COALESCE(SUM(f.hours_earned), 0) "
             "FROM gold_fact_participation f "
-            "LEFT JOIN gold_dim_subcategory sub ON sub.subcategory_key = f.subcategory_key "
             "JOIN gold_dim_student s ON s.student_key = f.student_key "
             "JOIN gold_dim_date d ON d.date_key = f.date_key "
-            f"WHERE {' AND '.join(clauses)} "
-            "GROUP BY sub.category_key"
+            f"WHERE {' AND '.join(clauses)} AND NOT EXISTS ("
+            "SELECT 1 FROM gold_fact_item_hours fi WHERE fi.participation_id = f.participation_id)"
         ),
         params,
-    ).all()
-    earned_by_category = {row[0]: float(row[1] or 0) for row in rows}
-
-    categories = session.execute(
-        text("SELECT category_key, name, required_hours FROM gold_dim_hour_category ORDER BY category_key")
-    ).all()
-
-    def _avg(total_earned: float) -> float:
-        return round((total_earned / total_students) if total_students else 0.0, 2)
-
-    result = []
-    for cat_key, name, required in categories:
-        result.append(
-            CategoryStat(
-                category_key=cat_key,
-                category_name=name,
-                required_hours=float(required),
-                avg_earned_hours=_avg(earned_by_category.get(cat_key, 0.0)),
-            )
-        )
-
-    # Bucket for approved hours not tied to any category (subcategory_id NULL /
-    # orphaned) — shown only when such hours exist.
-    uncategorized = earned_by_category.get(None, 0.0)
-    if uncategorized > 0:
+    ).scalar()
+    if float(unmapped or 0) > 0:
         result.append(
             CategoryStat(
                 category_key=None,
                 category_name="ไม่ระบุหมวด",
                 required_hours=0.0,
-                avg_earned_hours=_avg(uncategorized),
+                avg_earned_hours=_avg(float(unmapped)),
             )
         )
     return result
@@ -244,15 +299,16 @@ def at_risk(
     threshold: float = Query(50, ge=0, le=100, description="เปอร์เซ็นต์เกณฑ์กลุ่มเสี่ยง (ต่ำกว่านี้ = เสี่ยง)"),
     session: Session = Depends(get_session),
 ):
-    required_total = _required_total(session)
     students = _filtered_students(session, faculty, year_level)
-    earned = _earned_by_student(session, semester)
+    progress = _progress(_student_items(session, faculty, year_level, semester))
 
     result = []
     for student_key, code, full_name, fac, yr in students:
-        earned_hours = earned.get(student_key, 0.0)
-        percent = (earned_hours / required_total * 100) if required_total > 0 else 0.0
-        if percent < threshold:
+        p = progress.get(student_key)
+        # ไม่มีเกณฑ์ให้วัด (ยังไม่ผูกชุดเกณฑ์และไม่มีหมวดเดิม) = ตัดสินไม่ได้ว่าเสี่ยง
+        if p is None or p.required_hours <= 0:
+            continue
+        if p.percent < threshold:
             result.append(
                 AtRiskStudent(
                     student_key=student_key,
@@ -260,14 +316,15 @@ def at_risk(
                     full_name=full_name,
                     faculty=fac,
                     year_level=yr,
-                    earned_hours=earned_hours,
-                    required_hours=required_total,
-                    percent=round(percent, 2),
-                    missing_hours=round(max(required_total - earned_hours, 0.0), 2),
+                    # ชั่วโมงที่นับเข้าเกณฑ์ (ตัดส่วนเกินรายรายการ) ให้ตรงกับ percent/missing
+                    earned_hours=round(p.counted_hours, 2),
+                    required_hours=p.required_hours,
+                    percent=round(p.percent, 2),
+                    missing_hours=round(p.missing_hours, 2),
                 )
             )
     # most at risk first
-    result.sort(key=lambda s: s.earned_hours)
+    result.sort(key=lambda s: (s.percent, s.earned_hours))
     return result
 
 
@@ -323,9 +380,8 @@ def by_faculty(
     semester: Optional[int] = None,
     session: Session = Depends(get_session),
 ):
-    required_total = _required_total(session)
     students = _filtered_students(session, faculty, year_level)
-    earned = _earned_by_student(session, semester)
+    progress = _progress(_student_items(session, faculty, year_level, semester))
 
     # group by (faculty, year_level)
     groups: dict[tuple[str, int], dict] = {}
@@ -333,7 +389,7 @@ def by_faculty(
         key = (fac, yr)
         g = groups.setdefault(key, {"total": 0, "passed": 0})
         g["total"] += 1
-        if required_total > 0 and earned.get(student_key, 0.0) >= required_total:
+        if student_key in progress and progress[student_key].completed:
             g["passed"] += 1
 
     result = []

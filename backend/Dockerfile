@@ -22,6 +22,8 @@ COPY seed.py .
 COPY seed_criteria.py .
 COPY seed_evidence.py .
 COPY wipe_data.py .
+# สคริปต์ตรวจความครบเกณฑ์เทียบสถานะจากไฟล์นำเข้า (เฟส 6) — รันในคอนเทนเนอร์ที่ต่อ DB จริง
+COPY check_completion.py .
 COPY alembic.ini .
 COPY alembic ./alembic
 

@@ -26,9 +26,18 @@ from typing import Optional
 from sqlalchemy import text
 from sqlmodel import Session, select
 
+from app.completion import progress_by_student
 from app.config import settings
 from app.email import EmailMessage, EmailSender
-from app.models import Activity, ApprovalStatus, HourSubcategory, Participation, Student
+from app.models import (
+    Activity,
+    ActivityRequirement,
+    ApprovalStatus,
+    HourSubcategory,
+    Participation,
+    Requirement,
+    Student,
+)
 from app.timeutil import format_thai_datetime, now_th_naive
 
 logger = logging.getLogger(__name__)
@@ -113,13 +122,13 @@ def build_at_risk_message(student: AtRiskStudent) -> EmailMessage:
         f"เรียน {student.full_name} (รหัสนิสิต {student.student_code})",
         "",
         "ระบบตรวจพบว่าชั่วโมงกิจกรรมของคุณยังไม่ครบตามเกณฑ์ที่มหาวิทยาลัยกำหนด",
-        f"ขณะนี้คุณมีชั่วโมงที่ผ่านการอนุมัติแล้ว {format_hours(student.earned_hours)} "
+        f"ขณะนี้คุณมีชั่วโมงที่นับเข้าเกณฑ์แล้ว {format_hours(student.earned_hours)} "
         f"จาก {format_hours(student.required_hours)} ชั่วโมง (คิดเป็น {student.percent:.0f}%)",
         f"ยังขาดอีก {missing} ชั่วโมง",
     ]
 
     if student.gaps:
-        lines += ["", "หมวดที่ยังทำไม่ครบ:"]
+        lines += ["", "รายการที่ยังทำไม่ครบ:"]
         lines += [
             f"  - {gap.name}: ได้ {format_hours(gap.earned_hours)} "
             f"จาก {format_hours(gap.required_hours)} ชั่วโมง "
@@ -223,7 +232,7 @@ def collect_at_risk_students(
     rows = session.execute(
         text(
             "SELECT g.student_key, g.student_code, g.full_name, g.faculty, g.year_level, "
-            "g.category_name, g.required_hours, g.earned_hours "
+            "g.category_key, g.category_name, g.required_hours, g.earned_hours "
             "FROM gold_student_hours g "
             "JOIN gold_dim_student d ON d.student_key = g.student_key "
             f"WHERE {' AND '.join(clauses)} "
@@ -232,38 +241,34 @@ def collect_at_risk_students(
         params,
     ).all()
 
-    grouped: dict[int, dict] = {}
-    for key, code, name, fac, year, category_name, required, earned in rows:
-        entry = grouped.setdefault(
-            key,
-            {"code": code, "name": name, "faculty": fac, "year": year, "gaps": [], "earned": 0.0, "required": 0.0},
-        )
-        earned_hours, required_hours = float(earned or 0), float(required or 0)
-        entry["earned"] += earned_hours
-        entry["required"] += required_hours
-        if earned_hours < required_hours:
-            entry["gaps"].append(CategoryGap(category_name, earned_hours, required_hours))
+    people = {key: (code, name, fac, year) for key, code, name, fac, year, *_ in rows}
+    progress = progress_by_student(
+        (key, item_key, item_name, required, earned)
+        for key, _c, _n, _f, _y, item_key, item_name, required, earned in rows
+    )
 
     at_risk = []
-    for key, entry in grouped.items():
-        # ไม่มีเกณฑ์ (ยังไม่ได้ตั้งหมวดชั่วโมง) = ยังตัดสินไม่ได้ว่าใครเสี่ยง ข้ามไป
-        if entry["required"] <= 0:
+    for key, p in progress.items():
+        # ไม่มีเกณฑ์ (ยังไม่ได้ตั้งหมวดชั่วโมง/ชุดเกณฑ์) = ยังตัดสินไม่ได้ว่าใครเสี่ยง ข้ามไป
+        if p.required_hours <= 0:
             continue
+        code, name, fac, year = people[key]
         student = AtRiskStudent(
             student_key=key,
-            student_code=entry["code"],
-            full_name=entry["name"],
-            faculty=entry["faculty"],
-            year_level=entry["year"],
-            earned_hours=entry["earned"],
-            required_hours=entry["required"],
-            gaps=tuple(entry["gaps"]),
+            student_code=code,
+            full_name=name,
+            faculty=fac,
+            year_level=year,
+            # ชั่วโมงที่นับเข้าเกณฑ์ (ส่วนเกินของรายการหนึ่งไม่ชดเชยอีกรายการ) — กติกาเดียวกับแดชบอร์ด
+            earned_hours=p.counted_hours,
+            required_hours=p.required_hours,
+            gaps=tuple(CategoryGap(g.name, g.earned_hours, g.required_hours) for g in p.gaps),
         )
         if student.percent < limit:
             at_risk.append(student)
 
     # เสี่ยงที่สุดขึ้นก่อน เหมือนลำดับบนแดชบอร์ด
-    at_risk.sort(key=lambda s: s.earned_hours)
+    at_risk.sort(key=lambda s: (s.percent, s.earned_hours))
     return at_risk
 
 
@@ -342,6 +347,15 @@ def send_activity_announcement(
             category_name = (
                 f"{category.name} › {subcategory.name}" if category else subcategory.name
             )
+    if category_name is None:
+        # กิจกรรมชุดเกณฑ์ใหม่ไม่มีหมวดเดิม — บอกรายการเกณฑ์ที่นับให้แทน
+        names = session.exec(
+            select(Requirement.name)
+            .join(ActivityRequirement, ActivityRequirement.requirement_id == Requirement.id)
+            .where(ActivityRequirement.activity_id == activity.id)
+            .order_by(Requirement.id)
+        ).all()
+        category_name = " · ".join(names) or None
 
     registered = len(
         session.exec(

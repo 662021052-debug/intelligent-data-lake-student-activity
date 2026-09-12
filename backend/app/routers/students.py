@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, func, select
 
@@ -84,8 +85,69 @@ def list_students(
     return Page(items=items, total=total, skip=skip, limit=limit)
 
 
+def _build_criteria_summary(session: Session, student_id: int) -> list[HourCategorySummary]:
+    """ชั่วโมงของนิสิตที่ผูกชุดเกณฑ์แล้ว — อ่านจาก gold_student_hours ตัวเดียวกับแดชบอร์ด
+
+    หน้าของนิสิต แดชบอร์ด และอีเมลกลุ่มเสี่ยงจึงตัดสิน "ครบ/ไม่ครบ" ตรงกันเสมอ รูปคำตอบ
+    คงเดิม (หมวด → หมวดย่อย) ให้แอปใช้ได้ทันที: หมวด = Talent/PLO และหมวดย่อย = รายการที่
+    ตรวจความครบ · รายการที่ไม่มี Talent (เช่น หน่วยของชุด legacy) เป็นหมวดของตัวเองโดยไม่มีหมวดย่อย
+
+    ชั่วโมงของหมวดนับเฉพาะส่วนที่เข้าเกณฑ์ (ตัดส่วนเกินรายรายการ) — หมวดจะไม่ขึ้นว่าได้ครบเป้า
+    ทั้งที่ยังมีรายการในหมวดนั้นขาดอยู่
+    """
+    rows = session.execute(
+        text(
+            "SELECT category_key, category_name, required_hours, earned_hours, completed, "
+            "talent_key, talent_name, talent_order "
+            "FROM gold_student_hours WHERE student_key = :sid ORDER BY category_key"
+        ),
+        {"sid": student_id},
+    ).all()
+
+    groups: dict[tuple, dict] = {}
+    for item_key, name, required, earned, completed, talent_key, talent_name, talent_order in rows:
+        item = HourSubcategorySummary(
+            id=item_key,
+            name=name,
+            required_hours=float(required),
+            earned_hours=float(earned or 0),
+            completed=bool(completed),
+        )
+        key = ("talent", talent_key) if talent_key is not None else ("item", item_key)
+        group = groups.setdefault(
+            key,
+            {
+                "id": talent_key if talent_key is not None else item_key,
+                "name": talent_name if talent_key is not None else name,
+                "order": (0, talent_order or 0, item_key) if talent_key is not None else (1, 0, item_key),
+                "is_talent": talent_key is not None,
+                "items": [],
+            },
+        )
+        group["items"].append(item)
+
+    result = []
+    for group in sorted(groups.values(), key=lambda g: g["order"]):
+        items = group["items"]
+        result.append(
+            HourCategorySummary(
+                id=group["id"],
+                name=group["name"],
+                required_hours=sum(i.required_hours for i in items),
+                earned_hours=sum(min(i.earned_hours, i.required_hours) for i in items),
+                completed=all(i.completed for i in items),
+                subcategories=items if group["is_talent"] else [],
+            )
+        )
+    return result
+
+
 def _build_hours_summary(session: Session, student_id: int) -> list[HourCategorySummary]:
     """Roll up a single student's approved activity hours per hour-category/subcategory."""
+    student = session.get(Student, student_id)
+    if student is not None and student.criteria_set_id is not None:
+        return _build_criteria_summary(session, student_id)
+
     categories = session.exec(select(HourCategory)).all()
     subcategories = session.exec(select(HourSubcategory)).all()
     subs_by_category: dict[int, list[HourSubcategory]] = {}

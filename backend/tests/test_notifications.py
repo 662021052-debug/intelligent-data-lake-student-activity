@@ -169,7 +169,7 @@ def test_at_risk_message_has_name_missing_hours_and_link():
 
 def test_at_risk_message_lists_incomplete_categories():
     message = build_at_risk_message(_sample_at_risk())
-    assert "หมวดที่ยังทำไม่ครบ" in message.body
+    assert "รายการที่ยังทำไม่ครบ" in message.body
     assert "กิจกรรมเพื่อสังคม" in message.body
     assert "22" in message.body  # ขาดในหมวดนี้ 30 - 8
 

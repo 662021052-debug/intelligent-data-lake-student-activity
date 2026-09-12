@@ -109,6 +109,24 @@ class LearningUnit(SQLModel, table=True):
     name: str
 
 
+class RequirementGroup(SQLModel, table=True):
+    """กลุ่มรายการเกณฑ์ที่ "ใช้เป้าชั่วโมงร่วมกัน" — ตรวจความครบที่ยอดรวมของกลุ่ม
+
+    เช่น Social (PLO3) สองด้าน: เลือกด้านใดด้านหนึ่งครบ 16 ชม. หรือสองด้านรวมกัน ≥ 16 ก็ได้
+    — เท่ากับ "ผลรวมของสมาชิก ≥ 16" (ด้านเดียวครบก็ทำให้ผลรวมครบอยู่แล้ว) รายการที่อยู่ในกลุ่ม
+    จึงไม่ถูกตรวจทีละตัว required_hours ของสมาชิกเหลือไว้เป็นข้อมูลอ้างอิงเท่านั้น
+    """
+
+    __tablename__ = "requirement_group"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    criteria_set_id: int = Field(foreign_key="criteria_set.id", index=True)
+    code: str                                   # เช่น "social-16" — กุญแจธรรมชาติภายในชุดเกณฑ์
+    name: str
+    required_hours: float
+    rule_note: Optional[str] = None
+
+
 class Requirement(SQLModel, table=True):
     """รายการเกณฑ์ย่อยที่กิจกรรมผูกถึง — ตัวแทนของ HourSubcategory เดิม."""
 
@@ -116,11 +134,13 @@ class Requirement(SQLModel, table=True):
     criteria_set_id: int = Field(foreign_key="criteria_set.id", index=True)
     talent_id: Optional[int] = Field(default=None, foreign_key="talent.id", index=True)
     learning_unit_id: int = Field(foreign_key="learning_unit.id", index=True)
+    # อยู่ในกลุ่มที่แชร์เป้าชั่วโมง = ตรวจที่ยอดรวมของกลุ่ม ไม่ใช่ที่รายการนี้ตัวเดียว
+    group_id: Optional[int] = Field(default=None, foreign_key="requirement_group.id", index=True)
     name: str
     is_mandatory: bool = False
     required_hours: float = 0
     min_activities: Optional[int] = None
-    # กฎพิเศษที่ยังไม่ได้ทำเป็นโครงสร้าง เช่น "สองด้านรวมกัน ≥ 16 ชม."
+    # คำอธิบายกฎสำหรับคนอ่าน (กฎที่ตรวจอัตโนมัติอยู่ใน requirement_group)
     rule_note: Optional[str] = None
     organizer: Optional[str] = None
 

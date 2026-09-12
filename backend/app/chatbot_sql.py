@@ -28,8 +28,10 @@ from sqlmodel import Session
 from app import chatbot_format as fmt
 from app.llm import LlmClient
 from app.sql_guard import UnsafeSqlError, validate_select
+from app.timeutil import now_th_naive
 
-# Total activity hours required to graduate (sum of all category requirements).
+# เกณฑ์รวมเมื่อยังไม่รู้ชุดเกณฑ์ของนิสิต (ไม่มีแถวใน gold_student_hours) — ปกติใช้ผลรวม
+# เป้าของรายการในชุดเกณฑ์ของคนที่ถาม ซึ่งต่างกันได้ตามรุ่น/กลุ่มหลักสูตร
 TOTAL_REQUIRED_HOURS = 60
 
 
@@ -123,9 +125,8 @@ def answer_hours(session: Session, student_id: int) -> ChatAnswer:
     ).mappings().all()
 
     data = [dict(r) for r in rows]
-    return ChatAnswer(
-        Intent.HOURS, fmt.my_hours(data, TOTAL_REQUIRED_HOURS), data, needs_student=True
-    )
+    total_required = sum(float(r["required_hours"]) for r in data) or TOTAL_REQUIRED_HOURS
+    return ChatAnswer(Intent.HOURS, fmt.my_hours(data, total_required), data, needs_student=True)
 
 
 def answer_missing(session: Session, student_id: int) -> ChatAnswer:
@@ -172,7 +173,7 @@ def answer_required_activities(session: Session) -> ChatAnswer:
 # ---- Recommendations (Phase 18) --------------------------------------------
 
 def _open_activities_in_categories(session: Session, category_keys: list[int]) -> list[dict]:
-    """Approved, not-yet-full activities whose category is in ``category_keys``."""
+    """Approved, not-yet-full activities whose (legacy) category is in ``category_keys``."""
     if not category_keys:
         return []
     stmt = text(
@@ -186,12 +187,35 @@ def _open_activities_in_categories(session: Session, category_keys: list[int]) -
     return [dict(r) for r in rows]
 
 
+def _open_activities_for_items(
+    session: Session, criteria_set_key: int, item_keys: list[int]
+) -> list[dict]:
+    """Approved, not-yet-full, upcoming activities that count toward ``item_keys`` of
+    one criteria set — item keys only mean something inside their criteria set."""
+    if not item_keys:
+        return []
+    stmt = text(
+        "SELECT c.name, c.activity_type, c.hours, c.category_name, c.subcategory_name, "
+        "c.participant_count, c.max_participants "
+        "FROM gold_activity_catalog c "
+        "WHERE c.approval_status = 'approved' AND c.participant_count < c.max_participants "
+        "AND c.start_at >= :now AND c.activity_key IN ("
+        "  SELECT ai.activity_key FROM gold_activity_item ai "
+        "  WHERE ai.criteria_set_key = :cs AND ai.item_key IN :keys) "
+        "ORDER BY c.start_at"
+    ).bindparams(bindparam("keys", expanding=True))
+    rows = session.execute(
+        stmt, {"keys": item_keys, "cs": criteria_set_key, "now": now_th_naive()}
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def recommend_by_missing_categories(session: Session, student_id: int) -> ChatAnswer:
-    """Suggest open activities that count toward the categories the student has not
-    yet completed."""
+    """Suggest open activities that count toward the criteria items (legacy: hour
+    categories) the student has not yet completed."""
     missing = session.execute(
         text(
-            "SELECT category_key, category_name FROM gold_student_hours "
+            "SELECT category_key, category_name, criteria_set_key FROM gold_student_hours "
             "WHERE student_key = :sid AND completed = 0 ORDER BY category_key"
         ),
         {"sid": student_id},
@@ -204,8 +228,12 @@ def recommend_by_missing_categories(session: Session, student_id: int) -> ChatAn
             [], needs_student=True,
         )
 
-    category_keys = [m["category_key"] for m in missing]
-    activities = _open_activities_in_categories(session, category_keys)
+    keys = [m["category_key"] for m in missing]
+    criteria_set_key = missing[0]["criteria_set_key"]
+    if criteria_set_key is None:
+        activities = _open_activities_in_categories(session, keys)
+    else:
+        activities = _open_activities_for_items(session, criteria_set_key, keys)
     names = [m["category_name"] for m in missing]
     return ChatAnswer(
         Intent.RECOMMEND,
@@ -221,8 +249,8 @@ def _find_mentioned_activity(session: Session, question: str) -> dict | None:
     recommendation."""
     rows = session.execute(
         text(
-            "SELECT activity_key, name, subcategory_key, subcategory_name, "
-            "participant_count, max_participants FROM gold_activity_catalog"
+            "SELECT activity_key, name, subcategory_key, subcategory_name, requirement_key, "
+            "requirement_name, participant_count, max_participants FROM gold_activity_catalog"
         )
     ).mappings().all()
     matches = [dict(r) for r in rows if r["name"] and r["name"] in question]
@@ -232,17 +260,20 @@ def _find_mentioned_activity(session: Session, question: str) -> dict | None:
 
 
 def recommend_alternatives(session: Session, activity: dict) -> ChatAnswer:
-    """Suggest open activities in the SAME subcategory as ``activity`` (proactive
-    substitute when the one the student wanted is full)."""
+    """Suggest open activities in the SAME subcategory (legacy) or counting toward the
+    SAME criteria requirement as ``activity`` (proactive substitute when the one the
+    student wanted is full)."""
+    if activity.get("requirement_key") is not None:
+        match, params = "requirement_key = :key", {"key": activity["requirement_key"]}
+    else:
+        match, params = "subcategory_key = :key", {"key": activity["subcategory_key"]}
     stmt = text(
         "SELECT name, activity_type, hours, participant_count, max_participants "
         "FROM gold_activity_catalog "
         "WHERE approval_status = 'approved' AND participant_count < max_participants "
-        "AND subcategory_key = :sub AND activity_key <> :self ORDER BY start_at"
+        f"AND {match} AND activity_key <> :self ORDER BY start_at"
     )
-    rows = session.execute(
-        stmt, {"sub": activity["subcategory_key"], "self": activity["activity_key"]}
-    ).mappings().all()
+    rows = session.execute(stmt, {**params, "self": activity["activity_key"]}).mappings().all()
 
     data = [dict(r) for r in rows]
     return ChatAnswer(
@@ -280,8 +311,10 @@ SCHEMA_PROMPT = """\
 คุณคือผู้ช่วยที่แปลงคำถามภาษาไทยเป็นคำสั่ง SQL (ภาษา SQLite/Postgres) สำหรับระบบชั่วโมงกิจกรรมนิสิต
 ใช้ได้เฉพาะตาราง/วิวต่อไปนี้เท่านั้น (ห้ามอ้างถึงตารางอื่นเด็ดขาด):
 
-my_hours(category_name, required_hours, earned_hours, completed)
-  -- ชั่วโมงของ "นิสิตคนที่ถามเท่านั้น" แยกตามหมวด (completed = 1 คือครบแล้ว)
+my_hours(category_name, required_hours, earned_hours, completed, is_mandatory,
+  talent_name, learning_unit_name)
+  -- ชั่วโมงของ "นิสิตคนที่ถามเท่านั้น" แยกตามรายการเกณฑ์ของชุดเกณฑ์ของนิสิต
+  -- (completed = 1 คือครบแล้ว, is_mandatory = 1 คือรายการบังคับ)
 gold_activity_catalog(name, activity_type, is_required, hours, max_participants,
   approval_status, participant_count, category_name, subcategory_name)
   -- รายการกิจกรรมทั้งหมด (สาธารณะ)
