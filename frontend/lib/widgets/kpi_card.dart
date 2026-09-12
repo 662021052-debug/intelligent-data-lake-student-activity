@@ -56,30 +56,40 @@ class KpiCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ตาม mockup: ป้ายชื่อกับตัวเลขอยู่ซ้าย ไอคอนเป็นวงกลมสีชิดขวา
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: palette.background,
-                    borderRadius: BorderRadius.circular(AppRadius.chip),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        value,
+                        style: (emphasized
+                                ? theme.textTheme.displaySmall
+                                : theme.textTheme.headlineMedium)
+                            ?.copyWith(fontWeight: FontWeight.w700, color: valueColor),
+                      ),
+                    ],
                   ),
-                  child: Icon(icon, size: 20, color: palette.foreground),
                 ),
                 const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
+                Container(
+                  width: 44,
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: palette.background, shape: BoxShape.circle),
+                  child: Icon(icon, size: 21, color: palette.foreground),
                 ),
               ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              value,
-              style: (emphasized ? theme.textTheme.displaySmall : theme.textTheme.headlineMedium)
-                  ?.copyWith(fontWeight: FontWeight.w700, color: valueColor),
             ),
             if (sub != null) ...[
               const SizedBox(height: AppSpacing.xs),

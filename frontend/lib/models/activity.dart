@@ -10,6 +10,9 @@ class Activity {
   final String location;
   final int? createdBy;
   final String approvalStatus; // pending | approved
+
+  /// เวลาที่ผู้ดูแลกดอนุมัติ (null = ยังไม่อนุมัติ) — คอนโซลใช้นับ "อนุมัติวันนี้"
+  final DateTime? approvedAt;
   final int participantCount;
 
   /// ถูก "ซ่อน" แทนการลบ (กิจกรรมที่มีผู้เข้าร่วมแล้ว) — นิสิตไม่เห็น
@@ -28,6 +31,7 @@ class Activity {
     required this.location,
     this.createdBy,
     this.approvalStatus = 'pending',
+    this.approvedAt,
     this.participantCount = 0,
     this.isHidden = false,
   });
@@ -46,6 +50,9 @@ class Activity {
         location: json['location'] as String,
         createdBy: json['created_by'] as int?,
         approvalStatus: json['approval_status'] as String? ?? 'pending',
+        approvedAt: json['approved_at'] == null
+            ? null
+            : DateTime.parse(json['approved_at'] as String),
         participantCount: json['participant_count'] as int? ?? 0,
         isHidden: json['is_hidden'] as bool? ?? false,
       );

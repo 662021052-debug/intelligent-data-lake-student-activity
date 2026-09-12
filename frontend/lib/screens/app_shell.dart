@@ -8,7 +8,6 @@ import '../widgets/app_sidebar.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'chatbot_screen.dart';
-import 'dashboard_screen.dart';
 import 'hour_categories_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
@@ -28,7 +27,9 @@ Widget? screenForNavItem(AppNavItem item) => switch (item.id) {
       'calendar' => const ActivityCalendarScreen(),
       'users' => const UsersScreen(),
       'hour_categories' => const HourCategoriesScreen(),
-      'dashboard' => const DashboardScreen(),
+      // แดชบอร์ดคือหน้าแรกของแอดมินอยู่แล้ว กดเมนูนี้จึงแค่กลับหน้าแรก ถ้า push
+      // หน้าใหม่ทับจะได้แดชบอร์ดสองใบซ้อนกันและปุ่มย้อนกลับพากลับมาที่ตัวเอง
+      'dashboard' => null,
       'students' => const StudentsScreen(),
       _ => null,
     };

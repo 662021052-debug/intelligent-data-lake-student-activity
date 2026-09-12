@@ -49,7 +49,7 @@ final _screens = <String, (String, Widget Function())>{
   'จัดการผู้ใช้': ('admin', UsersScreen.new),
   'จัดการนิสิต': ('admin', StudentsScreen.new),
   'หมวดชั่วโมง': ('admin', HourCategoriesScreen.new),
-  'แดชบอร์ดผู้บริหาร': ('admin', DashboardScreen.new),
+  'แดชบอร์ดคอนโซล': ('admin', DashboardScreen.new),
   'การเข้าร่วมกิจกรรม': ('admin', ParticipationsScreen.new),
   'ปฏิทินกิจกรรม': ('admin', ActivityCalendarScreen.new),
 };

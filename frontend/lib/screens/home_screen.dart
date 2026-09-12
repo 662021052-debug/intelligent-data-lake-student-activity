@@ -7,21 +7,21 @@ import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'app_shell.dart';
 import 'dashboard_screen.dart';
-import 'hour_categories_screen.dart';
 import 'participations_screen.dart';
 import 'student_home_view.dart';
-import 'students_screen.dart';
-import 'users_screen.dart';
 
 /// หน้าแรก — หน้าตาต่างกันตาม role
 ///
-/// ฝั่งนิสิตเป็นหน้าโปรไฟล์ + ชั่วโมงสะสมตาม mockup ส่วนฝั่งเจ้าหน้าที่/ผู้ดูแล
-/// ยังเป็นแผงเมนูเดิม (จะยกเครื่องในเฟสของฝั่งผู้ดูแล)
+/// นิสิตเป็นหน้าโปรไฟล์ + ชั่วโมงสะสม · แอดมินเข้ามาเจอแดชบอร์ดคอนโซลทันที ·
+/// เจ้าหน้าที่ยังเป็นแผงการ์ดเมนู (เจ้าหน้าที่ไม่มีสิทธิ์ดูแดชบอร์ด)
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // แดชบอร์ดห่อ AppShell ของตัวเองอยู่แล้ว ครอบซ้ำจะได้ sidebar สองแถบ
+    if (authService.isAdmin) return const DashboardScreen();
+
     return AppShell(
       activeId: 'home',
       body: authService.role == 'student' ? const StudentHomeView() : const _StaffHomeView(),
@@ -80,21 +80,9 @@ class _StaffHomeView extends StatelessWidget {
     void open(Widget screen) =>
         Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
+    // แผงนี้เหลือไว้ให้เจ้าหน้าที่เท่านั้น — หน้าแรกของแอดมินเป็นแดชบอร์ดคอนโซล
+    // ซึ่งมีปุ่มลัดไปหน้าพวกนี้ครบอยู่แล้ว
     return [
-      if (authService.isAdmin)
-        _MenuCard(
-          icon: Icons.dashboard,
-          title: 'แดชบอร์ดผู้บริหาร',
-          subtitle: 'ภาพรวม KPI กราฟ และกลุ่มเสี่ยง',
-          onTap: () => open(const DashboardScreen()),
-        ),
-      if (authService.isAdmin)
-        _MenuCard(
-          icon: Icons.people,
-          title: 'นิสิต',
-          subtitle: 'จัดการข้อมูลนิสิต',
-          onTap: () => open(const StudentsScreen()),
-        ),
       _MenuCard(
         icon: Icons.event,
         title: 'กิจกรรม',
@@ -113,20 +101,6 @@ class _StaffHomeView extends StatelessWidget {
         subtitle: 'บันทึกและตรวจสอบการเข้าร่วม',
         onTap: () => open(const ParticipationsScreen()),
       ),
-      if (authService.isAdmin)
-        _MenuCard(
-          icon: Icons.admin_panel_settings,
-          title: 'จัดการผู้ใช้',
-          subtitle: 'สร้างผู้ใช้และกำหนดสิทธิ์',
-          onTap: () => open(const UsersScreen()),
-        ),
-      if (authService.isAdmin)
-        _MenuCard(
-          icon: Icons.category,
-          title: 'หมวดชั่วโมงกิจกรรม',
-          subtitle: 'เพิ่ม/แก้ไขหมวดและหมวดย่อยที่ใช้นับชั่วโมง',
-          onTap: () => open(const HourCategoriesScreen()),
-        ),
     ];
   }
 }

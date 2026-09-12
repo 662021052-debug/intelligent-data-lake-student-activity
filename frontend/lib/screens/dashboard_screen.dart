@@ -1,7 +1,10 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
+import '../models/activity.dart';
 import '../models/dashboard.dart';
+import '../models/page.dart' as api;
+import '../models/participation.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -11,14 +14,21 @@ import '../utils/api_error.dart';
 import '../utils/download_io.dart';
 import '../utils/format.dart';
 import '../utils/report_export.dart';
+import '../widgets/admin_console.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/kpi_card.dart';
 import '../widgets/status_chip.dart';
+import 'activities_screen.dart';
+import 'activity_calendar_screen.dart';
 import 'app_shell.dart';
+import 'hour_categories_screen.dart';
+import 'participations_screen.dart';
 import 'student_hours_screen.dart';
+import 'students_screen.dart';
+import 'users_screen.dart';
 
 /// จุดที่ [index] ควรมีป้ายเดือนบนแกน X ของกราฟแนวโน้มหรือไม่
 ///
@@ -32,8 +42,11 @@ bool showsTrendLabel(int index, int pointCount) {
   return (pointCount - 1 - index) % step == 0;
 }
 
-/// Phase 12 — Executive dashboard (admin only). Reads the Gold-Layer
-/// dashboard API and renders KPI cards, charts and drill-down tables.
+/// แดชบอร์ดคอนโซลของผู้ดูแล — เป็น "หน้าแรก" ของ role admin ด้วย
+///
+/// อ่านตัวเลขทั้งหมดจาก Gold Layer (`/dashboard/*`) แล้ววาดปุ่มลัด แถบคู่มือ KPI
+/// กราฟ ตารางกลุ่มเสี่ยง และการ์ดคิวงาน — แผงการ์ดเมนูเดิมของหน้าแรกถูกแทนด้วย
+/// [ConsoleShortcutBar] ซึ่งต้องพาไปได้ครบทุกหน้าที่แผงนั้นเคยพาไป
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -69,6 +82,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<AtRiskStudent> _atRisk = [];
   List<LowParticipationActivity> _lowParticipation = [];
   List<TrendPoint> _trend = [];
+
+  /// คิวงานของการ์ดสรุปสองใบ — มาจาก /activities และ /participations ไม่ใช่ Gold
+  /// (ไม่มี endpoint แดชบอร์ดสำหรับงานค้าง และงานนี้ห้ามเพิ่มฝั่ง backend)
+  ConsoleCounts _counts = const ConsoleCounts();
+
+  /// เวลาที่โหลดตัวเลขชุดที่เห็นอยู่สำเร็จ — คอนโซลบอกไว้ว่าข้อมูลสดแค่ไหน
+  DateTime? _loadedAt;
+
+  bool _refreshingGold = false;
 
   @override
   void initState() {
@@ -118,13 +140,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _atRisk = results[2] as List<AtRiskStudent>;
         _lowParticipation = results[3] as List<LowParticipationActivity>;
         _trend = results[4] as List<TrendPoint>;
+        _loadedAt = DateTime.now();
       });
     } catch (e) {
       setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+    await _loadCounts();
   }
+
+  /// คิวงานค้างของการ์ดสรุป — โหลดแยกจากตัวเลขหลัก
+  ///
+  /// ไม่ขึ้นกับตัวกรองคณะ/ชั้นปี/ภาคเรียน เพราะเป็น "งานที่ผู้ดูแลต้องทำ" ของทั้งระบบ
+  /// และล้มแยกจากกันได้ — แดชบอร์ดพังทั้งหน้าเพราะนับงานค้างไม่ได้นั้นไม่คุ้ม
+  Future<void> _loadCounts() async {
+    try {
+      final results = await Future.wait([
+        ApiService.fetchAll('/activities', Activity.fromJson),
+        ApiService.fetchPage(
+          '/participations',
+          Participation.fromJson,
+          query: {'evidence_status': 'pending', 'limit': '1'},
+        ),
+      ]);
+      final activities = results[0] as List<Activity>;
+      final evidence = results[1] as api.Page<Participation>;
+      final today = DateTime.now();
+
+      if (!mounted) return;
+      setState(() {
+        _counts = ConsoleCounts(
+          pendingActivities: activities.where((a) => a.approvalStatus == 'pending').length,
+          pendingEvidence: evidence.total,
+          approvedToday: activities.where((a) => _isSameDay(a.approvedAt, today)).length,
+        );
+      });
+    } catch (_) {
+      // คิวงานเป็นข้อมูลเสริม — โหลดไม่ได้ก็ปล่อยการ์ดเป็นศูนย์ไว้ ไม่ล้มทั้งหน้า
+    }
+  }
+
+  static bool _isSameDay(DateTime? a, DateTime b) =>
+      a != null && a.year == b.year && a.month == b.month && a.day == b.day;
+
+  /// สร้างวิว gold_* ใหม่ (POST /gold/refresh) แล้วโหลดตัวเลขบนหน้าใหม่ทั้งหมด
+  Future<void> _refreshGold() async {
+    setState(() => _refreshingGold = true);
+    try {
+      await ApiService.create('/gold/refresh', const {}, (json) => json);
+      if (mounted) showInfoSnackbar(context, 'รีเฟรช Gold Layer เรียบร้อย');
+      await _load();
+    } catch (e) {
+      if (mounted) showErrorSnackbar(context, friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _refreshingGold = false);
+    }
+  }
+
+  void _open(Widget screen) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
   /// ดาวน์โหลดรายงานตามตัวกรองที่เลือกอยู่ (คณะ/ชั้นปี)
   Future<void> _export(ReportFormat format) async {
@@ -154,8 +229,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return AdminPage(
       activeId: 'dashboard',
-      title: 'แดชบอร์ดผู้บริหาร',
-      subtitle: _filterSummary,
+      title: 'Dashboard',
+      subtitle: _headerSubtitle,
       actions: [
         ..._exportButtons(),
         AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
@@ -168,30 +243,140 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildBody() {
-    // โหลดครั้งแรก (ยังไม่มีอะไรให้ดู) ค่อยแสดงสถานะกำลังโหลดเต็มพื้นที่
-    if (_loading && _overview == null) {
-      return const LoadingState(message: 'กำลังโหลดแดชบอร์ด...');
-    }
-    if (_error != null) return ErrorState(message: _error!, onRetry: _load);
-
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.only(bottom: AppSpacing.lg),
         children: [
-          _buildFilters(),
+          // ปุ่มลัดกับคู่มือไม่ได้พึ่งข้อมูลแดชบอร์ด จึงอยู่นอกสถานะโหลด/ผิดพลาด —
+          // แดชบอร์ดโหลดไม่ขึ้นแล้วผู้ดูแลต้องไปหน้าอื่นไม่ได้เลยคือทางตัน
+          _buildShortcuts(),
           const SizedBox(height: AppSpacing.lg),
-          _buildKpiRow(),
+          GuideBanner(onOpen: () => showAdminGuide(context)),
           const SizedBox(height: AppSpacing.lg),
-          _buildCategoryChartCard(),
-          const SizedBox(height: AppSpacing.lg),
-          _buildTrendChartCard(),
-          const SizedBox(height: AppSpacing.lg),
-          _buildAtRiskCard(),
-          const SizedBox(height: AppSpacing.lg),
-          _buildLowParticipationCard(),
+          ..._buildDataSections(),
         ],
       ),
+    );
+  }
+
+  /// ส่วนที่ต้องมีข้อมูลจาก API ถึงจะวาดได้
+  List<Widget> _buildDataSections() {
+    // โหลดครั้งแรก (ยังไม่มีอะไรให้ดู) ค่อยแสดงสถานะกำลังโหลด
+    if (_loading && _overview == null) {
+      return const [LoadingState(message: 'กำลังโหลดแดชบอร์ด...')];
+    }
+    if (_error != null) return [ErrorState(message: _error!, onRetry: _load)];
+
+    return [
+      _buildFilters(),
+      const SizedBox(height: AppSpacing.lg),
+      _buildKpiRow(),
+      const SizedBox(height: AppSpacing.lg),
+      _buildCategoryChartCard(),
+      const SizedBox(height: AppSpacing.lg),
+      _buildTrendChartCard(),
+      const SizedBox(height: AppSpacing.lg),
+      _buildAtRiskCard(),
+      const SizedBox(height: AppSpacing.lg),
+      _buildLowParticipationCard(),
+      const SizedBox(height: AppSpacing.lg),
+      _buildQueueCards(),
+    ];
+  }
+
+  // --------------------------- console header ---------------------------
+
+  /// บรรทัดใต้หัวข้อตาม mockup + ตัวกรองที่ใช้อยู่ (mockup ไม่มีตัวกรอง แต่หน้าจริงมี
+  /// จึงต้องบอกด้วยว่าตัวเลขที่เห็นเป็นของใคร)
+  String get _headerSubtitle {
+    final loaded = _loadedAt;
+    final when = loaded == null ? 'กำลังโหลด...' : 'อัปเดต ${formatThaiDateTime(loaded)}';
+    return 'ภาพรวมข้อมูลและงานที่ต้องดำเนินการทั้งระบบ · $_filterSummary · $when';
+  }
+
+  /// ปุ่มลัดแทนแผงการ์ดเมนูเดิมของหน้าแรก — สี่ปุ่มแรกเรียงตาม mockup
+  ///
+  /// ปฏิทินกิจกรรมกับการเข้าร่วมกิจกรรมไม่ได้อยู่บน mockup และไม่มีช่องบน sidebar
+  /// ของแอดมิน แต่แผงการ์ดเดิมเป็นทางเข้าเดียวของสองหน้านี้ — ตัดออกแล้วจะกลายเป็น
+  /// หน้ากำพร้าที่เข้าไม่ได้เลย จึงคงไว้ต่อท้าย
+  Widget _buildShortcuts() => ConsoleShortcutBar(
+        shortcuts: [
+          ConsoleShortcut(
+            icon: Icons.description_outlined,
+            label: 'จัดการกิจกรรม',
+            onTap: () => _open(const ActivitiesScreen()),
+          ),
+          ConsoleShortcut(
+            icon: Icons.people_outline,
+            label: 'จัดการผู้ใช้',
+            onTap: () => _open(const UsersScreen()),
+          ),
+          ConsoleShortcut(
+            icon: Icons.schedule_outlined,
+            label: 'หมวดชั่วโมง',
+            onTap: () => _open(const HourCategoriesScreen()),
+          ),
+          ConsoleShortcut(
+            icon: Icons.sync,
+            label: 'รีเฟรช Gold',
+            onTap: _refreshGold,
+            busy: _refreshingGold,
+          ),
+          ConsoleShortcut(
+            icon: Icons.fact_check_outlined,
+            label: 'การเข้าร่วมกิจกรรม',
+            onTap: () => _open(const ParticipationsScreen()),
+          ),
+          ConsoleShortcut(
+            icon: Icons.calendar_month_outlined,
+            label: 'ปฏิทินกิจกรรม',
+            onTap: () => _open(const ActivityCalendarScreen()),
+          ),
+        ],
+      );
+
+  // --------------------------- queue cards ---------------------------
+
+  /// การ์ดคิวงานสองใบ — เรียงข้างกันบนจอกว้าง ซ้อนกันบนจอแคบ
+  Widget _buildQueueCards() {
+    final overview = StatusOverviewCard(counts: _counts);
+    final todo = TodoCard(
+      items: [
+        TodoItem(
+          label: 'อนุมัติ ${_counts.pendingActivities} กิจกรรมใหม่',
+          count: _counts.pendingActivities,
+          onTap: () => _open(const ActivitiesScreen()),
+        ),
+        TodoItem(
+          label: 'ตรวจหลักฐาน ${_counts.pendingEvidence} รายการ',
+          count: _counts.pendingEvidence,
+          onTap: () => _open(const ParticipationsScreen()),
+        ),
+        TodoItem(
+          label: 'ติดตามนิสิตกลุ่มเสี่ยง ${_atRisk.length} คน',
+          count: _atRisk.length,
+          onTap: () => _open(const StudentsScreen()),
+        ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 760) {
+          return Column(
+            children: [overview, const SizedBox(height: AppSpacing.lg), todo],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: overview),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(child: todo),
+          ],
+        );
+      },
     );
   }
 

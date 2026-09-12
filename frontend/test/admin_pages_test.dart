@@ -5,6 +5,7 @@ import 'package:activity_tracking_frontend/screens/users_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
+import 'package:activity_tracking_frontend/widgets/app_card.dart';
 import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -109,7 +110,15 @@ void main() {
       _loginAs('admin');
       await tester.pumpWidget(_app(const StudentsScreen()));
 
-      expect(find.text('จัดการนิสิต'), findsOneWidget);
+      // ชื่อเดียวกันอยู่บนเมนู sidebar ด้วย — นับเฉพาะหัวข้อในเนื้อหาของหน้า
+      expect(
+        find.descendant(of: find.byType(SectionHeader), matching: find.text('จัดการนิสิต')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: find.byType(AppSidebar), matching: find.text('จัดการนิสิต')),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(FilledButton, 'เพิ่มนิสิต'), findsOneWidget);
     });
   });

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Mockups — Sidebar + Dashboards (ธีม ม.ทักษิณ)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.44.0/iconfont/tabler-icons.min.css">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap');
+*{box-sizing:border-box;font-family:'Sarabun',sans-serif;}
+body{margin:0;background:#EEF1F4;color:#222831;}
+.wrap{max-width:1080px;margin:0 auto;padding:26px 18px 70px;}
+h1{font-size:22px;text-align:center;margin:0 0 4px;}
+.sub{text-align:center;color:#6E747D;font-size:13px;margin:0 0 26px;}
+.cap{font-size:13px;font-weight:600;color:#155189;background:#E8F1FA;display:inline-block;padding:5px 13px;border-radius:8px;margin:30px 0 12px;}
+:root{--blue:#1C6EB4;--blued:#155189;--sidebar:#16548C;--bluebg:#E8F1FA;--ink:#222831;--sub:#5B6470;--muted:#6E747D;--line:#E3E7EC;--page:#EEF1F4;--green:#1F9D57;--amber:#BE7A1F;}
+.mi{display:flex;align-items:center;gap:10px;font-size:12.5px;color:#D3E2F0;padding:9px 12px;border-radius:8px;cursor:pointer;}
+.mi i{font-size:16px;}
+.mi.on{background:#fff;color:var(--blued);font-weight:600;}
+.subm{font-size:12px;color:#BcD4EA;padding:7px 12px 7px 38px;}
+.subm.on{color:#fff;font-weight:600;}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+.ico{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:21px;}
+.abtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 11px;font-size:12px;color:var(--ink);}
+.pill{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;}
+.nl{font-size:13px;color:var(--sub);padding:5px 2px;}
+.nl.on{color:var(--blue);font-weight:600;border-bottom:2px solid var(--blue);}
+.meta{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub);}
+.frame{border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 6px 22px rgba(34,40,49,0.08);background:var(--page);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>UI Mockups — Sidebar + Dashboards</h1>
+  <p class="sub">ธีม ม.ทักษิณ (เทา-ฟ้า) · ฟอนต์ Sarabun · โครงเมนูซ้าย + หน้าแรกเป็นแดชบอร์ด</p>
+
+  <div class="cap">1 · แผงควบคุมแอดมิน (Sidebar + Dashboard)</div>
+  <div class="frame" style="display:flex;min-height:500px;">
+    <div style="width:212px;flex-shrink:0;background:var(--sidebar);display:flex;flex-direction:column;padding:14px 10px;">
+      <div style="display:flex;align-items:center;gap:9px;padding:2px 6px 14px;">
+        <div style="width:36px;height:36px;border-radius:8px;background:#fff;color:var(--blued);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;">TSU</div>
+        <div style="font-size:11.5px;font-weight:600;color:#fff;line-height:1.2;">กิจกรรมพัฒนานิสิต<br><span style="font-size:10px;color:#BcD4EA;font-weight:400;">Control Panel</span></div>
+      </div>
+      <div style="font-size:10.5px;color:#9DBFDD;padding:8px 8px 4px;">เมนูผู้ดูแลระบบ</div>
+      <div class="mi on"><i class="ti ti-layout-dashboard"></i>แดชบอร์ด<i class="ti ti-chevron-down" style="margin-left:auto;font-size:14px;"></i></div>
+      <div class="subm on">ภาพรวม</div>
+      <div class="subm">สถิติการเข้าร่วม</div>
+      <div class="mi"><i class="ti ti-calendar-event"></i>จัดการกิจกรรม</div>
+      <div class="mi"><i class="ti ti-users"></i>จัดการผู้ใช้</div>
+      <div class="mi"><i class="ti ti-school"></i>จัดการนิสิต</div>
+      <div class="mi"><i class="ti ti-clock-hour-4"></i>หมวดชั่วโมง</div>
+      <div style="flex:1;"></div>
+      <div style="border-top:1px solid rgba(255,255,255,0.15);padding-top:10px;display:flex;align-items:center;gap:8px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#fff;color:var(--blued);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;">A</div>
+        <div style="flex:1;font-size:11.5px;color:#fff;">ผู้ดูแลระบบ</div><i class="ti ti-logout" style="color:#BcD4EA;font-size:15px;"></i>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
+      <div style="background:var(--blue);color:#fff;display:flex;align-items:center;gap:14px;padding:11px 18px;">
+        <i class="ti ti-menu-2" style="font-size:19px;"></i><span style="font-size:14px;font-weight:600;">แผงควบคุมระบบ</span>
+        <div style="flex:1;"></div>
+        <div style="position:relative;"><i class="ti ti-bell" style="font-size:19px;"></i><span style="position:absolute;top:-6px;right:-8px;background:#D6453D;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:999px;">99+</span></div>
+        <span style="font-size:12.5px;">ธีรภักร อ่อนศรี</span>
+        <span style="background:#fff;color:var(--blued);font-size:11px;font-weight:700;padding:4px 12px;border-radius:999px;">Admin</span>
+      </div>
+      <div style="padding:18px 20px;overflow:hidden;">
+        <div style="font-size:19px;font-weight:600;">Dashboard</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">ภาพรวมข้อมูลและงานที่ต้องดำเนินการทั้งระบบ · อัปเดต 09/09/2026 20:06</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+          <span class="abtn"><i class="ti ti-file-text" style="font-size:14px;"></i>จัดการกิจกรรม</span>
+          <span class="abtn"><i class="ti ti-users" style="font-size:14px;"></i>จัดการผู้ใช้</span>
+          <span class="abtn"><i class="ti ti-clock-hour-4" style="font-size:14px;"></i>หมวดชั่วโมง</span>
+          <span class="abtn"><i class="ti ti-refresh" style="font-size:14px;"></i>รีเฟรช Gold</span>
+        </div>
+        <div style="background:var(--blued);border-radius:12px;padding:16px 18px;display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+          <div style="width:40px;height:40px;border-radius:9px;background:rgba(255,255,255,0.18);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ti ti-book-2"></i></div>
+          <div style="flex:1;color:#fff;"><div style="font-size:13.5px;font-weight:600;">คู่มือการใช้งานสำหรับ Admin</div><div style="font-size:11.5px;color:#CFE0F2;">ตั้งแต่ตั้งค่ากิจกรรมจนออกใบประมวลผล</div></div>
+          <span style="background:#fff;color:var(--blued);font-size:12px;font-weight:600;padding:8px 14px;border-radius:8px;">เปิดคู่มือ →</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
+          <div class="kpi" style="display:flex;align-items:center;justify-content:space-between;"><div><div style="font-size:11.5px;color:var(--muted);">นิสิตทั้งหมด</div><div style="font-size:24px;font-weight:700;">2,031</div></div><div class="ico" style="background:var(--bluebg);color:var(--blue);"><i class="ti ti-users"></i></div></div>
+          <div class="kpi" style="display:flex;align-items:center;justify-content:space-between;"><div><div style="font-size:11.5px;color:var(--muted);">ผ่านเกณฑ์</div><div style="font-size:24px;font-weight:700;color:var(--green);">78%</div></div><div class="ico" style="background:#E4F5EC;color:var(--green);"><i class="ti ti-circle-check"></i></div></div>
+          <div class="kpi" style="display:flex;align-items:center;justify-content:space-between;"><div><div style="font-size:11.5px;color:var(--muted);">กลุ่มเสี่ยง</div><div style="font-size:24px;font-weight:700;color:var(--amber);">112</div></div><div class="ico" style="background:#FCF1DE;color:var(--amber);"><i class="ti ti-alert-triangle"></i></div></div>
+          <div class="kpi" style="display:flex;align-items:center;justify-content:space-between;"><div><div style="font-size:11.5px;color:var(--muted);">กิจกรรม</div><div style="font-size:24px;font-weight:700;">48</div></div><div class="ico" style="background:var(--bluebg);color:var(--blue);"><i class="ti ti-calendar-event"></i></div></div>
+        </div>
+        <div style="display:flex;gap:12px;">
+          <div style="flex:1;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+            <div style="background:var(--sidebar);color:#fff;font-size:12.5px;font-weight:600;padding:9px 14px;">ภาพรวมสถานะ</div>
+            <div style="padding:12px 14px;font-size:12px;color:var(--sub);line-height:2;">รออนุมัติกิจกรรม <b style="float:right;color:var(--amber);">3</b><br>หลักฐานรอตรวจ <b style="float:right;color:var(--amber);">12</b><br>อนุมัติแล้ววันนี้ <b style="float:right;color:var(--green);">8</b></div>
+          </div>
+          <div style="flex:1;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+            <div style="background:var(--sidebar);color:#fff;font-size:12.5px;font-weight:600;padding:9px 14px;">งานที่ต้องดำเนินการ</div>
+            <div style="padding:12px 14px;font-size:12px;color:var(--sub);line-height:2;">ตรวจหลักฐาน "ค่ายอาสา 5" <span style="float:right;color:var(--blue);">ดู →</span><br>อนุมัติ 3 กิจกรรมใหม่ <span style="float:right;color:var(--blue);">ดู →</span><br>ส่งอีเมลกลุ่มเสี่ยง <span style="float:right;color:var(--blue);">ดู →</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cap">2 · หน้าแรกนิสิต (แดชบอร์ดส่วนตัว)</div>
+  <div class="frame">
+    <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;background:#fff;border-bottom:1px solid var(--line);">
+      <div style="width:34px;height:34px;border-radius:8px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;">TSU</div>
+      <div style="font-size:13px;font-weight:600;line-height:1.15;">กิจกรรมพัฒนานิสิต<br><span style="font-size:11px;color:var(--muted);font-weight:400;">นอกชั้นเรียน</span></div>
+      <div style="flex:1;display:flex;gap:18px;justify-content:center;"><span class="nl on">หน้าแรก</span><span class="nl">สมัครกิจกรรม</span><span class="nl">รายละเอียดชั่วโมง</span><span class="nl">ผู้ช่วยอัจฉริยะ</span></div>
+      <div style="width:30px;height:30px;border-radius:50%;background:var(--bluebg);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">ธ</div>
+    </div>
+    <div style="padding:18px 20px;">
+      <div style="font-size:18px;font-weight:600;margin-bottom:2px;">สวัสดี, ธีรภักร อ่อนศรี</div>
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:16px;">รหัส 6920210099 · คณะวิทยาศาสตร์และนวัตกรรมดิจิทัล · ชั้นปีที่ 1 · เกณฑ์ 2567</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;">
+        <div class="kpi"><div style="font-size:11.5px;color:var(--muted);">ชั่วโมงสะสม</div><div style="font-size:22px;font-weight:700;color:var(--blued);">34<span style="font-size:14px;color:var(--muted);font-weight:500;">/60</span></div></div>
+        <div class="kpi"><div style="font-size:11.5px;color:var(--muted);">ครบแล้ว</div><div style="font-size:22px;font-weight:700;color:var(--green);">57%</div></div>
+        <div class="kpi"><div style="font-size:11.5px;color:var(--muted);">หมวดที่ยังขาด</div><div style="font-size:22px;font-weight:700;color:var(--amber);">2</div></div>
+        <div class="kpi"><div style="font-size:11.5px;color:var(--muted);">กิจกรรมใกล้ถึง</div><div style="font-size:22px;font-weight:700;">3</div></div>
+      </div>
+      <div style="display:flex;gap:14px;">
+        <div style="flex:1;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:14px;">ชั่วโมงตาม Talent / PLO</div>
+          <div style="font-size:12px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>TSU Glocal Talent (PLO 1)</span><b>18/30</b></div>
+            <div style="height:7px;background:#EEF1F4;border-radius:4px;margin-bottom:12px;"><div style="height:100%;width:60%;background:var(--blue);border-radius:4px;"></div></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>TSU Communication (PLO 2)</span><b>10/10 ✓</b></div>
+            <div style="height:7px;background:#EEF1F4;border-radius:4px;margin-bottom:12px;"><div style="height:100%;width:100%;background:var(--green);border-radius:4px;"></div></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span>TSU Social Innovation (PLO 3)</span><b>6/20</b></div>
+            <div style="height:7px;background:#EEF1F4;border-radius:4px;"><div style="height:100%;width:30%;background:var(--amber);border-radius:4px;"></div></div>
+          </div>
+        </div>
+        <div style="width:250px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:12px;">แนะนำให้เข้าร่วม</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">เติมหมวดที่ยังขาด</div>
+          <div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:9px;">
+            <div style="font-weight:600;font-size:12.5px;margin-bottom:5px;">ค่ายอาสาพัฒนาชุมชน 5</div>
+            <div style="display:flex;gap:10px;"><span class="meta"><i class="ti ti-clock" style="font-size:13px;"></i>12 ชม.</span><span class="meta"><i class="ti ti-calendar" style="font-size:13px;"></i>18 ก.ย.</span></div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;">
+            <div style="font-weight:600;font-size:12.5px;margin-bottom:5px;">อบรมด้านผู้ประกอบการ</div>
+            <div style="display:flex;gap:10px;"><span class="meta"><i class="ti ti-clock" style="font-size:13px;"></i>4 ชม.</span><span class="meta"><i class="ti ti-calendar" style="font-size:13px;"></i>25 ก.ย.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

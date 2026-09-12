@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:activity_tracking_frontend/screens/dashboard_screen.dart';
 import 'package:activity_tracking_frontend/screens/home_screen.dart';
 import 'package:activity_tracking_frontend/screens/students_screen.dart';
 import 'package:activity_tracking_frontend/screens/users_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
+import 'package:activity_tracking_frontend/theme/app_theme.dart';
+import 'package:activity_tracking_frontend/widgets/admin_console.dart';
 import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 
 void main() {
@@ -68,17 +71,50 @@ void main() {
     expect(find.text('ผู้ช่วยอัจฉริยะ'), findsNothing);
   });
 
-  testWidgets('admin sees all cards including "จัดการผู้ใช้" on Home', (tester) async {
+  testWidgets('แอดมินล็อกอินแล้ว landing ที่แดชบอร์ดคอนโซล ไม่ใช่แผงการ์ดเมนูเดิม',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
     authService.token = 'fake-token';
     authService.username = 'admin';
     authService.role = 'admin';
 
+    // HomeScreen คือหน้าที่แอปพาไปหลังล็อกอิน — แอดมินต้องเจอคอนโซลทันทีโดยไม่ต้องกดต่อ
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
 
-    expect(find.widgetWithText(Card, 'นิสิต'), findsOneWidget);
-    expect(find.text('จัดการผู้ใช้'), findsOneWidget);
-    expect(find.text('แดชบอร์ดผู้บริหาร'), findsOneWidget);
-    expect(find.text('หมวดชั่วโมงกิจกรรม'), findsOneWidget);
+    expect(find.byType(DashboardScreen), findsOneWidget);
+    expect(find.text('Dashboard'), findsOneWidget);
+
+    // แถบคู่มือต้อง "แสดงจริง" ไม่ใช่แค่มีในโค้ด — เช็กทั้งตัว widget ข้อความ ปุ่ม
+    // และสีพื้นน้ำเงินเข้มที่วาดออกมา
+    expect(find.byType(GuideBanner), findsOneWidget);
+    expect(find.text('คู่มือการใช้งานสำหรับ Admin'), findsOneWidget);
+    expect(find.text('ตั้งแต่ตั้งค่ากิจกรรมจนออกใบประมวลผล'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'เปิดคู่มือ →'), findsOneWidget);
+    final banner = tester.widget<Container>(
+      find.descendant(of: find.byType(GuideBanner), matching: find.byType(Container)).first,
+    );
+    expect((banner.decoration as BoxDecoration).color, AppColors.blueDark);
+
+    // แผงการ์ดเมนูเดิมหายไป แต่ทุกหน้าที่มันเคยพาไปต้องยังเข้าถึงได้
+    expect(find.text('หมวดชั่วโมงกิจกรรม'), findsNothing, reason: 'ชื่อการ์ดของแผงเดิม');
+    for (final label in [
+      'จัดการกิจกรรม',
+      'จัดการผู้ใช้',
+      'หมวดชั่วโมง',
+      'รีเฟรช Gold',
+      'การเข้าร่วมกิจกรรม',
+      'ปฏิทินกิจกรรม',
+    ]) {
+      expect(find.widgetWithText(OutlinedButton, label), findsOneWidget, reason: label);
+    }
+    // จัดการนิสิตย้ายขึ้นเมนู sidebar ตาม mockup
+    expect(
+      find.descendant(of: find.byType(AppSidebar), matching: find.text('จัดการนิสิต')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('non-admin roles do not see the "แดชบอร์ดผู้บริหาร" card', (tester) async {

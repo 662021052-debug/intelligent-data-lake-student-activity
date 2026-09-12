@@ -50,6 +50,8 @@ class AppNavItem {
       AppNavItem(id: 'hour_categories', label: 'หมวดชั่วโมง', icon: Icons.category_outlined);
   static const dashboard =
       AppNavItem(id: 'dashboard', label: 'แดชบอร์ด', icon: Icons.dashboard_outlined);
+  static const students =
+      AppNavItem(id: 'students', label: 'จัดการนิสิต', icon: Icons.school_outlined);
 }
 
 /// เมนูของแต่ละ role — ตรงกับสิทธิ์ที่หน้าจอนั้น ๆ ยอมให้เข้าจริง
@@ -63,11 +65,13 @@ List<AppNavItem> navItemsForRole(String? role) => switch (role) {
           AppNavItem.myHours,
           AppNavItem.chatbot,
         ],
+      // เรียงตาม mockup: แดชบอร์ด (หน้าแรกของแอดมิน) มาก่อน แล้วหน้าจัดการ
       'admin' => const [
+          AppNavItem.dashboard,
           AppNavItem.activities,
           AppNavItem.users,
+          AppNavItem.students,
           AppNavItem.hourCategories,
-          AppNavItem.dashboard,
         ],
       'staff' => const [
           AppNavItem.activities,
