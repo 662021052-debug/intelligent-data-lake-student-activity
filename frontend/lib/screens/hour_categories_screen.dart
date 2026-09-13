@@ -204,17 +204,15 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     return AdminPage(
       activeId: 'hour_categories',
       title: 'หมวดชั่วโมงกิจกรรม',
-      subtitle: 'โครงสร้างเกณฑ์ 2 ชุดที่ใช้อยู่พร้อมกัน — คนละชุดตามรหัสนิสิต',
+      subtitle: 'เกณฑ์แยกตามรุ่นนิสิต · ปุ่มเพิ่ม/แก้ของแต่ละชุดอยู่ในกรอบของชุดนั้น',
+      // ปุ่มระดับหน้ามีปุ่มเดียว = สร้างเกณฑ์ของรุ่นใหม่ · ปุ่มที่แก้ของในชุดใดชุดหนึ่ง
+      // (เช่น "เพิ่มหมวดใหญ่" ของเกณฑ์เดิม) อยู่ในกรอบของชุดนั้นเท่านั้น ไม่งั้นผู้ดูแล
+      // เดาไม่ออกว่ากดแล้วของใหม่จะไปโผล่ในชุดไหน
       actions: [
         FilledButton.icon(
           onPressed: () => _openCriteriaForm(const CriteriaSetFormDialog()),
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('เพิ่มชุดเกณฑ์ใหม่'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => _openCategoryForm(),
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('เพิ่มหมวดใหญ่'),
+          label: const Text(kAddCriteriaSetLabel),
         ),
       ],
       filters: [
@@ -251,16 +249,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CriteriaSetHeader(
-          badge: 'ชุดที่ 1',
-          title: set?.name ?? 'โครงสร้าง 2567',
-          audience: set?.audienceLabel ?? 'สำหรับนิสิตรหัส 67 ขึ้นไป (ปัจจุบัน ปี 1-3)',
-          totalHours: set?.totalRequiredHours ?? 0,
-          palette: StatusPalette.info,
-          note: set == null ? null : 'รหัสชุด ${set.code}',
-          warning: set?.hoursWarning,
-          readOnly: true,
-        ),
+        systemCriteriaSectionHeader(set),
         if (set == null)
           _sectionMessage('ยังโหลดโครงสร้าง 2567 ไม่ได้ — กดโหลดใหม่อีกครั้ง')
         else if (groups.isEmpty)
@@ -389,19 +378,16 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CriteriaSetHeader(
-          badge: 'ชุดที่ 2',
-          title: 'เกณฑ์เดิม',
-          audience: 'สำหรับนิสิตรหัส 66 ลงไป (ปัจจุบัน ปี 4)',
+        legacyCriteriaSectionHeader(
           totalHours: totalHours,
-          palette: StatusPalette.neutral,
-          note: '${_categories.length} หน่วยการเรียนรู้ · $subcategoryCount หมวดย่อย '
-              '· แก้ไขได้จากปุ่มในส่วนนี้',
+          categoryCount: _categories.length,
+          subcategoryCount: subcategoryCount,
+          onAddCategory: () => _openCategoryForm(),
         ),
         if (visible.isEmpty)
           _sectionMessage(
             _search.isEmpty
-                ? 'ยังไม่มีหน่วยการเรียนรู้ — กดปุ่ม "เพิ่มหมวดใหญ่" ด้านบน'
+                ? 'ยังไม่มีหน่วยการเรียนรู้ — กดปุ่ม "$kAddLegacyCategoryLabel" ในกรอบด้านบน'
                 : 'ไม่พบหมวดที่ตรงกับคำค้นในชุดนี้',
           )
         else
@@ -417,14 +403,8 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CriteriaSetHeader(
-          badge: 'ชุดของผู้ดูแล',
-          title: set.name,
-          audience: '${set.audienceLabel} · ${set.programTypeLabel}',
-          totalHours: set.totalRequiredHours,
-          palette: StatusPalette.approved,
-          note: 'รหัสชุด ${set.code}',
-          warning: set.hoursWarning,
+        customCriteriaSectionHeader(
+          set,
           onEdit: () => _openCriteriaForm(CriteriaSetFormDialog(existing: set)),
           onDelete: () => _deleteCriteriaThing(
             '/criteria-sets/${set.id}',
@@ -433,38 +413,15 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
             detail: 'Talent และรายการเกณฑ์ในชุดจะถูกลบไปด้วย · '
                 'ลบไม่ได้ถ้ามีนิสิตใช้ชุดนี้อยู่หรือมีกิจกรรมผูกกับรายการเกณฑ์',
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.md),
-          child: Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () =>
-                    _openCriteriaForm(TalentFormDialog(criteriaSetId: set.id)),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('เพิ่ม Talent'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _openCriteriaForm(
-                  RequirementGroupFormDialog(criteriaSetId: set.id),
-                ),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('เพิ่มกลุ่มแชร์เป้า'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _openCriteriaForm(RequirementFormDialog(
-                  criteriaSetId: set.id,
-                  learningUnits: _learningUnits,
-                  talents: _talentOptions(set),
-                  groups: requirementGroupOptions(set),
-                )),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('เพิ่มรายการเกณฑ์'),
-              ),
-            ],
-          ),
+          onAddTalent: () => _openCriteriaForm(TalentFormDialog(criteriaSetId: set.id)),
+          onAddGroup: () =>
+              _openCriteriaForm(RequirementGroupFormDialog(criteriaSetId: set.id)),
+          onAddRequirement: () => _openCriteriaForm(RequirementFormDialog(
+            criteriaSetId: set.id,
+            learningUnits: _learningUnits,
+            talents: _talentOptions(set),
+            groups: requirementGroupOptions(set),
+          )),
         ),
         if (set.requirementGroups.isNotEmpty) _sharedTargetGroups(context, set),
         if (groups.isEmpty)
@@ -790,6 +747,95 @@ List<CriteriaGroup> filterCriteriaGroups(List<CriteriaGroup> groups, String sear
       .toList();
 }
 
+/// ปุ่มหลักของหน้า — สร้างเกณฑ์ของรุ่นใหม่ (ปุ่มเดียวบนหัวข้อหน้า)
+const kAddCriteriaSetLabel = 'เพิ่มชุดเกณฑ์ใหม่';
+
+/// ปุ่มเพิ่มหมวดของโครงเก่า — อยู่ในกรอบ "เกณฑ์เดิม" เท่านั้น และบอกรุ่นในชื่อปุ่มเลย
+const kAddLegacyCategoryLabel = 'เพิ่มหมวดใหญ่ (รหัส 66 ลงไป)';
+
+/// หัวข้อส่วนชุดทางการที่ระบบ seed (โครงสร้าง 2567) — ไม่มีปุ่มใดเลย
+CriteriaSetHeader systemCriteriaSectionHeader(CriteriaSet? set) => CriteriaSetHeader(
+      badge: 'ชุดที่ 1',
+      title: set?.name ?? 'โครงสร้าง 2567',
+      audience: set?.audienceLabel ?? 'สำหรับนิสิตรหัส 67 ขึ้นไป (ปัจจุบัน ปี 1-3)',
+      totalHours: set?.totalRequiredHours ?? 0,
+      palette: StatusPalette.info,
+      note: set == null ? null : 'รหัสชุด ${set.code}',
+      warning: set?.hoursWarning,
+      readOnly: true,
+      capabilities: 'ดูได้อย่างเดียว — เพิ่ม/แก้/ลบ Talent หรือรายการเกณฑ์ในชุดนี้ไม่ได้ · '
+          'ถ้ารุ่นใหม่ใช้เกณฑ์ต่างออกไป ให้กด "$kAddCriteriaSetLabel" ด้านบน',
+    );
+
+/// หัวข้อส่วนเกณฑ์เดิม (หมวดใหญ่ → หมวดย่อย) — ปุ่มเพิ่มหมวดใหญ่อยู่ในกรอบนี้ที่เดียว
+CriteriaSetHeader legacyCriteriaSectionHeader({
+  required double totalHours,
+  required int categoryCount,
+  required int subcategoryCount,
+  required VoidCallback onAddCategory,
+}) =>
+    CriteriaSetHeader(
+      badge: 'ชุดที่ 2',
+      title: 'เกณฑ์เดิม',
+      audience: 'สำหรับนิสิตรหัส 66 ลงไป (ปัจจุบัน ปี 4)',
+      totalHours: totalHours,
+      palette: StatusPalette.neutral,
+      note: '$categoryCount หน่วยการเรียนรู้ · $subcategoryCount หมวดย่อย',
+      capabilities: 'เพิ่มได้: หมวดใหญ่ (ปุ่มด้านล่าง) · หมวดย่อย (ปุ่ม + ท้ายหมวดใหญ่) — '
+          'แก้/ลบได้ทั้งสองระดับจากปุ่มในแต่ละแถว · มีผลเฉพาะนิสิตรหัส 66 ลงไป',
+      actions: [
+        OutlinedButton.icon(
+          onPressed: onAddCategory,
+          icon: const Icon(Icons.add, size: 16),
+          label: const Text(kAddLegacyCategoryLabel),
+        ),
+      ],
+    );
+
+/// หัวข้อส่วนชุดที่ผู้ดูแลสร้างเอง — แก้ข้อมูลชุด + ปุ่มเพิ่มของทุกชนิดอยู่ในกรอบนี้
+CriteriaSetHeader customCriteriaSectionHeader(
+  CriteriaSet set, {
+  required VoidCallback onEdit,
+  required VoidCallback onDelete,
+  required VoidCallback onAddTalent,
+  required VoidCallback onAddGroup,
+  required VoidCallback onAddRequirement,
+}) {
+  final shortCode = set.effectiveFromCohort > 0
+      ? 'รหัส ${(set.effectiveFromCohort % 100).toString().padLeft(2, '0')} ขึ้นไป'
+      : 'รุ่นที่ยังไม่มีชุดของตัวเอง';
+  return CriteriaSetHeader(
+    badge: 'ชุดของผู้ดูแล',
+    title: set.name,
+    audience: '${set.audienceLabel} · ${set.programTypeLabel}',
+    totalHours: set.totalRequiredHours,
+    palette: StatusPalette.approved,
+    note: 'รหัสชุด ${set.code}',
+    warning: set.hoursWarning,
+    onEdit: onEdit,
+    onDelete: onDelete,
+    capabilities: 'แก้ได้ทั้งชุด: ข้อมูลชุด (ปุ่มดินสอ) · เพิ่ม Talent · กลุ่มแชร์เป้า · '
+        'รายการเกณฑ์ (ปุ่มด้านล่าง) · แก้/ลบรายการจากปุ่มในแต่ละแถว — มีผลกับนิสิต$shortCode',
+    actions: [
+      OutlinedButton.icon(
+        onPressed: onAddTalent,
+        icon: const Icon(Icons.add, size: 16),
+        label: const Text('เพิ่ม Talent'),
+      ),
+      OutlinedButton.icon(
+        onPressed: onAddGroup,
+        icon: const Icon(Icons.add, size: 16),
+        label: const Text('เพิ่มกลุ่มแชร์เป้า'),
+      ),
+      OutlinedButton.icon(
+        onPressed: onAddRequirement,
+        icon: const Icon(Icons.add, size: 16),
+        label: const Text('เพิ่มรายการเกณฑ์'),
+      ),
+    ],
+  );
+}
+
 /// หัวข้อของชุดเกณฑ์หนึ่งชุด — ป้ายสี + ชื่อชุด + บอกว่าใช้กับนิสิตรุ่นไหน + ชั่วโมงรวม
 ///
 /// ทั้งสองส่วนในหน้านี้หน้าตาคล้ายกันมาก (การ์ดพับได้เหมือนกัน) ถ้าไม่มีแถบสีคั่น
@@ -807,7 +853,15 @@ class CriteriaSetHeader extends StatelessWidget {
     this.readOnly = false,
     this.onEdit,
     this.onDelete,
+    this.capabilities,
+    this.actions = const [],
   });
+
+  /// บอกตรง ๆ ว่าในชุดนี้เพิ่ม/แก้อะไรได้บ้าง (หรืออ่านอย่างเดียว)
+  final String? capabilities;
+
+  /// ปุ่มเพิ่มของในชุดนี้ — วางไว้ในกรอบเดียวกับหัวข้อ เห็นชัดว่าเป็นของชุดไหน
+  final List<Widget> actions;
 
   final String badge;
   final String title;
@@ -910,6 +964,36 @@ class CriteriaSetHeader extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+          if (capabilities != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    readOnly ? Icons.lock_outline : Icons.edit_note,
+                    size: 16,
+                    color: palette.foreground,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(
+                    child: Text(
+                      capabilities!,
+                      style: theme.textTheme.bodySmall?.copyWith(color: AppColors.ink),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (actions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.xs,
+                children: actions,
               ),
             ),
         ],

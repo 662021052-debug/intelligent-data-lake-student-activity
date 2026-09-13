@@ -124,15 +124,24 @@ void main() {
   });
 
   group('หน้าหมวดชั่วโมง', () {
-    testWidgets('แอดมินเห็นหัวข้อ + ปุ่มเพิ่มหมวดใหญ่', (tester) async {
+    testWidgets('แอดมินเห็นหัวข้อ + ปุ่มหลักปุ่มเดียว "เพิ่มชุดเกณฑ์ใหม่"', (tester) async {
       _wideScreen(tester);
       _loginAs('admin');
       await tester.pumpWidget(_app(const HourCategoriesScreen()));
 
       expect(find.text('หมวดชั่วโมงกิจกรรม'), findsOneWidget);
-      // ปุ่มหลักของหน้านี้คือ "เพิ่มชุดเกณฑ์ใหม่" ส่วนหมวดใหญ่ของเกณฑ์เดิมเป็นปุ่มรอง
+      // ปุ่มระดับหน้ามีปุ่มเดียว = สร้างเกณฑ์รุ่นใหม่ · "เพิ่มหมวดใหญ่" ของโครงเก่าต้องไม่อยู่
+      // บนหัวข้อหน้าอีก (ย้ายไปอยู่ในกรอบ "เกณฑ์เดิม" — เทสอยู่ที่ criteria_set_management_test)
       expect(find.widgetWithText(FilledButton, 'เพิ่มชุดเกณฑ์ใหม่'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'เพิ่มหมวดใหญ่'), findsOneWidget);
+      // ปุ่ม "เพิ่ม…" ทั้งหน้ามีตัวเดียว (ปุ่มอื่นของเปลือกหน้า เช่น ลองใหม่ ไม่นับ)
+      expect(
+        find.ancestor(
+          of: find.textContaining('เพิ่ม'),
+          matching: find.bySubtype<ButtonStyleButton>(),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('เพิ่มหมวดใหญ่'), findsNothing);
       expect(find.byType(FloatingActionButton), findsNothing);
     });
   });

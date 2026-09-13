@@ -473,6 +473,77 @@ void main() {
     });
   });
 
+  group('ปุ่มเพิ่มอยู่ในกรอบของชุดที่มันแก้ + บอกว่าทำอะไรได้', () {
+    Finder inHeader(Finder matching) =>
+        find.descendant(of: find.byType(CriteriaSetHeader), matching: matching);
+
+    testWidgets('เกณฑ์เดิม: ปุ่ม "เพิ่มหมวดใหญ่" อยู่ในกรอบนี้ และบอกว่าเป็นของรุ่น 66 ลงไป',
+        (tester) async {
+      var added = 0;
+      await tester.pumpWidget(_wrap(legacyCriteriaSectionHeader(
+        totalHours: 60,
+        categoryCount: 5,
+        subcategoryCount: 20,
+        onAddCategory: () => added++,
+      )));
+      await tester.pumpAndSettle();
+
+      final button = inHeader(find.widgetWithText(OutlinedButton, kAddLegacyCategoryLabel));
+      expect(button, findsOneWidget);
+      expect(kAddLegacyCategoryLabel, contains('66 ลงไป'));
+      expect(find.textContaining('สำหรับนิสิตรหัส 66 ลงไป'), findsOneWidget);
+      expect(inHeader(find.textContaining('เพิ่มได้: หมวดใหญ่')), findsOneWidget);
+      expect(inHeader(find.textContaining('หมวดย่อย')), findsWidgets);
+      expect(inHeader(find.textContaining('มีผลเฉพาะนิสิตรหัส 66 ลงไป')), findsOneWidget);
+
+      await tester.tap(button);
+      expect(added, 1);
+    });
+
+    testWidgets('ชุดทางการ 2567: ไม่มีปุ่มเลย บอกว่าดูอย่างเดียว และชี้ไปปุ่มสร้างชุดใหม่',
+        (tester) async {
+      await tester.pumpWidget(_wrap(systemCriteriaSectionHeader(
+        _set(code: '2567-regular', effectiveFromCohort: 2567, isSystem: true),
+      )));
+      await tester.pumpAndSettle();
+
+      expect(inHeader(find.byType(OutlinedButton)), findsNothing);
+      expect(inHeader(find.byType(FilledButton)), findsNothing);
+      expect(inHeader(find.byType(AppIconButton)), findsNothing);
+      expect(inHeader(find.textContaining('ดูได้อย่างเดียว')), findsOneWidget);
+      expect(inHeader(find.textContaining('"$kAddCriteriaSetLabel"')), findsOneWidget);
+      expect(inHeader(find.byIcon(Icons.lock_outline)), findsWidgets);
+    });
+
+    testWidgets('ชุดของผู้ดูแล: ปุ่มเพิ่ม Talent/กลุ่ม/รายการ + แก้/ลบชุด อยู่ในกรอบของชุด',
+        (tester) async {
+      final pressed = <String>[];
+      await tester.pumpWidget(_wrap(SingleChildScrollView(
+        child: customCriteriaSectionHeader(
+          _set(),
+          onEdit: () => pressed.add('edit'),
+          onDelete: () => pressed.add('delete'),
+          onAddTalent: () => pressed.add('talent'),
+          onAddGroup: () => pressed.add('group'),
+          onAddRequirement: () => pressed.add('requirement'),
+        ),
+      )));
+      await tester.pumpAndSettle();
+
+      for (final label in ['เพิ่ม Talent', 'เพิ่มกลุ่มแชร์เป้า', 'เพิ่มรายการเกณฑ์']) {
+        await tester.tap(inHeader(find.widgetWithText(OutlinedButton, label)));
+      }
+      await tester.tap(inHeader(find.byTooltip('แก้ไขชุดเกณฑ์')));
+      await tester.tap(inHeader(find.byTooltip('ลบชุดเกณฑ์')));
+      expect(pressed, ['talent', 'group', 'requirement', 'edit', 'delete']);
+
+      // ปุ่มของโครงเก่าต้องไม่หลุดมาอยู่ในชุดใหม่
+      expect(find.textContaining('เพิ่มหมวดใหญ่'), findsNothing);
+      expect(inHeader(find.textContaining('แก้ได้ทั้งชุด')), findsOneWidget);
+      expect(inHeader(find.textContaining('มีผลกับนิสิตรหัส 70 ขึ้นไป')), findsOneWidget);
+    });
+  });
+
   group('ปุ่มบนหัวข้อชุด', () {
     testWidgets('ปุ่มแก้/ลบของชุดเป็น AppIconButton ที่มี tooltip เสมอ', (tester) async {
       await tester.pumpWidget(_wrap(CriteriaSetHeader(
