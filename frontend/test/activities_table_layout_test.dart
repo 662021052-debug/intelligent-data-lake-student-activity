@@ -27,6 +27,10 @@ Widget _table({required double width, bool isStudent = false}) {
                 'กิจกรรมชื่อยาวมากจนดันคอลัมน์อื่นหลุดจอถ้าไม่ตัดข้อความ',
                 maxWidth: 220,
               )),
+              DataCell(ThaiDateCell(
+                formatThaiDate(DateTime(2027, 6, 30, 9, 30)),
+                key: ValueKey('date-$i'),
+              )),
               const DataCell(TruncatedCell('อบรม/สัมมนา', maxWidth: 110)),
               const DataCell(TruncatedCell(
                 'ด้านการสร้างนวัตกรรมสังคม (หน่วยใฝ่เรียนรู้ตลอดชีวิต)',
@@ -35,7 +39,6 @@ Widget _table({required double width, bool isStudent = false}) {
               const DataCell(NarrowCell(Text('6'), width: 36)),
               const DataCell(NarrowCell(Icon(Icons.remove, size: 18), width: 32)),
               const DataCell(NarrowCell(Text('120'), width: 40)),
-              DataCell(Text(formatThaiDate(DateTime(2027, 2, 1, 9, 30)))),
               const DataCell(TruncatedCell('หอประชุมใหญ่', maxWidth: 140)),
             ],
             pinned: [
@@ -72,6 +75,12 @@ void main() {
       expect(scrollable.first, 'ชื่อกิจกรรม');
     });
 
+    test('"วันเวลา" อยู่ถัดจากชื่อกิจกรรม ไม่ใช่เกือบท้าย (ไม่งั้นจมใต้ฝั่งตรึง)', () {
+      final scrollable = activityScrollColumns().map(_labelOf).toList();
+      expect(scrollable.take(2), ['ชื่อกิจกรรม', 'วันเวลา']);
+      expect(scrollable.last, 'สถานที่');
+    });
+
     test('ชั่วโมง/รับสูงสุด เป็นคอลัมน์ตัวเลข (ชิดขวา กินความกว้างน้อยกว่า)', () {
       final columns = {
         for (final c in activityScrollColumns()) _labelOf(c): c.numeric,
@@ -103,6 +112,43 @@ void main() {
         expect(actions.left, greaterThanOrEqualTo(0));
       });
     }
+
+    for (final width in [1024.0, 1280.0, 1440.0]) {
+      testWidgets('กว้าง ${width.toInt()}: วันที่ทุกแถวเห็นครบโดยไม่ต้องเลื่อน ไม่จมใต้ฝั่งตรึง',
+          (tester) async {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(_wrap(_table(width: width)));
+        await tester.pumpAndSettle();
+
+        // ขอบซ้ายของฝั่งตรึง = ขอบขวาของพื้นที่ที่ฝั่งเลื่อนได้มองเห็นจริง
+        final pinnedLeft = tester.getRect(find.text('สถานะอนุมัติ')).left;
+        for (var i = 0; i < 3; i++) {
+          final date = tester.getRect(find.byKey(ValueKey('date-$i')));
+          expect(date.right, lessThanOrEqualTo(pinnedLeft),
+              reason: 'แถว $i: วันที่ต้องอยู่ในส่วนที่เห็นได้ (ไม่ถูกฝั่งตรึงบัง)');
+          expect(date.width, kThaiDateCellWidth);
+        }
+      });
+    }
+
+    testWidgets('แถบเลื่อนแนวนอนโชว์ตลอด + เว้นที่ไม่ให้ทับแถวสุดท้าย', (tester) async {
+      tester.view.physicalSize = const Size(1024, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(_table(width: 1024)));
+      await tester.pumpAndSettle();
+
+      final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar).first);
+      expect(scrollbar.thumbVisibility, isTrue, reason: 'ต้องบอกผู้ใช้ว่ามีคอลัมน์ให้เลื่อนดู');
+      expect(scrollbar.trackVisibility, isTrue);
+
+      final scroll = tester.widget<SingleChildScrollView>(find.byType(SingleChildScrollView).first);
+      expect(scroll.padding, const EdgeInsets.only(bottom: kStickyTableScrollbarGap));
+    });
 
     testWidgets('ฝั่งตรึงไม่เลื่อนตามเมื่อเลื่อนตารางไปทางขวา', (tester) async {
       tester.view.physicalSize = const Size(900, 800);
@@ -188,8 +234,8 @@ void main() {
       await tester.pumpWidget(_wrap(_table(width: 1280)));
       await tester.pumpAndSettle();
 
-      expect(find.text('1 ก.พ. 2570'), findsWidgets);
-      expect(find.textContaining('2027-02-01'), findsNothing);
+      expect(find.text('30 มิ.ย. 2570'), findsWidgets);
+      expect(find.textContaining('2027-06-30'), findsNothing);
     });
   });
 

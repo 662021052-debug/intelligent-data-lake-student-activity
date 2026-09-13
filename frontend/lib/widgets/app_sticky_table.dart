@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'app_data_table.dart';
 
+/// ที่ว่างใต้ตารางฝั่งเลื่อนได้ สำหรับแถบเลื่อนแนวนอนที่โชว์ตลอด
+const kStickyTableScrollbarGap = 14.0;
+
 /// หนึ่งแถวของ [AppStickyTable] — แยกเป็นสองฝั่งตามที่ตารางแบ่ง
 class StickyRow {
   const StickyRow({required this.scrollable, required this.pinned});
@@ -102,11 +105,17 @@ class _AppStickyTableState extends State<AppStickyTable> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
+            // scrollbar โชว์ตลอด ไม่ใช่เฉพาะตอนเลื่อน/ชี้ — คอลัมน์ท้าย ๆ ของฝั่งนี้จมอยู่ใต้
+            // ฝั่งตรึงเมื่อจอไม่พอ ถ้าไม่มีแถบบอก ผู้ใช้จะนึกว่าข้อมูลถูกตัดทิ้ง ไม่รู้ว่าเลื่อนได้
             child: Scrollbar(
               controller: _horizontal,
+              thumbVisibility: true,
+              trackVisibility: true,
               child: SingleChildScrollView(
                 controller: _horizontal,
                 scrollDirection: Axis.horizontal,
+                // เว้นที่ใต้แถวสุดท้ายให้แถบเลื่อน ไม่งั้นแถบจะวาดทับตัวหนังสือแถวล่างสุด
+                padding: const EdgeInsets.only(bottom: kStickyTableScrollbarGap),
                 child: DataTable(
                   columns: widget.scrollableColumns,
                   rows: [

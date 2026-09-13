@@ -113,14 +113,18 @@ const kActivityActionsCompactBelow = 960.0;
 bool activityActionsCompact(double tableWidth) => tableWidth < kActivityActionsCompactBelow;
 
 /// คอลัมน์ฝั่งซ้ายของตารางกิจกรรม — ส่วนที่เลื่อนแนวนอนได้เมื่อจอไม่พอ
+///
+/// "วันเวลา" อยู่ถัดจากชื่อเสมอ: ฝั่งเลื่อนได้กว้างราว 1,270px แต่จอ 1440 ให้ที่แค่ ~800px
+/// คอลัมน์ท้าย ๆ จึงจมใต้ฝั่งตรึงจนกว่าจะเลื่อน เดิมวันเวลาอยู่เกือบท้ายเลยเห็นแค่
+/// "1 ก.พ. 25" — ชื่อ+วันคือสิ่งที่ใช้ระบุกิจกรรม ต้องเห็นโดยไม่ต้องเลื่อน
 List<DataColumn> activityScrollColumns() => const [
       DataColumn(label: Text('ชื่อกิจกรรม')),
+      DataColumn(label: Text('วันเวลา')),
       DataColumn(label: Text('ประเภท')),
       DataColumn(label: Text('หมวดชั่วโมง')),
       DataColumn(label: Text('ชั่วโมง'), numeric: true),
       DataColumn(label: Text('บังคับ')),
       DataColumn(label: Text('รับสูงสุด'), numeric: true),
-      DataColumn(label: Text('วันเวลา')),
       DataColumn(label: Text('สถานที่')),
     ];
 
@@ -439,6 +443,13 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
             scrollable: [
               // ชื่อกิจกรรมยาวได้เป็นประโยค — ตัดแล้วบอกเต็มตอนชี้ ไม่ให้ดันคอลัมน์อื่นหลุดจอ
               DataCell(TruncatedCell(a.name, maxWidth: 220)),
+              // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ เวลาเต็มอยู่ใน tooltip · อยู่ถัดจากชื่อ
+              // (ดู activityScrollColumns) และกว้างคงที่ (ดู ThaiDateCell)
+              DataCell(ThaiDateCell(
+                formatThaiDate(a.startAt),
+                tooltip: formatThaiDateTime(a.startAt),
+                style: _mutedCell(context),
+              )),
               DataCell(TruncatedCell(a.activityType,
                   maxWidth: 110, style: _mutedCell(context))),
               DataCell(TruncatedCell(
@@ -459,13 +470,6 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                 width: 32,
               )),
               DataCell(NarrowCell(Text('${a.maxParticipants}'), width: 40)),
-              // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ เวลาเต็มอยู่ใน tooltip · กว้างคงที่เพื่อไม่ให้
-              // ปีถูกตัดเมื่อฟอนต์ Sarabun โหลดเสร็จทีหลัง (ดู ThaiDateCell)
-              DataCell(ThaiDateCell(
-                formatThaiDate(a.startAt),
-                tooltip: formatThaiDateTime(a.startAt),
-                style: _mutedCell(context),
-              )),
               DataCell(TruncatedCell(a.location,
                   maxWidth: 140, style: _mutedCell(context))),
             ],
