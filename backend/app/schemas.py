@@ -3,6 +3,8 @@ from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models import CountingRule, ProgramType
+
 T = TypeVar("T")
 
 
@@ -169,3 +171,113 @@ class CriteriaSetRead(BaseModel):
     # จัดกลุ่มด้วยอะไร: "talent" (ชุดที่มี Talent/PLO) หรือ "learning_unit" (ชุดเก่า)
     grouped_by: str
     groups: list[CriteriaGroupRead]
+
+# ---------- เขียนชุดเกณฑ์ (เฟส 2: admin สร้าง/แก้ชุดของรุ่นอนาคตเองได้) ----------
+
+class CriteriaSetWrite(BaseModel):
+    """ข้อมูลชุดเกณฑ์ที่ผู้ดูแลกรอก — ใช้ทั้ง POST และ PUT (PUT = แทนที่ทั้งชุด)"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # กุญแจธรรมชาติที่ทั้งระบบใช้อ้างถึงชุด (seed_criteria.py ก็ค้นด้วย code)
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    academic_year: int = Field(ge=2500, le=2700, description="ปีหลักสูตร (พ.ศ.)")
+    program_type: ProgramType = ProgramType.regular
+    # ปีรุ่นแรกที่ชุดนี้เริ่มใช้ — 0 = ครอบทุกรุ่นที่ยังไม่มีชุดของตัวเอง
+    effective_from_cohort: int = Field(ge=0, le=2700)
+    total_required_hours: float = Field(gt=0)
+    counting_rule: CountingRule = CountingRule.min_per_requirement
+    is_active: bool = True
+
+
+class TalentWrite(BaseModel):
+    """กลุ่ม Talent/PLO ภายในชุดเกณฑ์"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    plo: Optional[str] = Field(default=None, max_length=64)
+    sort_order: int = 0
+
+
+class RequirementGroupWrite(BaseModel):
+    """กลุ่มรายการเกณฑ์ที่ใช้เป้าชั่วโมงร่วมกัน (เช่น Social รวม >= 16)"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=200)
+    required_hours: float = Field(gt=0)
+    rule_note: Optional[str] = None
+
+
+class RequirementWrite(BaseModel):
+    """รายการเกณฑ์หนึ่งรายการในชุด"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=300)
+    learning_unit_id: int
+    talent_id: Optional[int] = None
+    group_id: Optional[int] = None
+    is_mandatory: bool = False
+    required_hours: float = Field(default=0, ge=0)
+    min_activities: Optional[int] = Field(default=None, ge=1)
+    rule_note: Optional[str] = None
+    organizer: Optional[str] = None
+
+
+class TalentRead(BaseModel):
+    id: int
+    criteria_set_id: int
+    code: str
+    name: str
+    plo: Optional[str] = None
+    sort_order: int
+
+
+class RequirementGroupRead(BaseModel):
+    id: int
+    criteria_set_id: int
+    code: str
+    name: str
+    required_hours: float
+    rule_note: Optional[str] = None
+
+
+class RequirementRead(BaseModel):
+    id: int
+    criteria_set_id: int
+    name: str
+    learning_unit_id: int
+    talent_id: Optional[int] = None
+    group_id: Optional[int] = None
+    is_mandatory: bool
+    required_hours: float
+    min_activities: Optional[int] = None
+    rule_note: Optional[str] = None
+    organizer: Optional[str] = None
+
+
+class CriteriaSetDetailRead(BaseModel):
+    """ชุดเกณฑ์แบบแบน ๆ (ไม่จัดกลุ่ม) — คำตอบของ endpoint ที่เขียนข้อมูล
+
+    ต่างจาก :class:`CriteriaSetRead` ที่จัดกลุ่มมาให้ฟอร์มกิจกรรมใช้ ที่นี่คืนค่าที่
+    "เพิ่งบันทึกลงไปจริง" ตรง ๆ ผู้ดูแลจึงตรวจได้ว่าระบบเก็บอะไรไว้
+    """
+
+    id: int
+    code: str
+    name: str
+    academic_year: int
+    program_type: str
+    effective_from_cohort: int
+    total_required_hours: float
+    counting_rule: str
+    is_active: bool
+    is_system: bool
+    # เตือนเมื่อผลรวมชั่วโมงของรายการเกณฑ์ไม่เท่ากับ total_required_hours
+    # ไม่ใช่ error เพราะระหว่างสร้างชุดใหม่ยอดย่อมยังไม่ครบจนกว่าจะใส่รายการจบ
+    hours_warning: Optional[str] = None
