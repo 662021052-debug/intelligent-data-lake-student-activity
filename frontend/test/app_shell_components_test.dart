@@ -322,26 +322,68 @@ void main() {
       expect(find.text('จัดการผู้ใช้'), findsOneWidget);
     });
 
-    testWidgets('ออกจากระบบได้เสมอ แม้พับ sidebar หรืออยู่บนจอแคบ', (tester) async {
-      // ปุ่มท้าย sidebar อย่างเดียวไม่พอ — sidebar พับเก็บได้และจอแคบมันซ่อนเป็น drawer
+    testWidgets('แถบบนไม่มีปุ่มออกจากระบบแล้ว — ทางออกมีที่เดียวคือท้าย sidebar',
+        (tester) async {
+      // เคยมีสองที่ (แถบบน + ท้าย sidebar) ผู้ใช้จึงไม่แน่ใจว่าสองปุ่มต่างกันไหม
+      _setScreenWidth(tester, 1280);
+      await tester.pumpWidget(shell());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: find.byType(AppTopBar), matching: find.byIcon(Icons.logout)),
+        findsNothing,
+      );
+      expect(find.byTooltip('ออกจากระบบ'), findsNothing);
+      // ของท้าย sidebar ต้องยังอยู่
+      expect(find.widgetWithText(OutlinedButton, 'ออกจากระบบ'), findsOneWidget);
+    });
+
+    testWidgets('พับ sidebar แล้วไม่เหลือปุ่มออกจากระบบบนแถบบน', (tester) async {
       _setScreenWidth(tester, 1280);
       await tester.pumpWidget(shell());
       await tester.tap(find.byIcon(Icons.menu));
       await tester.pumpAndSettle();
 
       expect(find.byType(AppSidebar), findsNothing);
-      expect(find.byTooltip('ออกจากระบบ'), findsOneWidget);
+      expect(find.byIcon(Icons.logout), findsNothing);
+    });
 
-      _setScreenWidth(tester, 360);
-      await tester.pumpWidget(shell());
+    testWidgets('กดปุ่มท้าย sidebar แล้วออกจากระบบจริงและกลับไปหน้า login',
+        (tester) async {
+      // ปัญหาเดิม: ทุกหน้าถูก push ซ้อนบนหน้าแรก กด logout แล้ว home สลับเป็นหน้า
+      // login ก็จริง แต่มันอยู่ใต้กอง route ที่ค้างอยู่ ผู้ใช้จึงเห็นหน้าเดิมค้าง
+      _setScreenWidth(tester, 1280);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: ListenableBuilder(
+            listenable: authService,
+            builder: (context, _) => authService.isLoggedIn
+                ? const AppShell(activeId: 'home', body: Text('หน้าแรก'))
+                : const Text('หน้าเข้าสู่ระบบ'),
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.byType(AppSidebar), findsNothing, reason: 'จอแคบ sidebar ซ่อนอยู่ใน drawer');
-      expect(find.byTooltip('ออกจากระบบ'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('ออกจากระบบ'));
+      // จำลองการเปิดหน้าซ้อนขึ้นมา (เหมือนกดเมนูไปหน้าอื่น)
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => const AppShell(activeId: 'activities', body: Text('เนื้อหาหน้าที่เปิดซ้อน')),
+        ),
+      );
       await tester.pumpAndSettle();
+      expect(find.text('เนื้อหาหน้าที่เปิดซ้อน'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'ออกจากระบบ'));
+      await tester.pumpAndSettle();
+
       expect(authService.isLoggedIn, isFalse);
+      expect(authService.token, isNull);
+      expect(find.text('หน้าเข้าสู่ระบบ'), findsOneWidget);
+      expect(find.text('เนื้อหาหน้าที่เปิดซ้อน'), findsNothing,
+          reason: 'หน้าที่ push ไว้ต้องถูกปิดไปด้วย ไม่ใช่ค้างทับหน้า login');
     });
   });
 

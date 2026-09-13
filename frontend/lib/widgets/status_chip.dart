@@ -49,7 +49,9 @@ class StatusChip extends StatelessWidget {
     final approved = status == 'approved';
     return StatusChip(
       label: approved ? 'อนุมัติแล้ว' : 'รออนุมัติ',
-      palette: approved ? StatusPalette.approved : StatusPalette.neutral,
+      // รออนุมัติเป็นสีเหลือง ไม่ใช่เทา — เทาอ่านเหมือน "ไม่มีอะไรต้องทำ" ทั้งที่มันคือ
+      // คิวงานที่รอผู้ดูแลกดอนุมัติอยู่ (สีเดียวกับสถานะรอตรวจของหลักฐาน)
+      palette: approved ? StatusPalette.approved : StatusPalette.pending,
       icon: approved ? Icons.verified_outlined : Icons.hourglass_empty,
       dense: dense,
     );

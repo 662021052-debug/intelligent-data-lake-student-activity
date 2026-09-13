@@ -359,8 +359,10 @@ class _SidebarUser extends StatelessWidget {
 
 /// แถบบนบาง ๆ เหนือเนื้อหา — พื้นฟ้าตัวขาวตาม mockup
 ///
-/// ปุ่มพับ sidebar · ชื่อหน้า/ชื่อระบบ · กระดิ่งแจ้งเตือน · ชื่อผู้ใช้ + ป้ายบทบาท ·
-/// ปุ่มออกจากระบบ
+/// ปุ่มพับ sidebar · ชื่อหน้า/ชื่อระบบ · กระดิ่งแจ้งเตือน · ชื่อผู้ใช้ + ป้ายบทบาท
+///
+/// **ไม่มีปุ่มออกจากระบบ** — ทางออกมีที่เดียวคือท้าย sidebar เพื่อไม่ให้ผู้ใช้เจอปุ่ม
+/// เดียวกันสองที่แล้วไม่แน่ใจว่าต่างกันไหม (จอแคบต้องเปิด drawer ก่อนถึงจะกดได้)
 class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   const AppTopBar({
     super.key,
@@ -369,7 +371,6 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     this.onBack,
     this.username,
     this.role,
-    this.onLogout,
   });
 
   /// ชื่อหน้าที่กำลังเปิด — หน้าที่มีหัวข้อของตัวเองอยู่แล้วไม่ต้องส่ง จะขึ้น
@@ -384,10 +385,6 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
 
   final String? username;
   final String? role;
-
-  /// ออกจากระบบ — อยู่บนแถบบนด้วย ไม่ใช่แค่ท้าย sidebar เพราะ sidebar พับเก็บได้
-  /// และจอแคบมันซ่อนเป็น drawer ถ้ามีที่เดียวผู้ใช้จะออกจากระบบไม่ได้เลย
-  final VoidCallback? onLogout;
 
   static const double _height = 52;
 
@@ -451,14 +448,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
                   ],
                   const SizedBox(width: AppSpacing.sm),
                   _RolePill(role: role),
-                  if (onLogout != null)
-                    IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.white),
-                      tooltip: 'ออกจากระบบ',
-                      onPressed: onLogout,
-                    )
-                  else
-                    const SizedBox(width: AppSpacing.lg),
+                  const SizedBox(width: AppSpacing.lg),
                 ],
               );
             },

@@ -9,8 +9,9 @@ import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
-import '../widgets/app_data_table.dart';
+import '../utils/format.dart';
 import '../widgets/app_form_dialog.dart';
+import '../widgets/app_sticky_table.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
@@ -24,11 +25,6 @@ import 'activity_participants_screen.dart';
 import 'checkin_qr_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
-
-String _formatDateTime(DateTime dt) {
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
-}
 
 String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
 
@@ -80,21 +76,42 @@ String activityCriteriaLabel(
   return names.length == 1 ? names.first : '${names.first} +${names.length - 1}';
 }
 
-/// คอลัมน์ของตารางกิจกรรม — แยกเป็นฟังก์ชันบนสุดเพื่อให้เทสต์ยืนยันได้ว่ามุมมอง
-/// นิสิตไม่มีคอลัมน์ "สถานะอนุมัติ" (หน้าจอเต็มต้องยิง API จริงจึงเทสต์ตรง ๆ ไม่ได้)
-List<DataColumn> activityTableColumns(bool isStudent) => [
-      const DataColumn(label: Text('ชื่อกิจกรรม')),
-      const DataColumn(label: Text('ประเภท')),
-      const DataColumn(label: Text('หมวดชั่วโมง')),
-      const DataColumn(label: Text('ชั่วโมง')),
-      const DataColumn(label: Text('บังคับ')),
-      const DataColumn(label: Text('รับสูงสุด')),
-      const DataColumn(label: Text('วันเวลา')),
-      const DataColumn(label: Text('สถานที่')),
-      // นิสิตเห็นเฉพาะกิจกรรมที่อนุมัติแล้ว (backend กรองให้) คอลัมน์นี้จึงเป็น
-      // ค่าเดียวกันทุกแถว ไม่ให้ข้อมูลอะไร — ซ่อนเฉพาะมุมมองนิสิต
+/// กิจกรรมนี้มีปุ่ม "อนุมัติ" ให้คนที่กำลังดูอยู่ไหม
+///
+/// อนุมัติได้เฉพาะ admin (backend ตอบ 403 ให้ staff อยู่แล้ว — ฝั่ง UI ไม่โชว์ปุ่มที่
+/// กดแล้วเด้ง error แน่ ๆ) และเฉพาะกิจกรรมที่ยังไม่อนุมัติ · staff ยังเห็น *ชิปสถานะ*
+/// ได้ตามปกติ แค่กดเองไม่ได้
+bool canApproveActivity(String approvalStatus, {required bool isAdmin}) =>
+    isAdmin && approvalStatus != 'approved';
+
+/// คอลัมน์ฝั่งซ้ายของตารางกิจกรรม — ส่วนที่เลื่อนแนวนอนได้เมื่อจอไม่พอ
+List<DataColumn> activityScrollColumns() => const [
+      DataColumn(label: Text('ชื่อกิจกรรม')),
+      DataColumn(label: Text('ประเภท')),
+      DataColumn(label: Text('หมวดชั่วโมง')),
+      DataColumn(label: Text('ชั่วโมง'), numeric: true),
+      DataColumn(label: Text('บังคับ')),
+      DataColumn(label: Text('รับสูงสุด'), numeric: true),
+      DataColumn(label: Text('วันเวลา')),
+      DataColumn(label: Text('สถานที่')),
+    ];
+
+/// คอลัมน์ฝั่งขวาที่ถูกตรึงไว้ให้เห็นเสมอ
+///
+/// "สถานะอนุมัติ" กับปุ่มจัดการคือสองสิ่งที่ผู้ดูแลต้องใช้ทุกแถว ถ้าปล่อยให้เลื่อนหลุด
+/// ออกนอกจอไปกับคอลัมน์อื่น ต้องลากตารางไปขวาทุกครั้งที่อยากกดอะไรสักปุ่ม
+///
+/// นิสิตเห็นเฉพาะกิจกรรมที่อนุมัติแล้ว (backend กรองให้) คอลัมน์สถานะจึงเป็นค่าเดียวกัน
+/// ทุกแถว ไม่ให้ข้อมูลอะไร — ซ่อนเฉพาะมุมมองนิสิต
+List<DataColumn> activityPinnedColumns(bool isStudent) => [
       if (!isStudent) const DataColumn(label: Text('สถานะอนุมัติ')),
-      const DataColumn(label: Text('')),
+      const DataColumn(label: Text('จัดการ')),
+    ];
+
+/// คอลัมน์ทั้งตารางตามลำดับซ้าย→ขวา (ฝั่งเลื่อน + ฝั่งตรึง)
+List<DataColumn> activityTableColumns(bool isStudent) => [
+      ...activityScrollColumns(),
+      ...activityPinnedColumns(isStudent),
     ];
 
 class ActivitiesScreen extends StatefulWidget {
@@ -362,30 +379,48 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
 
   Widget _buildTable(bool canWrite, bool isStudent) {
     final scheme = Theme.of(context).colorScheme;
-    return AppDataTable(
-      columns: activityTableColumns(isStudent),
+    return AppStickyTable(
+      scrollableColumns: activityScrollColumns(),
+      pinnedColumns: activityPinnedColumns(isStudent),
       rows: [
         for (final a in _activities)
-          [
-            DataCell(Text(a.name)),
-            DataCell(Text(a.activityType, style: _mutedCell(context))),
-            DataCell(Text(activityCriteriaLabel(_categories, _criteriaSets, a),
-                style: _mutedCell(context))),
-            DataCell(Text(_trimHours(a.hours))),
-            DataCell(Tooltip(
-              message: a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ',
-              child: Icon(
-                a.isRequired ? Icons.check : Icons.close,
-                size: 18,
-                color: a.isRequired ? StatusPalette.approved.foreground : scheme.outline,
-              ),
-            )),
-            DataCell(Text('${a.maxParticipants}')),
-            DataCell(Text(_formatDateTime(a.startAt), style: _mutedCell(context))),
-            DataCell(Text(a.location, style: _mutedCell(context))),
-            if (!isStudent) DataCell(_approvalChip(a)),
-            DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
-          ],
+          StickyRow(
+            scrollable: [
+              // ชื่อกิจกรรมยาวได้เป็นประโยค — ตัดแล้วบอกเต็มตอนชี้ ไม่ให้ดันคอลัมน์อื่นหลุดจอ
+              DataCell(TruncatedCell(a.name, maxWidth: 220)),
+              DataCell(TruncatedCell(a.activityType,
+                  maxWidth: 110, style: _mutedCell(context))),
+              DataCell(TruncatedCell(
+                activityCriteriaLabel(_categories, _criteriaSets, a),
+                maxWidth: 170,
+                style: _mutedCell(context),
+              )),
+              DataCell(NarrowCell(Text(_trimHours(a.hours)), width: 36)),
+              DataCell(NarrowCell(
+                Tooltip(
+                  message: a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ',
+                  child: Icon(
+                    a.isRequired ? Icons.check_circle : Icons.remove,
+                    size: 18,
+                    color: a.isRequired ? StatusPalette.approved.foreground : scheme.outline,
+                  ),
+                ),
+                width: 32,
+              )),
+              DataCell(NarrowCell(Text('${a.maxParticipants}'), width: 40)),
+              // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ให้คอลัมน์แคบ เวลาเต็มอยู่ใน tooltip
+              DataCell(Tooltip(
+                message: formatThaiDateTime(a.startAt),
+                child: Text(formatThaiDate(a.startAt), style: _mutedCell(context)),
+              )),
+              DataCell(TruncatedCell(a.location,
+                  maxWidth: 140, style: _mutedCell(context))),
+            ],
+            pinned: [
+              if (!isStudent) DataCell(_approvalChip(a)),
+              DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
+            ],
+          ),
       ],
     );
   }
@@ -410,7 +445,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               ],
             ),
             subtitle: Text(
-              '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${_formatDateTime(a.startAt)}\n'
+              '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${formatThaiDateTime(a.startAt)}\n'
               '${a.location} • รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}',
             ),
             isThreeLine: true,
@@ -447,7 +482,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               tooltip: 'เลิกซ่อน',
               onPressed: () => _unhide(a),
             ),
-          if (authService.isAdmin && a.approvalStatus != 'approved')
+          if (canApproveActivity(a.approvalStatus, isAdmin: authService.isAdmin))
             AppIconButton(
               icon: Icons.check_circle,
               tooltip: 'อนุมัติกิจกรรม',
@@ -727,7 +762,7 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
             onTap: _pickDateTime,
             child: Row(
               children: [
-                Expanded(child: Text(_formatDateTime(_startAt))),
+                Expanded(child: Text(formatThaiDateTime(_startAt))),
                 const Icon(Icons.calendar_today, size: 18),
               ],
             ),

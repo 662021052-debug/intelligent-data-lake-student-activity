@@ -93,6 +93,18 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  /// ออกจากระบบ แล้วพากลับไปหน้าแรกของ navigator จริง ๆ
+  ///
+  /// `authService.logout()` เฉย ๆ ไม่พอ: ทุกหน้าถูก `push` ซ้อนขึ้นมาบนหน้าแรก
+  /// ตัว `home` ใน main.dart สลับเป็นหน้า login ให้แล้วก็จริง แต่มันอยู่ *ใต้* กอง
+  /// route ที่ยังค้างอยู่ ผู้ใช้จึงเห็นหน้าเดิมค้างและนึกว่ากดปุ่มไม่ติด
+  void _logout() {
+    final navigator = Navigator.of(context);
+    authService.logout();
+    // ปิด drawer (ถ้าเปิดอยู่) แล้วไล่ route ที่ push ไว้ออกให้หมด
+    navigator.popUntil((route) => route.isFirst);
+  }
+
   Widget _sidebar() => AppSidebar(
         items: navItemsForRole(authService.role),
         activeId: widget.activeId,
@@ -101,7 +113,7 @@ class _AppShellState extends State<AppShell> {
         role: authService.role,
         subtitle: navSubtitleForRole(authService.role),
         groupTitle: navGroupTitleForRole(authService.role),
-        onLogout: authService.logout,
+        onLogout: _logout,
         onBrandTap: widget.activeId == 'home' ? null : () => _open(AppNavItem.home),
       );
 
@@ -121,7 +133,6 @@ class _AppShellState extends State<AppShell> {
             title: widget.title,
             username: authService.username,
             role: authService.role,
-            onLogout: authService.logout,
             onToggleSidebar: wide
                 ? () => setState(() => _sidebarOpen = !_sidebarOpen)
                 : () => _scaffoldKey.currentState?.openDrawer(),
