@@ -1,9 +1,10 @@
+import re
 import uuid
 from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict, field_validator, model_validator
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -159,6 +160,29 @@ class ActivityRequirement(SQLModel, table=True):
 
 
 # ---------- Student ----------
+# อีเมลที่ "พอใช้ส่งได้จริง" — ไม่ได้ตรวจตาม RFC เต็มรูปแบบ เพราะตัวตรวจที่เข้มเกินไป
+# มักปัดอีเมลที่ใช้งานได้จริงทิ้ง ที่นี่แค่กันค่าที่ส่งออกไปแล้วเด้งกลับแน่ ๆ
+# (ไม่มี @ / มีช่องว่าง / โดเมนไม่มีจุด)
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
+def normalize_optional_email(value: Optional[str]) -> Optional[str]:
+    """ตัดช่องว่างหัวท้าย · ช่องว่างเปล่า = ไม่ระบุ (None) · มีค่าแล้วต้องถูกรูปแบบ
+
+    ฟอร์มฝั่งเว็บส่ง "" มาเมื่อผู้ดูแลล้างช่องอีเมลทิ้ง ถ้าเก็บสตริงว่างลงฐานตรง ๆ
+    จะได้ "อีเมลว่างที่ไม่ใช่ NULL" ซึ่งเล็ดลอดด่าน "ข้ามคนที่ไม่มีอีเมล" ของการแจ้งเตือน
+    ไปโผล่เป็นผู้รับที่ส่งไม่ถึง จึงบีบให้เหลือค่าเดียวคือ None
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if not re.match(EMAIL_PATTERN, text):
+        raise ValueError("รูปแบบอีเมลไม่ถูกต้อง")
+    return text
+
+
 class StudentBase(SQLModel):
     student_id: str = Field(unique=True, index=True)
     full_name: str
@@ -166,11 +190,16 @@ class StudentBase(SQLModel):
     major: str
     year_level: int
     status: StudentStatus = StudentStatus.active
+    # อีเมลสำหรับแจ้งเตือน — เว้นว่างได้ (ไม่ใช่ทุกคนที่มี/อยากให้ระบบใช้) ระบบไม่เดา
+    # จากรหัสนิสิตให้เอง เพราะที่อยู่ที่เดาแล้วส่งไม่ถึงทำให้รายงาน "ส่งแล้ว" โกหก
+    email: Optional[str] = Field(default=None, max_length=255)
     # ปีที่เข้าศึกษา (พ.ศ.) — เว้นว่างได้ ระบบถอดจากรหัสนิสิตให้เอง (ดู app/criteria.py)
     cohort: Optional[int] = None
     program_type: ProgramType = ProgramType.regular
     # ชุดเกณฑ์ที่นิสิตคนนี้ต้องทำให้ครบ — ระบบเลือกให้จาก cohort + program_type
     criteria_set_id: Optional[int] = Field(default=None, foreign_key="criteria_set.id", index=True)
+
+    _normalize_email = field_validator("email")(normalize_optional_email)
 
 
 class Student(StudentBase, table=True):
@@ -218,9 +247,12 @@ class StudentUpdate(SQLModel):
     major: Optional[str] = None
     year_level: Optional[int] = None
     status: Optional[StudentStatus] = None
+    email: Optional[str] = None
     cohort: Optional[int] = None
     program_type: Optional[ProgramType] = None
     criteria_set_id: Optional[int] = None
+
+    _normalize_email = field_validator("email")(normalize_optional_email)
 
 
 class StudentRead(StudentBase):

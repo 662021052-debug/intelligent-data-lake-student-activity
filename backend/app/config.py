@@ -68,9 +68,6 @@ class Settings(BaseSettings):
     )
     smtp_from: str = "no-reply@tsu.ac.th"
     smtp_use_tls: bool = True
-    # อีเมลนิสิตอนุมานจากรหัสนิสิตตามรูปแบบของมหาวิทยาลัย (เช่น 662021052@tsu.ac.th)
-    # เพราะตาราง student ยังไม่มีคอลัมน์อีเมล
-    student_email_domain: str = "tsu.ac.th"
     # ต่ำกว่ากี่ % ของชั่วโมงที่ต้องได้ ถือว่าเป็นกลุ่มเสี่ยง (ตรงกับดีฟอลต์ของ
     # /dashboard/at-risk เพื่อให้ "รายชื่อบนแดชบอร์ด" กับ "คนที่ได้รับอีเมล" ตรงกัน)
     notify_at_risk_threshold: float = 50
@@ -78,6 +75,9 @@ class Settings(BaseSettings):
     # ตอน deploy จริง (ดีฟอลต์เปิดจะทำให้ทุกเครื่อง dev มี thread ตั้งเวลาโดยไม่ตั้งใจ)
     notify_scheduler_enabled: bool = False
     notify_at_risk_hour: int = 8  # เวลาไทยที่ให้ job รายวันทำงาน
+    # เวลาไทยที่ส่งอีเมลเตือน "พรุ่งนี้มีกิจกรรม" — ค่าเริ่มต้นเป็นหัวค่ำ เพราะอีเมลที่ถึง
+    # ตอนเย็นก่อนวันงานมีโอกาสถูกอ่านก่อนเข้านอนมากกว่าฉบับที่ส่งตั้งแต่เช้าวันก่อนหน้า
+    notify_activity_reminder_hour: int = 18
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

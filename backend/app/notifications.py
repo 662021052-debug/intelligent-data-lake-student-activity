@@ -7,21 +7,24 @@
    หน้าแดชบอร์ดเสมอ ไม่ใช่คนละชุดเพราะคำนวณคนละที่
 2. **ประชาสัมพันธ์กิจกรรม** — กิจกรรมที่อนุมัติแล้ว ยังไม่ถึงวันจัด และยังไม่เต็ม
    ส่งถึงนิสิตที่ยังไม่ได้สมัครกิจกรรมนั้น
+3. **เตือนกิจกรรมพรุ่งนี้** — กิจกรรมที่จะจัด "วันพรุ่งนี้" ตามเวลาไทย ส่งถึงนิสิตที่
+   สมัครไว้แล้ว (ตรงข้ามกับข้อ 2 ซึ่งส่งถึงคนที่ *ยัง* ไม่ได้สมัคร)
 
 ฟังก์ชันเลือกผู้รับกับฟังก์ชันเขียนเนื้อความแยกจากกัน และตัวเขียนเนื้อความเป็น
 pure function ทั้งหมด — เทสต์ข้อความภาษาไทยได้โดยไม่ต้องมีฐานข้อมูล
 
-**ที่อยู่อีเมลของนิสิตอนุมานจากรหัสนิสิต** (`<รหัส>@tsu.ac.th`) เพราะตาราง
-``student`` ยังไม่มีคอลัมน์อีเมล — ถ้าจะเก็บอีเมลรายคนจริง ๆ ต้องเพิ่มคอลัมน์
-พร้อม migration แล้วเปลี่ยนเฉพาะ :func:`student_email` จุดเดียว
+**ที่อยู่อีเมลมาจากคอลัมน์ ``student.email`` เท่านั้น** ไม่เดาจากรหัสนิสิตอีกต่อไป —
+ที่อยู่ที่เดาเอาแล้วส่งไม่ถึงทำให้รายงาน "ส่งสำเร็จ" โกหกผู้ดูแล นิสิตที่ยังไม่ระบุอีเมล
+(``email`` เป็น NULL) จะถูก **ข้าม** และนับไว้ใน :attr:`NotificationReport.skipped`
+พร้อมรายชื่อรหัสนิสิต เพื่อให้ผู้ดูแลรู้ว่าต้องตามกรอกอีเมลให้ใครบ้าง
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, time, timedelta
+from typing import Iterable, Optional, TypeVar
 
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -67,6 +70,8 @@ class AtRiskStudent:
     earned_hours: float
     required_hours: float
     gaps: tuple[CategoryGap, ...]
+    # None = ยังไม่ระบุอีเมล -> ส่งไม่ได้ ต้องถูกข้ามก่อนเขียนเนื้อความ
+    email: Optional[str] = None
 
     @property
     def missing_hours(self) -> float:
@@ -84,19 +89,22 @@ class NotificationReport:
     subject: str
     sent: int = 0
     failed: int = 0
+    # คนที่ยังไม่ระบุอีเมล — ไม่ได้ล้มเหลว แต่ก็ไม่ได้รับ จึงต้องแยกจาก failed
+    # ไม่งั้นผู้ดูแลอ่านรายงานแล้วเข้าใจว่าครอบคลุมนิสิตครบทุกคน
+    skipped: int = 0
     recipients: list[str] = field(default_factory=list)
     failed_recipients: list[str] = field(default_factory=list)
+    # เก็บเป็น "รหัสนิสิต" ไม่ใช่ที่อยู่อีเมล เพราะคนกลุ่มนี้ไม่มีที่อยู่ให้เก็บ
+    skipped_students: list[str] = field(default_factory=list)
+    # True = แค่ดูว่าจะส่งหาใคร ยังไม่ได้ส่งจริง ``recipients`` คือ "คนที่จะได้รับ"
+    # และ ``sent`` เป็น 0 เสมอ — มีธงนี้ไว้ไม่ให้ผู้ดูแลอ่าน sent=0 แล้วเข้าใจว่าส่งล้มเหลว
+    dry_run: bool = False
 
 
 # --------------------------- ตัวช่วยเล็ก ๆ ---------------------------
 def format_hours(value: float) -> str:
     """4.0 → "4" แต่ 4.5 ยังเป็น "4.5" — เลขกลม ๆ ในอีเมลอ่านง่ายกว่า"""
     return str(int(value)) if float(value).is_integer() else str(value)
-
-
-def student_email(student_code: str) -> str:
-    """ที่อยู่อีเมลของนิสิตตามรูปแบบของมหาวิทยาลัย (เช่น 662021052@tsu.ac.th)"""
-    return f"{student_code.strip()}@{settings.student_email_domain}"
 
 
 def app_url() -> str:
@@ -116,7 +124,14 @@ _SIGNATURE = (
 
 # --------------------------- เนื้อความ (pure) ---------------------------
 def build_at_risk_message(student: AtRiskStudent) -> EmailMessage:
-    """อีเมลเตือนนิสิตที่ชั่วโมงยังไม่ครบเกณฑ์"""
+    """อีเมลเตือนนิสิตที่ชั่วโมงยังไม่ครบเกณฑ์
+
+    เรียกได้เฉพาะนิสิตที่มีอีเมลแล้ว — ผู้เรียกต้องกรองคนที่ยังไม่ระบุออกไปก่อน
+    (ดู :func:`partition_by_email`) ที่นี่จึงยืนยันไว้แทนที่จะปล่อยให้ ``to=None``
+    ไหลลงไปถึงตัวส่งแล้วค่อยระเบิดตอนนั้น
+    """
+    if not student.email:
+        raise ValueError(f"นิสิต {student.student_code} ยังไม่ระบุอีเมล จึงเขียนอีเมลถึงไม่ได้")
     missing = format_hours(student.missing_hours)
     lines = [
         f"เรียน {student.full_name} (รหัสนิสิต {student.student_code})",
@@ -146,7 +161,7 @@ def build_at_risk_message(student: AtRiskStudent) -> EmailMessage:
     ]
 
     return EmailMessage(
-        to=student_email(student.student_code),
+        to=student.email,
         subject=f"[แจ้งเตือน] ชั่วโมงกิจกรรมของคุณยังขาดอีก {missing} ชั่วโมง",
         body="\n".join(lines),
     )
@@ -155,12 +170,15 @@ def build_at_risk_message(student: AtRiskStudent) -> EmailMessage:
 def build_activity_message(
     *,
     student_name: str,
-    student_code: str,
+    student_email: str,
     activity: Activity,
     category_name: Optional[str],
     available_seats: int,
 ) -> EmailMessage:
-    """อีเมลประชาสัมพันธ์กิจกรรมที่กำลังเปิดรับสมัคร"""
+    """อีเมลประชาสัมพันธ์กิจกรรมที่กำลังเปิดรับสมัคร
+
+    ``student_email`` ต้องมีค่าแล้ว — คนที่ยังไม่ระบุถูกกรองออกตั้งแต่ชั้นเลือกผู้รับ
+    """
     lines = [
         f"เรียน {student_name}",
         "",
@@ -184,10 +202,59 @@ def build_activity_message(
     ]
 
     return EmailMessage(
-        to=student_email(student_code),
+        to=student_email,
         subject=f"[ประชาสัมพันธ์] ขอเชิญเข้าร่วมกิจกรรม {activity.name}",
         body="\n".join(lines),
     )
+
+
+def build_activity_reminder_message(
+    *,
+    student_name: str,
+    student_email: str,
+    activity: Activity,
+) -> EmailMessage:
+    """อีเมลเตือนล่วงหน้า 1 วันสำหรับกิจกรรมที่นิสิตสมัครไว้แล้ว
+
+    คนอ่านคือคนที่ "สมัครไว้เมื่อหลายสัปดาห์ก่อนแล้วลืม" ข้อมูลที่ต้องใช้ในเช้าวันงาน
+    จึงอยู่ครบในฉบับเดียว: เวลา สถานที่ และชั่วโมงที่จะได้ โดยไม่ต้องเปิดเว็บไปหาเอง
+    """
+    lines = [
+        f"เรียน {student_name}",
+        "",
+        f"พรุ่งนี้เป็นวันจัดกิจกรรม “{activity.name}” ที่คุณสมัครเข้าร่วมไว้",
+        "",
+        f"  วันเวลา       : {format_thai_datetime(activity.start_at)}",
+        f"  สถานที่       : {activity.location}",
+        f"  ชั่วโมงที่จะได้รับ : {format_hours(activity.hours)} ชั่วโมง",
+        "",
+        "กรุณาไปถึงก่อนเวลาเริ่มและเช็กอินหน้างานเพื่อให้ระบบบันทึกชั่วโมงให้ครบ",
+        "",
+        "ดูรายละเอียดกิจกรรมได้ที่",
+        f"  {app_url()}",
+        _SIGNATURE,
+    ]
+
+    return EmailMessage(
+        to=student_email,
+        subject=f"[เตือนล่วงหน้า] พรุ่งนี้มีกิจกรรม {activity.name}",
+        body="\n".join(lines),
+    )
+
+
+def tomorrow_window(now: Optional[datetime] = None) -> tuple[datetime, datetime]:
+    """ช่วงเวลา ``[เริ่ม, สิ้นสุด)`` ของ "วันพรุ่งนี้" ตามเวลาไทย
+
+    ``activity.start_at`` เก็บเป็นเวลาไทยแบบไม่มีโซนอยู่แล้ว (ดู ``app/timeutil.py``)
+    สิ่งที่ต้องอิงเวลาไทยคือ "วันนี้วันอะไร" — ถ้าคำนวณจากเวลา UTC ตอนหัวค่ำของไทย
+    วันจะเลื่อนไปหนึ่งวัน แล้วอีเมลเตือนจะออกผิดวันทั้งรอบ
+
+    คืนเป็นช่วงครึ่งเปิดเพื่อให้กรองที่ฐานข้อมูลได้ตรง ๆ (ใช้ index ของ start_at)
+    แทนการดึงกิจกรรมทั้งหมดมาเทียบวันที่ในไพทอน
+    """
+    today = (now or now_th_naive()).date()
+    start = datetime.combine(today + timedelta(days=1), time.min)
+    return start, start + timedelta(days=1)
 
 
 def announcement_blocker(activity: Activity, participant_count: int, now: Optional[datetime] = None) -> Optional[str]:
@@ -232,7 +299,7 @@ def collect_at_risk_students(
     rows = session.execute(
         text(
             "SELECT g.student_key, g.student_code, g.full_name, g.faculty, g.year_level, "
-            "g.category_key, g.category_name, g.required_hours, g.earned_hours "
+            "d.email, g.category_key, g.category_name, g.required_hours, g.earned_hours "
             "FROM gold_student_hours g "
             "JOIN gold_dim_student d ON d.student_key = g.student_key "
             f"WHERE {' AND '.join(clauses)} "
@@ -241,10 +308,10 @@ def collect_at_risk_students(
         params,
     ).all()
 
-    people = {key: (code, name, fac, year) for key, code, name, fac, year, *_ in rows}
+    people = {key: (code, name, fac, year, email) for key, code, name, fac, year, email, *_ in rows}
     progress = progress_by_student(
         (key, item_key, item_name, required, earned)
-        for key, _c, _n, _f, _y, item_key, item_name, required, earned in rows
+        for key, _c, _n, _f, _y, _e, item_key, item_name, required, earned in rows
     )
 
     at_risk = []
@@ -252,13 +319,14 @@ def collect_at_risk_students(
         # ไม่มีเกณฑ์ (ยังไม่ได้ตั้งหมวดชั่วโมง/ชุดเกณฑ์) = ยังตัดสินไม่ได้ว่าใครเสี่ยง ข้ามไป
         if p.required_hours <= 0:
             continue
-        code, name, fac, year = people[key]
+        code, name, fac, year, email = people[key]
         student = AtRiskStudent(
             student_key=key,
             student_code=code,
             full_name=name,
             faculty=fac,
             year_level=year,
+            email=email,
             # ชั่วโมงที่นับเข้าเกณฑ์ (ส่วนเกินของรายการหนึ่งไม่ชดเชยอีกรายการ) — กติกาเดียวกับแดชบอร์ด
             earned_hours=p.counted_hours,
             required_hours=p.required_hours,
@@ -295,14 +363,79 @@ def collect_activity_recipients(
     return list(session.exec(query.order_by(Student.student_id)).all())
 
 
+def collect_tomorrow_activities(
+    session: Session, *, now: Optional[datetime] = None
+) -> list[tuple[Activity, list[Student]]]:
+    """กิจกรรมของพรุ่งนี้ พร้อมนิสิตที่สมัครไว้ของแต่ละรายการ
+
+    เงื่อนไขของกิจกรรมตรงกับ "กิจกรรมที่นิสิตเห็นว่ายังจัดอยู่จริง":
+    อนุมัติแล้ว และไม่ถูกซ่อน (ซ่อน = ถูกยกเลิกในสายตานิสิต ดู routers/participations.py)
+
+    ผู้รับคือคนที่ยังมีแถว ``participation`` อยู่ — การยกเลิกสมัครลบแถวทิ้ง ไม่ได้ทำเป็น
+    สถานะ จึงไม่ต้องกรองสถานะเพิ่ม แถวที่ยังอยู่ = ยังไม่ยกเลิก
+    """
+    start, end = tomorrow_window(now)
+    activities = session.exec(
+        select(Activity)
+        .where(
+            Activity.approval_status == ApprovalStatus.approved,
+            Activity.is_hidden.is_(False),
+            Activity.start_at >= start,
+            Activity.start_at < end,
+        )
+        .order_by(Activity.start_at, Activity.id)
+    ).all()
+
+    result = []
+    for activity in activities:
+        students = session.exec(
+            select(Student)
+            .join(Participation, Participation.student_id == Student.id)
+            .where(Participation.activity_id == activity.id)
+            .order_by(Student.student_id)
+        ).all()
+        if students:
+            result.append((activity, list(students)))
+    return result
+
+
 # --------------------------- ส่งจริง ---------------------------
-def _send_all(sender: EmailSender, messages: list[EmailMessage], subject: str) -> NotificationReport:
+T = TypeVar("T")
+
+
+def partition_by_email(
+    people: Iterable[T], *, email_of, code_of
+) -> tuple[list[T], list[str]]:
+    """แยกผู้รับออกเป็น (คนที่มีอีเมล, รหัสนิสิตของคนที่ยังไม่ระบุ)
+
+    เป็น pure function เพื่อให้กติกา "ใครถูกข้าม" มีที่เดียว ทั้งอีเมลกลุ่มเสี่ยงและ
+    อีเมลประชาสัมพันธ์ใช้ตัวเดียวกัน — ไม่ใช่ต่างคนต่างเช็กแล้วหลุดไปข้างหนึ่ง
+    """
+    sendable: list[T] = []
+    skipped: list[str] = []
+    for person in people:
+        if (email_of(person) or "").strip():
+            sendable.append(person)
+        else:
+            skipped.append(code_of(person))
+    return sendable, skipped
+
+
+def _send_all(
+    sender: EmailSender,
+    messages: list[EmailMessage],
+    subject: str,
+    skipped_students: Optional[list[str]] = None,
+) -> NotificationReport:
     """ส่งทีละฉบับ ฉบับที่ล้มไม่ทำให้ที่เหลือหยุดส่ง
 
     การแจ้งเตือนเป็นงาน "ยิงแล้วลืม" — ถ้าปล่อย exception ออกไป ผู้ดูแลจะเห็นแค่
     500 โดยไม่รู้ว่าส่งไปแล้วกี่คน จึงเก็บผลรายฉบับแล้วสรุปกลับไปแทน
     """
     report = NotificationReport(subject=subject)
+    if skipped_students:
+        report.skipped = len(skipped_students)
+        report.skipped_students = list(skipped_students)
     for message in messages:
         try:
             sender.send(message)
@@ -327,8 +460,64 @@ def send_at_risk_notifications(
     students = collect_at_risk_students(
         session, threshold=threshold, faculty=faculty, year_level=year_level
     )
-    messages = [build_at_risk_message(s) for s in students]
-    return _send_all(sender, messages, subject="แจ้งเตือนนิสิตกลุ่มเสี่ยง")
+    sendable, skipped = partition_by_email(
+        students, email_of=lambda s: s.email, code_of=lambda s: s.student_code
+    )
+    if skipped:
+        logger.info("ข้ามนิสิตกลุ่มเสี่ยงที่ยังไม่ระบุอีเมล %d คน", len(skipped))
+    messages = [build_at_risk_message(s) for s in sendable]
+    return _send_all(
+        sender, messages, subject="แจ้งเตือนนิสิตกลุ่มเสี่ยง", skipped_students=skipped
+    )
+
+
+def send_activity_reminders(
+    session: Session,
+    sender: EmailSender,
+    *,
+    now: Optional[datetime] = None,
+    dry_run: bool = False,
+) -> NotificationReport:
+    """เตือนนิสิตที่สมัครกิจกรรมของพรุ่งนี้ไว้ — หนึ่งฉบับต่อ นิสิต × กิจกรรม
+
+    คนที่สมัครสองกิจกรรมในวันเดียวกันจะได้สองฉบับโดยตั้งใจ: รวบเป็นฉบับเดียวแล้ว
+    เวลา/สถานที่ของแต่ละงานจะปนกันในอีเมลเดียว ซึ่งอ่านพลาดง่ายกว่าตอนรีบ ๆ ตอนเช้า
+
+    ``dry_run=True`` = ไม่ส่งอะไรเลย แต่คืนรายชื่อผู้รับที่จะได้รับ ให้ผู้ดูแลตรวจก่อน
+    กดส่งจริง (อีเมลถึงนิสิตเป็นสิ่งที่เรียกคืนไม่ได้)
+    """
+    subject = "เตือนกิจกรรมที่จะจัดพรุ่งนี้"
+    pairs = collect_tomorrow_activities(session, now=now)
+
+    messages: list[EmailMessage] = []
+    skipped: list[str] = []
+    for activity, students in pairs:
+        sendable, without_email = partition_by_email(
+            students, email_of=lambda s: s.email, code_of=lambda s: s.student_id
+        )
+        skipped.extend(without_email)
+        messages.extend(
+            build_activity_reminder_message(
+                student_name=s.full_name,
+                student_email=s.email,
+                activity=activity,
+            )
+            for s in sendable
+        )
+
+    if skipped:
+        logger.info("ข้ามผู้รับอีเมลเตือนกิจกรรมที่ยังไม่ระบุอีเมล %d ราย", len(skipped))
+
+    if dry_run:
+        # ไม่แตะ sender เลย เพื่อให้ dry-run เป็นการอ่านอย่างเดียวจริง ๆ
+        return NotificationReport(
+            subject=subject,
+            skipped=len(skipped),
+            recipients=[m.to for m in messages],
+            skipped_students=skipped,
+            dry_run=True,
+        )
+    return _send_all(sender, messages, subject=subject, skipped_students=skipped)
 
 
 def send_activity_announcement(
@@ -367,14 +556,24 @@ def send_activity_announcement(
     recipients = collect_activity_recipients(
         session, activity.id, faculty=faculty, year_level=year_level
     )
+    sendable, skipped = partition_by_email(
+        recipients, email_of=lambda s: s.email, code_of=lambda s: s.student_id
+    )
+    if skipped:
+        logger.info("ข้ามผู้รับประชาสัมพันธ์ที่ยังไม่ระบุอีเมล %d คน", len(skipped))
     messages = [
         build_activity_message(
             student_name=s.full_name,
-            student_code=s.student_id,
+            student_email=s.email,
             activity=activity,
             category_name=category_name,
             available_seats=available,
         )
-        for s in recipients
+        for s in sendable
     ]
-    return _send_all(sender, messages, subject=f"ประชาสัมพันธ์กิจกรรม {activity.name}")
+    return _send_all(
+        sender,
+        messages,
+        subject=f"ประชาสัมพันธ์กิจกรรม {activity.name}",
+        skipped_students=skipped,
+    )

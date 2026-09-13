@@ -175,6 +175,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
         DataColumn(label: Text('ชื่อ-สกุล')),
         DataColumn(label: Text('คณะ')),
         DataColumn(label: Text('สาขา')),
+        DataColumn(label: Text('อีเมล')),
         DataColumn(label: Text('ชั้นปี'), numeric: true),
         DataColumn(label: Text('สถานะ')),
         DataColumn(label: Text('')),
@@ -186,6 +187,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
             DataCell(Text(s.fullName)),
             DataCell(Text(s.faculty)),
             DataCell(Text(s.major)),
+            DataCell(_emailCell(s.email)),
             DataCell(Text('${s.yearLevel}')),
             DataCell(_statusChip(s.status)),
             DataCell(canWrite ? _actionButtons(s) : const SizedBox.shrink()),
@@ -203,7 +205,11 @@ class _StudentsScreenState extends State<StudentsScreen> {
           margin: const EdgeInsets.only(bottom: AppSpacing.md),
           child: ListTile(
             title: Text(s.fullName),
-            subtitle: Text('${s.studentId} • ${s.faculty} / ${s.major} • ปี ${s.yearLevel}'),
+            subtitle: Text(
+              '${s.studentId} • ${s.faculty} / ${s.major} • ปี ${s.yearLevel}\n'
+              '${studentEmailLabel(s.email)}',
+            ),
+            isThreeLine: true,
             trailing: canWrite
                 ? _actionButtons(s)
                 : _statusChip(s.status),
@@ -230,6 +236,22 @@ class _StudentsScreenState extends State<StudentsScreen> {
             ),
         ],
       );
+
+  /// อีเมลในตาราง — คนที่ยังไม่ระบุต้องเห็นชัดว่า "ยังไม่ระบุ" ไม่ใช่ช่องว่างที่ดู
+  /// เหมือนข้อมูลหาย เพราะช่องว่างนี้แปลว่านิสิตคนนั้นจะไม่ได้รับอีเมลแจ้งเตือน
+  Widget _emailCell(String? email) {
+    final theme = Theme.of(context);
+    final missing = (email == null || email.trim().isEmpty);
+    return Text(
+      studentEmailLabel(email),
+      style: missing
+          ? theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
+            )
+          : null,
+    );
+  }
 
   Widget _statusChip(String status) => StatusChip.studentStatus(status, dense: true);
 
@@ -277,6 +299,42 @@ String? studentIdValidator(String? value) {
   return null;
 }
 
+/// โดเมนอีเมลของมหาวิทยาลัย — ใช้กับปุ่มเติมอีเมลให้อัตโนมัติในฟอร์ม
+const String kStudentEmailDomain = 'tsu.ac.th';
+
+/// ที่อยู่อีเมลมหาวิทยาลัยที่เดาจากรหัสนิสิต — null เมื่อรหัสยังไม่ถูกรูปแบบ
+///
+/// เป็นแค่ "ตัวช่วยกรอก" ไม่ใช่ค่าที่ระบบเติมให้เอง — ผู้ดูแลต้องกดปุ่มยืนยันเองว่า
+/// นิสิตคนนี้ใช้ที่อยู่ตามรูปแบบนี้จริง ที่อยู่ที่เดาแล้วส่งไม่ถึงทำให้รายงานผลส่งโกหก
+String? suggestedStudentEmail(String studentId) {
+  final code = studentId.trim();
+  if (studentIdValidator(code) != null) return null;
+  return '$code@$kStudentEmailDomain';
+}
+
+/// อีเมลนิสิต — ไม่บังคับ แต่ถ้ากรอกแล้วต้องพอส่งได้จริง
+///
+/// ตรวจหลวม ๆ ให้ตรงกับฝั่ง backend (``EMAIL_PATTERN`` ใน app/models.py): ตัวตรวจ
+/// ที่เข้มตาม RFC มักปัดอีเมลที่ใช้งานได้จริงทิ้ง ที่นี่แค่กันค่าที่ส่งแล้วเด้งกลับแน่ ๆ
+String? studentEmailValidator(String? value) {
+  final text = (value ?? '').trim();
+  if (text.isEmpty) return null; // เว้นว่างได้
+  if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
+    return 'รูปแบบอีเมลไม่ถูกต้อง';
+  }
+  return null;
+}
+
+/// ข้อความแทนอีเมลที่ยังไม่ได้กรอก — ใช้ทั้งในตารางและการ์ดจอแคบ
+const String kNoEmailLabel = 'ยังไม่ระบุ';
+
+/// ข้อความอีเมลที่จะแสดงในรายการนิสิต
+///
+/// ช่องว่างเปล่าอ่านเหมือน "ข้อมูลหาย" ทั้งที่มันมีความหมาย — นิสิตคนนั้นจะไม่ได้รับ
+/// อีเมลแจ้งเตือน จึงเขียนออกมาตรง ๆ ว่ายังไม่ระบุ
+String studentEmailLabel(String? email) =>
+    (email == null || email.trim().isEmpty) ? kNoEmailLabel : email.trim();
+
 class StudentFormDialog extends StatefulWidget {
   final Student? existing;
   const StudentFormDialog({super.key, this.existing});
@@ -292,6 +350,7 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
   late final TextEditingController _facultyController;
   late final TextEditingController _majorController;
   late final TextEditingController _yearLevelController;
+  late final TextEditingController _emailController;
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
   String _status = 'active';
@@ -311,9 +370,22 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
     _facultyController = TextEditingController(text: e?.faculty ?? '');
     _majorController = TextEditingController(text: e?.major ?? '');
     _yearLevelController = TextEditingController(text: e != null ? '${e.yearLevel}' : '1');
+    _emailController = TextEditingController(text: e?.email ?? '');
+    // ปุ่มเติมอีเมลอัตโนมัติต้องเปิด/ปิดและเปลี่ยนข้อความตามรหัสนิสิตที่กำลังพิมพ์
+    _studentIdController.addListener(_onStudentIdChanged);
     _usernameController = TextEditingController();
     _passwordController = TextEditingController();
     _status = e?.status ?? 'active';
+  }
+
+  void _onStudentIdChanged() => setState(() {});
+
+  /// เติมอีเมลตามรูปแบบมหาวิทยาลัยลงในช่อง (ผู้ดูแลแก้ต่อได้ ไม่ได้ล็อกไว้)
+  void _fillSuggestedEmail() {
+    final suggestion = suggestedStudentEmail(_studentIdController.text);
+    if (suggestion == null) return;
+    _emailController.text = suggestion;
+    setState(() {});
   }
 
   @override
@@ -323,6 +395,8 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
     _facultyController.dispose();
     _majorController.dispose();
     _yearLevelController.dispose();
+    _emailController.dispose();
+    _studentIdController.removeListener(_onStudentIdChanged);
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -348,6 +422,8 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
       'major': _majorController.text.trim(),
       'year_level': int.parse(_yearLevelController.text.trim()),
       'status': _status,
+      // ส่ง null เมื่อเว้นว่าง (ไม่ใช่ "") เพื่อให้ล้างอีเมลทิ้งได้จริงตอนแก้ไข
+      'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
       // ส่งเฉพาะตอนสร้างใหม่ — backend ไม่รับฟิลด์นี้ตอนแก้ไข
       if (_isNew) 'create_user': _createUser,
       if (wantsAccount && username.isNotEmpty) 'username': username,
@@ -401,6 +477,7 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final suggestion = suggestedStudentEmail(_studentIdController.text);
     return AppFormDialog(
       title: widget.existing == null ? 'เพิ่มนิสิต' : 'แก้ไขนิสิต',
       formKey: _formKey,
@@ -439,6 +516,25 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
           decoration: _decoration('ชั้นปี', required: true),
           keyboardType: TextInputType.number,
           validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
+        ),
+        TextFormField(
+          controller: _emailController,
+          decoration: _decoration(
+            'อีเมล',
+            hint: 'เช่น 6820510466@$kStudentEmailDomain',
+            helper: 'เว้นว่างได้ · ถ้าไม่ระบุ ระบบจะข้ามคนนี้ตอนส่งอีเมลแจ้งเตือน',
+          ).copyWith(
+            // ปุ่มลัดอยู่ในช่องเลย ไม่ต้องเพิ่มแถวปุ่มให้ฟอร์มยาวขึ้นอีกบรรทัด
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.alternate_email),
+              tooltip: suggestion == null
+                  ? 'กรอกรหัสนิสิตให้ถูกต้องก่อน จึงจะเติมอีเมลให้อัตโนมัติได้'
+                  : 'เติม $suggestion',
+              onPressed: suggestion == null ? null : _fillSuggestedEmail,
+            ),
+          ),
+          keyboardType: TextInputType.emailAddress,
+          validator: studentEmailValidator,
         ),
         DropdownButtonFormField<String>(
           initialValue: _status,

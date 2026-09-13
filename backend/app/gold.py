@@ -281,7 +281,10 @@ def _view_definitions(dialect: str) -> list[tuple[str, str]]:
             s.faculty     AS faculty,
             s.major       AS major,
             s.year_level  AS year_level,
-            s.status      AS status
+            s.status      AS status,
+            -- อีเมลรายคน (NULL = ยังไม่ระบุ) — การแจ้งเตือนกลุ่มเสี่ยงอ่านจากที่นี่
+            -- พร้อมกับชั่วโมง จะได้ไม่ต้องวิ่งถามตาราง student อีกรอบ
+            s.email       AS email
         FROM student s
     """
 

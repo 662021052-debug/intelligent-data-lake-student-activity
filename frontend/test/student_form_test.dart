@@ -18,6 +18,7 @@ final _existing = Student(
   major: 'วิศวกรรมคอมพิวเตอร์',
   yearLevel: 4,
   status: 'active',
+  email: 'thanakorn@tsu.ac.th',
 );
 
 void main() {
@@ -185,4 +186,95 @@ void main() {
       expect(find.text('รหัสนิสิตต้องเป็นตัวเลข 9-10 หลัก'), findsOneWidget);
     });
   });
+
+  group('อีเมลนิสิต (ไม่บังคับ)', () {
+    test('เว้นว่างได้ — ไม่ใช่ทุกคนที่มีอีเมล', () {
+      expect(studentEmailValidator(''), isNull);
+      expect(studentEmailValidator('   '), isNull);
+      expect(studentEmailValidator(null), isNull);
+    });
+
+    test('กรอกแล้วต้องพอส่งได้จริง', () {
+      expect(studentEmailValidator('6820510466@tsu.ac.th'), isNull);
+      expect(studentEmailValidator('  somchai.j@tsu.ac.th  '), isNull, reason: 'ตัดช่องว่างก่อนตรวจ');
+      expect(studentEmailValidator('ไม่ใช่อีเมล'), 'รูปแบบอีเมลไม่ถูกต้อง');
+      expect(studentEmailValidator('somchai@'), isNotNull, reason: 'ไม่มีโดเมน');
+      expect(studentEmailValidator('@tsu.ac.th'), isNotNull, reason: 'ไม่มีชื่อผู้ใช้');
+      expect(studentEmailValidator('somchai@tsu'), isNotNull, reason: 'โดเมนไม่มีจุด');
+      expect(studentEmailValidator('som chai@tsu.ac.th'), isNotNull, reason: 'มีช่องว่าง');
+    });
+
+    test('ที่อยู่ที่เดาจากรหัสนิสิต ใช้ได้เฉพาะเมื่อรหัสถูกรูปแบบ', () {
+      expect(suggestedStudentEmail('6820510466'), '6820510466@tsu.ac.th');
+      expect(suggestedStudentEmail('  652021002  '), '652021002@tsu.ac.th');
+      expect(suggestedStudentEmail(''), isNull);
+      expect(suggestedStudentEmail('123'), isNull, reason: 'รหัสยังไม่ครบหลัก');
+    });
+
+    test('อีเมลที่ยังไม่ระบุต้องขึ้นว่า "ยังไม่ระบุ" ไม่ใช่ช่องว่าง', () {
+      expect(studentEmailLabel(null), 'ยังไม่ระบุ');
+      expect(studentEmailLabel(''), 'ยังไม่ระบุ');
+      expect(studentEmailLabel('   '), 'ยังไม่ระบุ');
+      expect(studentEmailLabel(' somchai@tsu.ac.th '), 'somchai@tsu.ac.th');
+    });
+
+    testWidgets('ฟอร์มมีช่องอีเมลที่บอกชัดว่าไม่บังคับ', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('อีเมล (ไม่บังคับ)'), findsOneWidget);
+      expect(
+        find.text('เว้นว่างได้ · ถ้าไม่ระบุ ระบบจะข้ามคนนี้ตอนส่งอีเมลแจ้งเตือน'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('โหมดแก้ไขเติมอีเมลเดิมมาให้', (tester) async {
+      await tester.pumpWidget(_wrap(StudentFormDialog(existing: _existing)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('thanakorn@tsu.ac.th'), findsOneWidget);
+    });
+
+    testWidgets('กดปุ่มแล้วเติม {รหัสนิสิต}@tsu.ac.th ให้เอง', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, '6820510466');
+      await tester.pumpAndSettle();
+
+      final button = find.widgetWithIcon(IconButton, Icons.alternate_email);
+      expect(tester.widget<IconButton>(button).onPressed, isNotNull);
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+
+      expect(find.text('6820510466@tsu.ac.th'), findsOneWidget);
+    });
+
+    testWidgets('ยังไม่กรอกรหัสนิสิต ปุ่มเติมอีเมลต้องกดไม่ได้', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      final button = find.widgetWithIcon(IconButton, Icons.alternate_email);
+      expect(tester.widget<IconButton>(button).onPressed, isNull);
+    });
+
+    testWidgets('กรอกอีเมลผิดรูปแบบแล้วกดบันทึก ต้องขึ้น error ไม่ยิง API',
+        (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, '6820510466');
+      await tester.enterText(find.byType(TextFormField).at(1), 'ทดสอบ ระบบ');
+      await tester.enterText(find.byType(TextFormField).at(2), 'วิศวกรรมศาสตร์');
+      await tester.enterText(find.byType(TextFormField).at(3), 'วิศวกรรมคอมพิวเตอร์');
+      await tester.enterText(find.byType(TextFormField).at(5), 'ไม่ใช่อีเมล');
+      await tester.tap(find.text('บันทึก'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('รูปแบบอีเมลไม่ถูกต้อง'), findsOneWidget);
+    });
+  });
+
 }

@@ -7,7 +7,7 @@ def _admin_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-def make_student(client, student_id="6501001", full_name="ทดสอบ ระบบ"):
+def make_student(client, student_id="6501001", full_name="ทดสอบ ระบบ", email=None):
     payload = {
         "student_id": student_id,
         "full_name": full_name,
@@ -16,6 +16,8 @@ def make_student(client, student_id="6501001", full_name="ทดสอบ ระ
         "year_level": 2,
         "status": "active",
     }
+    if email is not None:
+        payload["email"] = email
     # student master data is admin-only to create, regardless of which role is
     # logged in as the test's default `client`
     return client.post("/students", json=payload, headers=_admin_headers(client))
@@ -262,6 +264,82 @@ def test_update_student(client):
     assert body["year_level"] == 4
     assert body["status"] == "inactive"
     assert body["full_name"] == created["full_name"]
+
+
+# ---- อีเมลนิสิต: ไม่บังคับ แต่ถ้ากรอกต้องถูกรูปแบบ ----
+
+def test_create_student_without_an_email_is_allowed(client):
+    """ปล่อยว่างได้ — ไม่ใช่ทุกคนที่มีอีเมลตั้งแต่วันแรก และระบบไม่เดาให้"""
+    response = make_student(client, student_id="6502001")
+
+    assert response.status_code == 201
+    assert response.json()["email"] is None
+
+
+def test_email_can_be_filled_in_later(client):
+    created = make_student(client, student_id="6502002").json()
+    assert created["email"] is None
+
+    response = client.put(
+        f"/students/{created['id']}",
+        json={"email": "6502002@tsu.ac.th"},
+        headers=_admin_headers(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "6502002@tsu.ac.th"
+    # อ่านซ้ำต้องยังอยู่ ไม่ใช่ค้างอยู่แค่ใน response ของ PUT
+    assert client.get(f"/students/{created['id']}").json()["email"] == "6502002@tsu.ac.th"
+
+
+def test_email_can_be_cleared_back_to_empty(client):
+    created = make_student(client, student_id="6502003", email="6502003@tsu.ac.th").json()
+    assert created["email"] == "6502003@tsu.ac.th"
+
+    # ฟอร์มส่งสตริงว่างมาเมื่อผู้ดูแลล้างช่องทิ้ง ต้องกลายเป็น "ยังไม่ระบุ" ไม่ใช่ค่าว่าง
+    response = client.put(
+        f"/students/{created['id']}", json={"email": ""}, headers=_admin_headers(client)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] is None
+
+
+def test_malformed_email_is_rejected_on_create(client):
+    for bad in ["ไม่ใช่อีเมล", "somchai@", "@tsu.ac.th", "somchai tsu.ac.th", "a b@tsu.ac.th"]:
+        response = make_student(client, student_id="6502009", email=bad)
+        assert response.status_code == 422, f"ต้องปฏิเสธ {bad!r}"
+
+
+def test_malformed_email_is_rejected_on_update(client):
+    created = make_student(client, student_id="6502004").json()
+
+    response = client.put(
+        f"/students/{created['id']}",
+        json={"email": "somchai.tsu.ac.th"},
+        headers=_admin_headers(client),
+    )
+
+    assert response.status_code == 422
+    assert client.get(f"/students/{created['id']}").json()["email"] is None
+
+
+def test_email_is_trimmed_before_saving(client):
+    response = make_student(client, student_id="6502005", email="  6502005@tsu.ac.th  ")
+
+    assert response.status_code == 201
+    assert response.json()["email"] == "6502005@tsu.ac.th"
+
+
+def test_updating_other_fields_leaves_the_email_alone(client):
+    created = make_student(client, student_id="6502006", email="6502006@tsu.ac.th").json()
+
+    response = client.put(
+        f"/students/{created['id']}", json={"year_level": 3}, headers=_admin_headers(client)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "6502006@tsu.ac.th"
 
 
 def test_list_students_order_is_stable_after_status_change(client):

@@ -248,11 +248,15 @@ curl -X POST "http://localhost:8000/notifications/activity/12" -H "Authorization
 
 - ค่าเริ่มต้น `EMAIL_BACKEND=stub` คือ **ไม่ส่งจริง** (เก็บไว้ในหน่วยความจำ + เขียน log)
   ต้องตั้ง `EMAIL_BACKEND=smtp` พร้อม `SMTP_HOST/PORT/USER/PASSWORD/FROM` ใน `.env` เองเมื่อพร้อมส่ง
-- ที่อยู่อีเมลนิสิต **อนุมานจากรหัสนิสิต** (`662021052@tsu.ac.th`) เพราะตาราง `student`
-  ยังไม่มีคอลัมน์อีเมล — เปลี่ยนโดเมนได้ที่ `STUDENT_EMAIL_DOMAIN`
+- ที่อยู่อีเมลนิสิตมาจากคอลัมน์ `student.email` ที่ผู้ดูแลกรอกเอง (**ไม่บังคับ** และระบบ
+  ไม่เดาจากรหัสนิสิตให้) — ฟอร์มนิสิตมีปุ่มเติม `{รหัสนิสิต}@tsu.ac.th` ให้กดเองได้
+  คนที่ยังไม่ระบุอีเมลจะถูก **ข้าม** ตอนส่ง และผลลัพธ์จะรายงานจำนวนที่ข้ามไว้ใน `skipped`
 - รอบอัตโนมัติวันละครั้งปิดไว้ ต้อง `pip install APScheduler` แล้วตั้ง
-  `NOTIFY_SCHEDULER_ENABLED=true` (+ `NOTIFY_AT_RISK_HOUR`) — **เปิดเมื่อรัน uvicorn
-  worker เดียวเท่านั้น** ไม่งั้นอีเมลจะถูกส่งซ้ำตามจำนวน worker
+  `NOTIFY_SCHEDULER_ENABLED=true` (+ `NOTIFY_AT_RISK_HOUR`, `NOTIFY_ACTIVITY_REMINDER_HOUR`)
+  — **เปิดเมื่อรัน uvicorn worker เดียวเท่านั้น** ไม่งั้นอีเมลจะถูกส่งซ้ำตามจำนวน worker
+- แจ้งเตือน **"พรุ่งนี้มีกิจกรรม"** ส่งล่วงหน้า 1 วันถึงคนที่สมัครไว้ (กิจกรรมที่อนุมัติแล้ว
+  ไม่ถูกซ่อน และ `start_at` ตรงกับวันพรุ่งนี้ตามเวลาไทย) · สั่งเองได้ที่
+  `POST /notifications/activity-reminders` และลอง `?dry_run=true` ดูรายชื่อผู้รับก่อนส่งจริง
 
 ## โครงสร้างโปรเจกต์
 

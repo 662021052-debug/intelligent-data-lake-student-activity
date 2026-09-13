@@ -19,6 +19,7 @@ from app.notifications import (
     NotificationReport,
     announcement_blocker,
     send_activity_announcement,
+    send_activity_reminders,
     send_at_risk_notifications,
 )
 
@@ -35,10 +36,17 @@ class NotificationResult(BaseModel):
     subject: str
     sent: int
     failed: int
+    # นิสิตที่เข้าเงื่อนไขผู้รับแต่ยังไม่ได้ระบุอีเมล จึงไม่ได้ถูกส่งถึง — ผู้ดูแลจะได้รู้ว่า
+    # ยอด sent ไม่ได้แปลว่าครอบคลุมทุกคน แล้วตามไปกรอกอีเมลให้คนที่ขาดได้
+    skipped: int
     # ตัดรายชื่อไว้ไม่ให้ตอบกลับยาวเป็นพัน (นิสิต 100+ คน) แต่ยังพอให้ยืนยันได้ว่า
-    # ส่งถูกกลุ่ม — จำนวนจริงอยู่ที่ sent/failed
+    # ส่งถูกกลุ่ม — จำนวนจริงอยู่ที่ sent/failed/skipped
     recipients: list[str]
     failed_recipients: list[str]
+    # เป็น "รหัสนิสิต" ไม่ใช่ที่อยู่อีเมล — คนกลุ่มนี้ยังไม่มีที่อยู่ให้แสดง
+    skipped_students: list[str]
+    # true = ยังไม่ได้ส่ง recipients คือ "คนที่จะได้รับ" และ sent เป็น 0 เสมอ
+    dry_run: bool = False
 
 
 MAX_LISTED_RECIPIENTS = 50
@@ -49,8 +57,11 @@ def _to_result(report: NotificationReport) -> NotificationResult:
         subject=report.subject,
         sent=report.sent,
         failed=report.failed,
+        skipped=report.skipped,
         recipients=report.recipients[:MAX_LISTED_RECIPIENTS],
         failed_recipients=report.failed_recipients[:MAX_LISTED_RECIPIENTS],
+        skipped_students=report.skipped_students[:MAX_LISTED_RECIPIENTS],
+        dry_run=report.dry_run,
     )
 
 
@@ -72,6 +83,27 @@ def notify_at_risk(
     report = send_at_risk_notifications(
         session, sender, threshold=threshold, faculty=faculty, year_level=year_level
     )
+    return _to_result(report)
+
+
+@router.post("/activity-reminders", response_model=NotificationResult)
+def notify_activity_reminders(
+    dry_run: bool = Query(
+        False,
+        description="true = ดูว่าจะส่งถึงใครบ้างโดยยังไม่ส่งจริง (recipients คือคนที่จะได้รับ)",
+    ),
+    session: Session = Depends(get_session),
+    sender: EmailSender = Depends(get_email_sender),
+):
+    """เตือนนิสิตที่สมัครไว้ ว่าพรุ่งนี้มีกิจกรรม (ส่งล่วงหน้า 1 วัน)
+
+    ปกติงานตั้งเวลารายวันเป็นคนเรียก (``app/scheduler.py``) endpoint นี้มีไว้ให้ผู้ดูแล
+    สั่งเองเมื่อรอบอัตโนมัติปิดอยู่หรือพลาดรอบไป — และให้ cron ภายนอกเรียกได้ด้วย
+
+    ลองด้วย ``?dry_run=true`` ก่อนได้เสมอ: อีเมลที่ส่งออกไปแล้วเรียกคืนไม่ได้ และ
+    "วันพรุ่งนี้" คิดตามเวลาไทย ถ้าสั่งผิดรอบก็ไปโผล่ผิดวันทั้งชุด
+    """
+    report = send_activity_reminders(session, sender, dry_run=dry_run)
     return _to_result(report)
 
 

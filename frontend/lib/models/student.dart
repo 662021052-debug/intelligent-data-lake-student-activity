@@ -7,6 +7,9 @@ class Student {
   final int yearLevel;
   final String status; // active | inactive
 
+  /// อีเมลสำหรับแจ้งเตือน — null/ว่าง = ยังไม่ระบุ (ระบบไม่เดาจากรหัสนิสิตให้)
+  final String? email;
+
   Student({
     this.id,
     required this.studentId,
@@ -15,6 +18,7 @@ class Student {
     required this.major,
     required this.yearLevel,
     this.status = 'active',
+    this.email,
   });
 
   factory Student.fromJson(Map<String, dynamic> json) => Student(
@@ -25,6 +29,7 @@ class Student {
         major: json['major'] as String,
         yearLevel: json['year_level'] as int,
         status: json['status'] as String? ?? 'active',
+        email: json['email'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -34,5 +39,7 @@ class Student {
         'major': major,
         'year_level': yearLevel,
         'status': status,
+        // ส่ง null ไปด้วยเสมอ เพื่อให้ "ล้างอีเมลทิ้ง" มีผลจริงตอนแก้ไข
+        'email': email,
       };
 }
