@@ -42,6 +42,7 @@ from app.models import (
 )
 from app.schemas import (
     CriteriaGroupRead,
+    LearningUnitRead,
     CriteriaRequirementRead,
     CriteriaSetDetailRead,
     CriteriaSetRead,
@@ -70,6 +71,17 @@ requirement_group_router = APIRouter(
 requirement_router = APIRouter(
     prefix="/requirements", tags=["criteria"], dependencies=[Depends(get_current_user)]
 )
+# หน่วยการเรียนรู้เป็น taxonomy คงที่ 5 หน่วยที่ทุกชุดเกณฑ์ใช้ร่วมกัน จึงมีแต่ทางอ่าน —
+# ฟอร์มรายการเกณฑ์ต้องใช้เลือกว่าชั่วโมงของรายการนั้นนับเข้าหน่วยไหน
+learning_unit_router = APIRouter(
+    prefix="/learning-units", tags=["criteria"], dependencies=[Depends(get_current_user)]
+)
+
+
+@learning_unit_router.get("", response_model=list[LearningUnitRead])
+def list_learning_units(session: Session = Depends(get_session)):
+    units = session.exec(select(LearningUnit).order_by(LearningUnit.code)).all()
+    return [LearningUnitRead(id=u.id, code=u.code, name=u.name) for u in units]
 
 
 # --------------------------- ตัวช่วยกันพลาด ---------------------------
@@ -219,6 +231,7 @@ def _requirement_read(
         is_mandatory=requirement.is_mandatory,
         learning_unit_name=unit.name if unit else None,
         group_name=group.name if group else None,
+        group_id=group.id if group else None,
     )
 
 
@@ -311,10 +324,19 @@ def list_criteria_sets(
                 code=criteria_set.code,
                 name=criteria_set.name,
                 academic_year=criteria_set.academic_year,
+                program_type=criteria_set.program_type.value,
+                effective_from_cohort=criteria_set.effective_from_cohort,
                 total_required_hours=criteria_set.total_required_hours,
                 counting_rule=criteria_set.counting_rule.value,
+                is_system=criteria_set.is_system,
                 grouped_by="talent" if by_talent else "learning_unit",
+                hours_warning=_hours_warning(session, criteria_set),
                 groups=groups_read,
+                requirement_groups=[
+                    RequirementGroupRead(**g.model_dump())
+                    for g in sorted(groups.values(), key=lambda g: g.id)
+                    if g.criteria_set_id == criteria_set.id
+                ],
             )
         )
     return result

@@ -130,7 +130,9 @@ void main() {
       await tester.pumpWidget(_app(const HourCategoriesScreen()));
 
       expect(find.text('หมวดชั่วโมงกิจกรรม'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'เพิ่มหมวดใหญ่'), findsOneWidget);
+      // ปุ่มหลักของหน้านี้คือ "เพิ่มชุดเกณฑ์ใหม่" ส่วนหมวดใหญ่ของเกณฑ์เดิมเป็นปุ่มรอง
+      expect(find.widgetWithText(FilledButton, 'เพิ่มชุดเกณฑ์ใหม่'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'เพิ่มหมวดใหญ่'), findsOneWidget);
       expect(find.byType(FloatingActionButton), findsNothing);
     });
   });

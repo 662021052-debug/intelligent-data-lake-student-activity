@@ -598,6 +598,211 @@ def test_students_can_still_read_criteria_sets(client, tokens):
     assert client.get("/criteria-sets", headers=student_headers).status_code == 200
 
 
+# --------------------------- ฟิลด์ที่หน้าจอต้องใช้ ---------------------------
+def test_list_exposes_the_fields_the_admin_screen_needs(client):
+    """หน้าจัดการชุดเกณฑ์ต้องรู้ว่าชุดไหนแก้ได้ และใช้กับรุ่นไหน จาก GET ตัวเดียว"""
+    created = _create_set(client).json()
+
+    listed = client.get("/criteria-sets").json()
+    mine = next(c for c in listed if c["id"] == created["id"])
+
+    assert mine["effective_from_cohort"] == 2570
+    assert mine["is_system"] is False
+    assert mine["program_type"] == "regular"
+    assert mine["counting_rule"] == "min_per_requirement"
+    # ชุดที่ยังไม่มีรายการเลย ต้องติดคำเตือนมาให้หน้าจอแสดง
+    assert mine["hours_warning"] is not None
+
+
+def test_system_sets_are_flagged_so_the_screen_can_lock_them(client, system_set):
+    listed = client.get("/criteria-sets").json()
+    official = next(c for c in listed if c["id"] == system_set.id)
+
+    assert official["is_system"] is True
+
+
+def test_learning_units_are_listed_for_the_requirement_form(client, unit):
+    """ฟอร์มรายการเกณฑ์ต้องเลือกหน่วยการเรียนรู้ได้ จึงต้องมีทางอ่านรายการหน่วย"""
+    response = client.get("/learning-units")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(u["id"] == unit.id and u["name"] == unit.name for u in body)
+    # เรียงตามรหัสหน่วย เพื่อให้ลำดับใน dropdown คงที่ทุกครั้ง
+    codes = [u["code"] for u in body]
+    assert codes == sorted(codes)
+
+
+def test_learning_units_require_login(client):
+    assert client.get(
+        "/learning-units", headers={"Authorization": "Bearer not-a-token"}
+    ).status_code == 401
+
+
+# --------------------------- กฎกลุ่มแชร์เป้าที่สร้างผ่าน UI ---------------------------
+def _build_social_set_through_the_api(client, unit):
+    """ทำตามลำดับเดียวกับที่ผู้ดูแลกดในหน้าจอ: สร้างชุด → เพิ่มกลุ่ม → เพิ่มรายการ →
+    เปิดฟอร์มแก้ไขแล้วเลือกกลุ่ม (PUT) — คืน (ชุด, กลุ่ม, id รายการ 2 ตัว)"""
+    headers = _admin_headers(client)
+    created = _create_set(client, total_required_hours=16).json()
+    group = client.post(
+        f"/criteria-sets/{created['id']}/requirement-groups",
+        json={"code": "social-16", "name": "กลุ่ม Social", "required_hours": 16},
+        headers=headers,
+    ).json()
+
+    requirement_ids = []
+    for name in ("ด้านนวัตกรรมสังคม", "ด้านผู้ประกอบการ"):
+        response = client.post(
+            f"/criteria-sets/{created['id']}/requirements",
+            json={"name": name, "learning_unit_id": unit.id, "required_hours": 16},
+            headers=headers,
+        )
+        assert response.status_code == 201, response.text
+        requirement_ids.append(response.json()["id"])
+
+    # ก่อนผูก: กลุ่มยังไม่มีสมาชิก แต่ต้องโผล่ใน GET แล้ว ไม่งั้นฟอร์มไม่มีตัวเลือกให้เลือก
+    listed = next(c for c in client.get("/criteria-sets").json() if c["id"] == created["id"])
+    assert [g["id"] for g in listed["requirement_groups"]] == [group["id"]]
+    assert all(r["group_id"] is None for g in listed["groups"] for r in g["requirements"])
+
+    for requirement_id, name in zip(requirement_ids, ("ด้านนวัตกรรมสังคม", "ด้านผู้ประกอบการ")):
+        response = client.put(
+            f"/requirements/{requirement_id}",
+            json={
+                "name": name,
+                "learning_unit_id": unit.id,
+                "group_id": group["id"],
+                "required_hours": 16,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+
+    return created, group, requirement_ids
+
+
+def test_requirement_read_exposes_group_id_and_set_lists_its_groups(client, unit):
+    created, group, requirement_ids = _build_social_set_through_the_api(client, unit)
+
+    listed = next(c for c in client.get("/criteria-sets").json() if c["id"] == created["id"])
+    requirements = [r for g in listed["groups"] for r in g["requirements"]]
+
+    assert sorted(r["id"] for r in requirements) == sorted(requirement_ids)
+    assert all(r["group_id"] == group["id"] for r in requirements)
+    assert all(r["group_name"] == "กลุ่ม Social" for r in requirements)
+    assert listed["requirement_groups"] == [
+        {
+            "id": group["id"],
+            "criteria_set_id": created["id"],
+            "code": "social-16",
+            "name": "กลุ่ม Social",
+            "required_hours": 16.0,
+            "rule_note": None,
+        }
+    ]
+    assert listed["hours_warning"] is None, "สองรายการในกลุ่มนับเป็นก้อน 16 ครั้งเดียว"
+
+
+def test_requirement_groups_do_not_leak_across_sets(client, unit, system_set, session):
+    session.add(
+        RequirementGroup(
+            criteria_set_id=system_set.id, code="social-16", name="Social ทางการ", required_hours=16
+        )
+    )
+    session.commit()
+    created, group, _ = _build_social_set_through_the_api(client, unit)
+
+    listed = {c["id"]: c for c in client.get("/criteria-sets").json()}
+
+    assert [g["id"] for g in listed[created["id"]]["requirement_groups"]] == [group["id"]]
+    assert [g["name"] for g in listed[system_set.id]["requirement_groups"]] == ["Social ทางการ"]
+
+
+@pytest.mark.parametrize(
+    ("innovation", "entrepreneur", "completed"),
+    [(8, 8, True), (16, 0, True), (12, 4, True), (8, 4, False), (0, 12, False)],
+)
+def test_group_built_through_the_api_enforces_the_combined_target(
+    client, session, unit, innovation, entrepreneur, completed
+):
+    """หัวใจของการปิดช่องว่าง: กฎ "สองด้านรวม ≥ 16" ที่ผู้ดูแลสร้างเองผ่าน UI ต้องตัดสิน
+    ความครบแบบเดียวกับกลุ่ม Social ทางการ — รวมยอดทั้งกลุ่ม ไม่ใช่ต้องครบทีละด้าน"""
+    from datetime import datetime
+
+    from sqlalchemy import text
+
+    from app.completion import progress_by_student
+    from app.gold import create_gold_layer
+    from app.models import (
+        Activity,
+        ApprovalStatus,
+        EvidenceStatus,
+        Participation,
+        User,
+        UserRole,
+    )
+
+    created, group, requirement_ids = _build_social_set_through_the_api(client, unit)
+    student = Student(
+        student_id="7000000001",
+        full_name="นิสิต 70",
+        faculty="คณะทดสอบ",
+        major="ไม่ระบุ",
+        year_level=1,
+        criteria_set_id=created["id"],
+    )
+    session.add(student)
+    session.commit()
+
+    staff_id = session.exec(select(User).where(User.role == UserRole.staff)).first().id
+    for requirement_id, hours in zip(requirement_ids, (innovation, entrepreneur)):
+        if not hours:
+            continue
+        activity = Activity(
+            name=f"กิจกรรมรายการ {requirement_id}",
+            activity_type="วิชาการ",
+            max_participants=100,
+            start_at=datetime(2026, 7, 1, 9),
+            location="อาคารเรียนรวม 1",
+            hours=hours,
+            created_by=staff_id,
+            approval_status=ApprovalStatus.approved,
+        )
+        session.add(activity)
+        session.flush()
+        session.add(ActivityRequirement(activity_id=activity.id, requirement_id=requirement_id))
+        session.add(
+            Participation(
+                student_id=student.id,
+                activity_id=activity.id,
+                evidence_status=EvidenceStatus.approved,
+                hours_earned=hours,
+            )
+        )
+    session.commit()
+
+    create_gold_layer(session)
+    rows = session.execute(
+        text(
+            "SELECT category_key, category_name, required_hours, earned_hours, item_kind "
+            "FROM gold_student_hours WHERE student_key = :sid"
+        ),
+        {"sid": student.id},
+    ).mappings().all()
+
+    # สองรายการในกลุ่มถูกวัดเป็นรายการเดียวของกลุ่ม ไม่ใช่สองรายการ 16 ชม.
+    assert [(r["item_kind"], r["category_name"], r["required_hours"]) for r in rows] == [
+        ("group", "กลุ่ม Social", 16)
+    ]
+    progress = progress_by_student(
+        (student.id, r["category_key"], r["category_name"], r["required_hours"], r["earned_hours"])
+        for r in rows
+    )[student.id]
+    assert progress.completed is completed
+    assert progress.items[0].earned_hours == innovation + entrepreneur
+
+
 def test_unknown_set_returns_404(client):
     assert client.delete("/criteria-sets/99999", headers=_admin_headers(client)).status_code == 404
     assert client.put(

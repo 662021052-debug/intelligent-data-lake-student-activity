@@ -148,6 +148,9 @@ class CriteriaRequirementRead(BaseModel):
     # อยู่ในกลุ่มที่แชร์เป้าชั่วโมงไหม (เช่น Social รวม ≥ 16) — บอกผู้ใช้ว่ารายการนี้
     # ตรวจความครบที่ยอดรวมของกลุ่ม ไม่ใช่ที่ตัวมันเอง
     group_name: Optional[str] = None
+    # id ของกลุ่มเดียวกัน — ฟอร์มแก้ไขต้องส่งค่าเดิมกลับใน PUT (แทนที่ทั้งแถว)
+    # ไม่งั้นกดบันทึกเฉย ๆ รายการก็หลุดออกจากกลุ่ม
+    group_id: Optional[int] = None
 
 
 class CriteriaGroupRead(BaseModel):
@@ -166,11 +169,22 @@ class CriteriaSetRead(BaseModel):
     code: str
     name: str
     academic_year: int
+    program_type: str
+    # ปีรุ่นแรกที่ชุดนี้เริ่มใช้ — หน้าจอเอาไปเขียนว่า "ใช้กับนิสิตรหัส XX ขึ้นไป"
+    effective_from_cohort: int
     total_required_hours: float
     counting_rule: str
+    # True = เกณฑ์ทางการที่ seed ไว้ แก้ผ่าน API ไม่ได้ (403) หน้าจอจึงต้องปิดปุ่มแก้/ลบ
+    # ตั้งแต่แรก ไม่ใช่ปล่อยให้กดแล้วค่อยเด้ง error
+    is_system: bool
     # จัดกลุ่มด้วยอะไร: "talent" (ชุดที่มี Talent/PLO) หรือ "learning_unit" (ชุดเก่า)
     grouped_by: str
+    # เตือนเมื่อผลรวมชั่วโมงของรายการเกณฑ์ไม่เท่ากับ total_required_hours (None = ตรงแล้ว)
+    hours_warning: Optional[str] = None
     groups: list[CriteriaGroupRead]
+    # กลุ่มแชร์เป้าทั้งหมดของชุด รวมกลุ่มที่ยังไม่มีสมาชิก — ไม่มีรายการนี้ ฟอร์มจะผูก
+    # รายการแรกเข้ากลุ่มที่เพิ่งสร้างไม่ได้ เพราะกลุ่มนั้นยังไม่โผล่ใน `groups` เลย
+    requirement_groups: list["RequirementGroupRead"] = []
 
 # ---------- เขียนชุดเกณฑ์ (เฟส 2: admin สร้าง/แก้ชุดของรุ่นอนาคตเองได้) ----------
 
@@ -229,6 +243,14 @@ class RequirementWrite(BaseModel):
     organizer: Optional[str] = None
 
 
+class LearningUnitRead(BaseModel):
+    """หน่วยการเรียนรู้ 5 หน่วย — taxonomy คงที่ ใช้ร่วมกันทุกชุดเกณฑ์ (อ่านอย่างเดียว)"""
+
+    id: int
+    code: str
+    name: str
+
+
 class TalentRead(BaseModel):
     id: int
     criteria_set_id: int
@@ -245,6 +267,10 @@ class RequirementGroupRead(BaseModel):
     name: str
     required_hours: float
     rule_note: Optional[str] = None
+
+
+# CriteriaSetRead อ้างถึง RequirementGroupRead ก่อนประกาศ — resolve forward ref ตรงนี้
+CriteriaSetRead.model_rebuild()
 
 
 class RequirementRead(BaseModel):
