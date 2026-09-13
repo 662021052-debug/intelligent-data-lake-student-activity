@@ -26,7 +26,10 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from sqlmodel import Session, select
 
-from app.criteria import LEGACY_CRITERIA_CODE
+from app.criteria import CRITERIA_2567_FROM_COHORT, LEGACY_CRITERIA_CODE
+
+# ชุดเกณฑ์เก่าเป็นขั้นล่างสุดของบันไดการแมปรุ่น — รุ่นไหนที่ยังไม่มีชุดของตัวเองตกมาที่นี่
+LEGACY_FROM_COHORT = 0
 from app.database import create_db_and_tables, engine
 from app.models import (
     CountingRule,
@@ -212,8 +215,16 @@ def _upsert_criteria_set(
     name: str,
     total_required_hours: float,
     counting_rule: CountingRule,
-) -> CriteriaSet:
+    effective_from_cohort: int,
+) -> Optional[CriteriaSet]:
+    """สร้าง/อัปเดตชุดเกณฑ์ **ทางการ** ให้ตรงกับเอกสาร
+
+    คืน ``None`` เมื่อ code นั้นถูกชุดที่ผู้ดูแลสร้างเองจองไว้แล้ว — ดู :func:`_is_custom`
+    """
     criteria_set = session.exec(select(CriteriaSet).where(CriteriaSet.code == code)).first()
+    if _is_custom(criteria_set, report, code):
+        return None
+
     fields = {
         "academic_year": academic_year,
         "program_type": program_type,
@@ -221,6 +232,8 @@ def _upsert_criteria_set(
         "total_required_hours": total_required_hours,
         "counting_rule": counting_rule,
         "is_active": True,
+        "effective_from_cohort": effective_from_cohort,
+        "is_system": True,
     }
     if criteria_set is None:
         # effective_from/to ปล่อยว่างไว้ตั้งใจ — ตัวเลือกชุดเกณฑ์จริงคือรุ่นของนิสิต (§8)
@@ -237,6 +250,22 @@ def _upsert_criteria_set(
             report.updated.append(f"criteria_set {code}: {', '.join(changed)}")
     session.flush()
     return criteria_set
+
+
+def _is_custom(criteria_set: Optional[CriteriaSet], report: Report, code: str) -> bool:
+    """ชุดนี้เป็นของผู้ดูแล (ไม่ใช่ชุดระบบ) หรือเปล่า — ถ้าใช่ ต้องไม่แตะ
+
+    ไฟล์นี้ถูกเรียกทุกครั้งที่คอนเทนเนอร์บูต ถ้าเขียนทับชุดที่ผู้ดูแลสร้างเอง งานที่เขา
+    ทำไว้จะหายไปเงียบ ๆ ตอนดีพลอยครั้งถัดไป และจะหาสาเหตุแทบไม่เจอ จึงข้ามแล้วเตือน
+    ให้เห็นใน log แทน (ชนกันแบบนี้แปลว่า code ถูกใช้ซ้ำ ต้องมีคนไปตัดสินใจ)
+    """
+    if criteria_set is None or criteria_set.is_system:
+        return False
+    report.warnings.append(
+        f"ข้ามชุดเกณฑ์ {code} — มีชุดที่ผู้ดูแลสร้างเองใช้ code นี้อยู่ (is_system=false) "
+        "seed จะไม่เขียนทับของที่คนทำเอง"
+    )
+    return True
 
 
 def _upsert_requirement(
@@ -311,7 +340,11 @@ def seed_legacy_set(
         # โครงเดิมตัดสิน "ผ่าน" จากยอดรวมของแต่ละหมวด ไม่ได้ดูรายหมวดย่อย
         # (ดู gold_student_hours เดิม) จึงเป็น total_per_unit ไม่ใช่ min_per_requirement
         counting_rule=CountingRule.total_per_unit,
+        # 0 = ขั้นล่างสุดของบันได ครอบทุกรุ่นที่ไม่มีชุดของตัวเอง
+        effective_from_cohort=LEGACY_FROM_COHORT,
     )
+    if criteria_set is None:
+        return None
 
     subcategories = session.exec(select(HourSubcategory)).all()
     subs_by_category: dict[int, list[HourSubcategory]] = {}
@@ -358,7 +391,7 @@ def seed_legacy_set(
 
 def seed_2567_regular(
     session: Session, units: dict[str, LearningUnit], report: Report
-) -> CriteriaSet:
+) -> Optional[CriteriaSet]:
     """ชุดเกณฑ์ 2567 หลักสูตรปกติ + Talent 3 กลุ่ม + รายการเกณฑ์ 11 รายการ (§9)."""
     criteria_set = _upsert_criteria_set(
         session,
@@ -370,7 +403,10 @@ def seed_2567_regular(
         total_required_hours=EXPECTED_2567_REGULAR_TOTAL,
         # §9: "ทำตามชั่วโมงที่ระบุต่อรายการ (บังคับต้องครบทุกตัว)"
         counting_rule=CountingRule.min_per_requirement,
+        effective_from_cohort=CRITERIA_2567_FROM_COHORT,
     )
+    if criteria_set is None:
+        return None
 
     talent_ids: dict[str, int] = {}
     for spec in TALENTS_2567:

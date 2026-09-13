@@ -216,15 +216,24 @@ def load(
     report = Report()
 
     criteria_ids = {cs.code: cs.id for cs in session.exec(select(CriteriaSet)).all()}
-    needed_codes: dict[str, int] = {}
-    for row in rows:
-        code = criteria_set_code_for(cohort_from_student_id(row.student_id), ProgramType.regular)
-        needed_codes[code] = needed_codes.get(code, 0) + 1
-    absent = sorted(code for code in needed_codes if code not in criteria_ids)
-    if absent:
+    # รุ่นไหนที่หาชุดเกณฑ์ไม่เจอเลย = ฐานยังไม่ได้ seed นิยามเกณฑ์
+    # (ตัวแมปอ่านจากฐาน จึงตอบ None แทนที่จะตอบ code ที่ยังไม่มีแถวรองรับ)
+    cohorts_without_set = sorted(
+        {
+            cohort_from_student_id(row.student_id)
+            for row in rows
+            if criteria_set_code_for(
+                session, cohort_from_student_id(row.student_id), ProgramType.regular
+            )
+            is None
+        }
+    )
+    if cohorts_without_set:
         # ปล่อยให้นิสิตเข้าไปแบบ criteria_set_id = NULL จะเงียบ แต่ทั้งระบบคำนวณเกณฑ์ไม่ได้
+        listed = ", ".join(str(c) for c in cohorts_without_set)
         raise ImportAborted(
-            f"ยังไม่มีชุดเกณฑ์ {', '.join(absent)} ในฐาน — รัน python seed_criteria.py ก่อน"
+            f"ยังไม่มีชุดเกณฑ์รองรับนิสิตรุ่น {listed} ในฐาน — "
+            "รัน python seed_criteria.py ก่อน"
         )
 
     existing_students = {s.student_id: s for s in session.exec(select(Student)).all()}
@@ -258,7 +267,7 @@ def load(
 
         student = existing_students.get(row.student_id)
         if student is None:
-            code = criteria_set_code_for(cohort, ProgramType.regular)
+            code = criteria_set_code_for(session, cohort, ProgramType.regular)
             student = Student(
                 student_id=row.student_id,
                 full_name=row.full_name,
@@ -284,7 +293,7 @@ def load(
             }
             # ชุดเกณฑ์: เติมให้เฉพาะคนที่ยังว่าง — ถ้าผู้ดูแลตั้งกลุ่ม/ชุดเกณฑ์ไว้แล้วต้องไม่ทับ
             if student.criteria_set_id is None:
-                code = criteria_set_code_for(cohort, student.program_type)
+                code = criteria_set_code_for(session, cohort, student.program_type)
                 if code in criteria_ids:
                     updates["criteria_set_id"] = criteria_ids[code]
             changed = {k: v for k, v in updates.items() if getattr(student, k) != v}

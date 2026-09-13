@@ -45,6 +45,8 @@ def _seed_criteria_set(session, code="2567-regular", counting_hours=60.0):
         program_type=ProgramType.regular,
         name="เกณฑ์ 2567 หลักสูตรปกติ",
         total_required_hours=counting_hours,
+        effective_from_cohort=2567,
+        is_system=True,
     )
     session.add(criteria_set)
     session.commit()
@@ -90,19 +92,38 @@ def test_cohort_from_student_id(student_id, expected):
     assert cohort_from_student_id(student_id) == expected
 
 
-@pytest.mark.parametrize(
-    "cohort,program_type,expected",
-    [
-        (2569, ProgramType.regular, "2567-regular"),
-        (2567, ProgramType.regular, "2567-regular"),
-        (2567, ProgramType.continuing, "2567-continuing"),
-        (2566, ProgramType.regular, "legacy-2566"),   # รุ่นก่อน 2567 ใช้เกณฑ์เก่า
-        (2565, ProgramType.regular, "legacy-2566"),
-        (None, ProgramType.regular, None),
-    ],
-)
-def test_criteria_set_code_for(cohort, program_type, expected):
-    assert criteria_set_code_for(cohort, program_type) == expected
+def test_criteria_set_code_for_reads_the_ladder_from_the_database(session):
+    """การแมปรุ่น→ชุดอ่านจาก effective_from_cohort ในฐาน ไม่ได้ฝังไว้ในโค้ดแล้ว
+
+    เคสครบ ๆ อยู่ที่ ``tests/test_criteria_resolver.py`` ที่นี่คุมแค่ว่าฟังก์ชันนี้
+    ยังตอบตรงกับกติกาเดิมของรุ่น 2566/2567 ซึ่งเป็นข้อมูลจริงที่ใช้อยู่
+    """
+    session.add(
+        CriteriaSet(
+            code="legacy-2566",
+            academic_year=2566,
+            program_type=ProgramType.regular,
+            name="เกณฑ์เดิม",
+            total_required_hours=60,
+            effective_from_cohort=0,
+        )
+    )
+    session.add(
+        CriteriaSet(
+            code="2567-regular",
+            academic_year=2567,
+            program_type=ProgramType.regular,
+            name="เกณฑ์ 2567",
+            total_required_hours=60,
+            effective_from_cohort=2567,
+        )
+    )
+    session.commit()
+
+    assert criteria_set_code_for(session, 2566, ProgramType.regular) == "legacy-2566"
+    assert criteria_set_code_for(session, 2567, ProgramType.regular) == "2567-regular"
+    assert criteria_set_code_for(session, 2569, ProgramType.regular) == "2567-regular"
+    assert criteria_set_code_for(session, None, ProgramType.regular) is None
 
 
 def test_create_student_derives_cohort_and_criteria_set(client, session):

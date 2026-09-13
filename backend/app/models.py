@@ -84,6 +84,13 @@ class CriteriaSet(SQLModel, table=True):
     total_required_hours: float
     counting_rule: CountingRule = CountingRule.min_per_requirement
     is_active: bool = True
+    # ปีรุ่น (พ.ศ.) แรกที่ชุดนี้เริ่มใช้ — หัวใจของการแมป "นิสิตรหัส NN → ชุดไหน"
+    # ระบบเลือกชุดที่ค่านี้ "สูงสุดที่ยังไม่เกินรุ่นของนิสิต" เพิ่มชุดของรุ่นอนาคตจึงทำได้
+    # ด้วยการเพิ่มแถว ไม่ต้องแก้โค้ด (ดู app/criteria.py) · 0 = ใช้กับรุ่นเก่าที่สุดเป็นต้นไป
+    effective_from_cohort: int = Field(default=0, index=True)
+    # True = เกณฑ์ทางการที่ seed ไว้ — seed_criteria.py เป็นเจ้าของและเขียนทับได้
+    # False = ชุดที่ผู้ดูแลสร้างเอง ตัว seed ต้องไม่แตะ ไม่งั้นงานที่คนทำไว้หายตอน boot
+    is_system: bool = False
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
 

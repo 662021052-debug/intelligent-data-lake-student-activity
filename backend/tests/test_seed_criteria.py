@@ -55,6 +55,86 @@ def _requirements(session, code):
     ).all()
 
 
+def test_seeded_sets_are_marked_as_system_with_their_starting_cohort(session):
+    """ชุดที่ seed สร้างต้องเป็นชุดระบบ และบอกรุ่นที่เริ่มใช้ไว้ให้ตัวแมปใช้งานได้"""
+    _legacy_hour_structure(session)
+    populate(session)
+    session.commit()
+
+    legacy = session.exec(
+        select(CriteriaSet).where(CriteriaSet.code == LEGACY_CRITERIA_CODE)
+    ).first()
+    modern = session.exec(
+        select(CriteriaSet).where(CriteriaSet.code == "2567-regular")
+    ).first()
+
+    assert legacy.is_system is True
+    assert legacy.effective_from_cohort == 0, "เกณฑ์เดิมเป็นขั้นล่างสุดของบันได"
+    assert modern.is_system is True
+    assert modern.effective_from_cohort == 2567
+
+
+def test_seed_never_overwrites_a_set_an_admin_made(session):
+    """สคริปต์นี้รันทุกครั้งที่คอนเทนเนอร์บูต — ของที่ผู้ดูแลทำเองต้องรอดทุกรอบ
+
+    จำลองกรณีที่แย่ที่สุด: ผู้ดูแลสร้างชุดของตัวเองโดยใช้ code ชนกับชุดทางการ
+    ถ้า seed เขียนทับ งานของเขาจะหายไปเงียบ ๆ ตอนดีพลอยครั้งถัดไป
+    """
+    _legacy_hour_structure(session)
+    custom = CriteriaSet(
+        code="2567-regular",
+        academic_year=2599,
+        program_type=ProgramType.regular,
+        name="ชุดที่ผู้ดูแลทำเอง ห้ามหาย",
+        total_required_hours=99,
+        counting_rule=CountingRule.total_per_unit,
+        effective_from_cohort=2599,
+        is_system=False,
+    )
+    session.add(custom)
+    session.commit()
+    session.refresh(custom)
+
+    report = populate(session)
+    session.commit()
+    session.refresh(custom)
+
+    assert custom.name == "ชุดที่ผู้ดูแลทำเอง ห้ามหาย"
+    assert custom.total_required_hours == 99
+    assert custom.effective_from_cohort == 2599
+    assert custom.is_system is False
+    # ต้องเตือนให้เห็น ไม่ใช่ข้ามไปเงียบ ๆ แล้วไม่มีใครรู้ว่าเกณฑ์ทางการไม่ได้ลงฐาน
+    assert any("2567-regular" in w for w in report.warnings)
+
+    # และต้องไม่แอบสร้างของซ้ำขึ้นมาอีกแถว
+    same_code = session.exec(
+        select(CriteriaSet).where(CriteriaSet.code == "2567-regular")
+    ).all()
+    assert len(same_code) == 1
+
+
+def test_seed_still_enforces_system_sets_when_nothing_is_custom(session):
+    """ชุดระบบที่ค่าเพี้ยนต้องถูกดึงกลับมาให้ตรงเอกสารเหมือนเดิม"""
+    _legacy_hour_structure(session)
+    populate(session)
+    session.commit()
+
+    modern = session.exec(
+        select(CriteriaSet).where(CriteriaSet.code == "2567-regular")
+    ).first()
+    modern.total_required_hours = 1
+    modern.effective_from_cohort = 9999
+    session.add(modern)
+    session.commit()
+
+    populate(session)
+    session.commit()
+    session.refresh(modern)
+
+    assert modern.total_required_hours == EXPECTED_2567_REGULAR_TOTAL
+    assert modern.effective_from_cohort == 2567
+
+
 def test_spec_totals_match_the_design_doc():
     """ตารางใน §9 ต้องรวมได้ 60 ชม. โดยสองด้านของ Talent 3 นับเป็นก้อน 16 ชม. ก้อนเดียว."""
     assert _spec_total_hours(REQUIREMENTS_2567_REGULAR) == EXPECTED_2567_REGULAR_TOTAL
