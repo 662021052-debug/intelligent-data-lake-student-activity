@@ -459,10 +459,12 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                 width: 32,
               )),
               DataCell(NarrowCell(Text('${a.maxParticipants}'), width: 40)),
-              // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ให้คอลัมน์แคบ เวลาเต็มอยู่ใน tooltip
-              DataCell(Tooltip(
-                message: formatThaiDateTime(a.startAt),
-                child: Text(formatThaiDate(a.startAt), style: _mutedCell(context)),
+              // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ เวลาเต็มอยู่ใน tooltip · กว้างคงที่เพื่อไม่ให้
+              // ปีถูกตัดเมื่อฟอนต์ Sarabun โหลดเสร็จทีหลัง (ดู ThaiDateCell)
+              DataCell(ThaiDateCell(
+                formatThaiDate(a.startAt),
+                tooltip: formatThaiDateTime(a.startAt),
+                style: _mutedCell(context),
               )),
               DataCell(TruncatedCell(a.location,
                   maxWidth: 140, style: _mutedCell(context))),

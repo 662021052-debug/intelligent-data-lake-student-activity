@@ -152,6 +152,38 @@ void main() {
       );
     });
 
+    testWidgets('เซลล์วันที่กว้างคงที่ บรรทัดเดียว และแสดงปี พ.ศ. ครบ 4 หลัก', (tester) async {
+      // วันที่ยาวสุดที่เกิดได้ (วัน 2 หลัก + เดือนตัวย่อยาวสุด) และสั้นสุด
+      const longest = '30 มิ.ย. 2570';
+      const shortest = '1 ก.พ. 2570';
+      await tester.pumpWidget(_wrap(const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ThaiDateCell(longest, key: ValueKey('long')),
+          ThaiDateCell(shortest, key: ValueKey('short'), tooltip: '1 ก.พ. 2570 เวลา 09:30 น.'),
+        ],
+      )));
+      await tester.pumpAndSettle();
+
+      // ความกว้างไม่ขึ้นกับความยาวข้อความ (หรือฟอนต์ที่ใช้วัดตอนนั้น) — คอลัมน์จึงไม่หดจนตัดปี
+      expect(tester.getSize(find.byKey(const ValueKey('long'))).width, kThaiDateCellWidth);
+      expect(tester.getSize(find.byKey(const ValueKey('short'))).width, kThaiDateCellWidth);
+
+      for (final text in [longest, shortest]) {
+        final widget = tester.widget<Text>(find.text(text));
+        expect(widget.maxLines, 1);
+        expect(widget.softWrap, isFalse, reason: 'ห้ามตัดปีลงบรรทัดใหม่แล้วโดนความสูงแถวบัง');
+        expect(widget.overflow, isNot(TextOverflow.ellipsis), reason: 'ต้องเห็นปีครบ ไม่ใช่ …');
+        expect(text, endsWith('2570'));
+      }
+      expect(find.byTooltip('1 ก.พ. 2570 เวลา 09:30 น.'), findsOneWidget);
+    });
+
+    test('ความกว้างเซลล์วันที่เผื่อพอสำหรับวันที่ยาวสุดด้วยฟอนต์จริง', () {
+      // "30 มิ.ย. 2570" = 13 ตัวอักษร · Sarabun 14px เฉลี่ยราว 7px/ตัว ≈ 91px
+      expect(kThaiDateCellWidth, greaterThanOrEqualTo(13 * 7 + 16));
+    });
+
     testWidgets('เซลล์วันเวลาในตารางขึ้นเป็น พ.ศ.', (tester) async {
       await tester.pumpWidget(_wrap(_table(width: 1280)));
       await tester.pumpAndSettle();

@@ -164,6 +164,35 @@ class TruncatedCell extends StatelessWidget {
   }
 }
 
+/// ความกว้างคงที่ของเซลล์วันที่ — พอสำหรับวันที่ยาวสุด "30 มิ.ย. 2570" ด้วยฟอนต์ Sarabun
+/// พร้อมเผื่อที่
+const kThaiDateCellWidth = 112.0;
+
+/// เซลล์วันที่ พ.ศ. (เช่น "1 ก.พ. 2570") — กว้างคงที่ บรรทัดเดียว
+///
+/// ห้ามปล่อยให้คอลัมน์กว้างตามเนื้อหา: DataTable วัดความกว้างคอลัมน์จากข้อความตอนวาดครั้ง
+/// แรก ซึ่งบนเว็บฟอนต์ Sarabun (google_fonts) ยังโหลดไม่เสร็จ จึงวัดด้วยฟอนต์สำรองที่แคบกว่า
+/// พอ Sarabun มาถึงตัวอักษรกว้างขึ้นแต่คอลัมน์ไม่ขยายตาม ปี พ.ศ. ท้ายข้อความเลยถูกตัด
+/// เหลือ "1 ก.พ. 25" — ความกว้างคงที่ไม่ขึ้นกับว่าวัดตอนฟอนต์ไหน
+class ThaiDateCell extends StatelessWidget {
+  const ThaiDateCell(this.text, {super.key, this.tooltip, this.style});
+
+  final String text;
+
+  /// ข้อความเต็มตอนชี้ (เช่นวันที่พร้อมเวลา)
+  final String? tooltip;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final cell = SizedBox(
+      width: kThaiDateCellWidth,
+      child: Text(text, maxLines: 1, softWrap: false, style: style),
+    );
+    return tooltip == null ? cell : Tooltip(message: tooltip, child: cell);
+  }
+}
+
 /// เซลล์ตัวเลขแคบ ๆ (ชั่วโมง / รับสูงสุด) — กว้างพอสำหรับเลขไม่กี่หลักเท่านั้น
 class NarrowCell extends StatelessWidget {
   const NarrowCell(this.child, {super.key, this.width = 44});
