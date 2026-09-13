@@ -84,6 +84,34 @@ String activityCriteriaLabel(
 bool canApproveActivity(String approvalStatus, {required bool isAdmin}) =>
     isAdmin && approvalStatus != 'approved';
 
+/// ปุ่มจัดการที่แถวกิจกรรมหนึ่งแถวมีได้
+enum ActivityAction { unhide, approve, checkinQr, participants, edit, delete }
+
+/// ปุ่มจัดการของกิจกรรมนี้ ตามลำดับที่แสดง (ตัวแรก = ปุ่มหลักที่ยังโชว์ในโหมดย่อ)
+///
+/// คู่ที่ไม่มีวันขึ้นพร้อมกัน: อนุมัติ ↔ QR (QR ต้องอนุมัติแล้ว) และ เลิกซ่อน ↔ ลบ
+/// (ที่ซ่อนอยู่ไม่มีปุ่มลบ) — แถวหนึ่งจึงมีไม่เกิน [kActivityActionSlots] ปุ่มเสมอ
+List<ActivityAction> activityActionsFor(Activity a, {required bool isAdmin}) => [
+      if (a.isHidden) ActivityAction.unhide,
+      if (canApproveActivity(a.approvalStatus, isAdmin: isAdmin)) ActivityAction.approve,
+      // แสดงเฉพาะกิจกรรมที่อนุมัติแล้วและยังไม่ถูกซ่อน — สองกรณีนี้สแกนไม่ผ่านอยู่ดี
+      // (backend ตอบ "กิจกรรมนี้ยังไม่เปิดให้เช็กอิน") การโชว์ QR จึงมีแต่ทำให้เข้าใจผิด
+      if (a.approvalStatus == 'approved' && !a.isHidden) ActivityAction.checkinQr,
+      ActivityAction.participants,
+      ActivityAction.edit,
+      // ที่ซ่อนอยู่แล้วไม่ต้องมีปุ่มลบ — กดไปก็ได้ผลเดิม แต่ชวนให้เข้าใจผิดว่าลบได้
+      if (!a.isHidden) ActivityAction.delete,
+    ];
+
+/// จำนวนปุ่มสูงสุดที่แถวเดียวมีได้ — ใช้กำหนดความกว้างคอลัมน์ "จัดการ" ให้คงที่
+const kActivityActionSlots = 4;
+
+/// ตารางแคบกว่านี้ ยุบปุ่มรองเข้าเมนู ⋮ — ต่ำกว่านี้ฝั่งตรึงจะกินจอเกินครึ่ง
+/// จนคอลัมน์ข้อมูลที่เลื่อนได้เหลือแทบมองไม่เห็น
+const kActivityActionsCompactBelow = 960.0;
+
+bool activityActionsCompact(double tableWidth) => tableWidth < kActivityActionsCompactBelow;
+
 /// คอลัมน์ฝั่งซ้ายของตารางกิจกรรม — ส่วนที่เลื่อนแนวนอนได้เมื่อจอไม่พอ
 List<DataColumn> activityScrollColumns() => const [
       DataColumn(label: Text('ชื่อกิจกรรม')),
@@ -274,6 +302,23 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     );
   }
 
+  void _onAction(Activity a, ActivityAction action) {
+    switch (action) {
+      case ActivityAction.unhide:
+        _unhide(a);
+      case ActivityAction.approve:
+        _approve(a);
+      case ActivityAction.checkinQr:
+        _openCheckinQr(a);
+      case ActivityAction.participants:
+        _openParticipants(a);
+      case ActivityAction.edit:
+        _openForm(existing: a);
+      case ActivityAction.delete:
+        _delete(a);
+    }
+  }
+
   void _openCheckinQr(Activity a) {
     Navigator.push(
       context,
@@ -345,7 +390,13 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                   : LayoutBuilder(
                       builder: (context, constraints) {
                         return constraints.maxWidth > 800
-                            ? TableCard(child: _buildTable(canWrite, isStudent))
+                            ? TableCard(
+                                child: _buildTable(
+                                  canWrite,
+                                  isStudent,
+                                  compact: activityActionsCompact(constraints.maxWidth),
+                                ),
+                              )
                             : _buildList(canWrite, isStudent);
                       },
                     ),
@@ -377,7 +428,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
   TextStyle? _mutedCell(BuildContext context) =>
       Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.sub);
 
-  Widget _buildTable(bool canWrite, bool isStudent) {
+  Widget _buildTable(bool canWrite, bool isStudent, {required bool compact}) {
     final scheme = Theme.of(context).colorScheme;
     return AppStickyTable(
       scrollableColumns: activityScrollColumns(),
@@ -417,8 +468,15 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                   maxWidth: 140, style: _mutedCell(context))),
             ],
             pinned: [
-              if (!isStudent) DataCell(_approvalChip(a)),
-              DataCell(canWrite ? _actionButtons(a) : const SizedBox.shrink()),
+              if (!isStudent) DataCell(ActivityApprovalChips(activity: a)),
+              DataCell(canWrite
+                  ? ActivityActionButtons(
+                      activity: a,
+                      isAdmin: authService.isAdmin,
+                      compact: compact,
+                      onAction: (action) => _onAction(a, action),
+                    )
+                  : const SizedBox.shrink()),
             ],
           ),
       ],
@@ -440,7 +498,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                 Flexible(child: Text(a.name)),
                 if (!isStudent) ...[
                   const SizedBox(width: 8),
-                  _approvalChip(a),
+                  ActivityApprovalChips(activity: a),
                 ],
               ],
             ),
@@ -449,73 +507,20 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
               '${a.location} • รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}',
             ),
             isThreeLine: true,
-            trailing: canWrite ? _actionButtons(a) : null,
+            // การ์ดบนจอแคบมีที่ให้ trailing น้อย — ใช้โหมดย่อ (ปุ่มหลัก + ⋮) เสมอ
+            trailing: canWrite
+                ? ActivityActionButtons(
+                    activity: a,
+                    isAdmin: authService.isAdmin,
+                    compact: true,
+                    onAction: (action) => _onAction(a, action),
+                  )
+                : null,
           ),
         );
       },
     );
   }
-
-  /// ชิปสถานะฝั่ง staff/admin: สถานะอนุมัติ + "ซ่อนอยู่" ถ้าถูกซ่อนไว้
-  Widget _approvalChip(Activity a) => Wrap(
-        spacing: AppSpacing.xs,
-        runSpacing: AppSpacing.xs,
-        children: [
-          StatusChip.activityApproval(a.approvalStatus, dense: true),
-          if (a.isHidden)
-            const StatusChip(
-              label: 'ซ่อนอยู่',
-              palette: StatusPalette.neutral,
-              icon: Icons.visibility_off_outlined,
-              dense: true,
-            ),
-        ],
-      );
-
-  Widget _actionButtons(Activity a) => Wrap(
-        spacing: AppSpacing.xs,
-        runSpacing: AppSpacing.xs,
-        children: [
-          if (a.isHidden)
-            AppIconButton(
-              icon: Icons.visibility,
-              tooltip: 'เลิกซ่อน',
-              onPressed: () => _unhide(a),
-            ),
-          if (canApproveActivity(a.approvalStatus, isAdmin: authService.isAdmin))
-            AppIconButton(
-              icon: Icons.check_circle,
-              tooltip: 'อนุมัติกิจกรรม',
-              onPressed: () => _approve(a),
-            ),
-          // แสดงเฉพาะกิจกรรมที่อนุมัติแล้วและยังไม่ถูกซ่อน — สองกรณีนี้สแกนไม่ผ่านอยู่ดี
-          // (backend ตอบ "กิจกรรมนี้ยังไม่เปิดให้เช็กอิน") การโชว์ QR จึงมีแต่ทำให้เข้าใจผิด
-          if (a.approvalStatus == 'approved' && !a.isHidden)
-            AppIconButton(
-              icon: Icons.qr_code_2,
-              tooltip: 'แสดง QR เช็กอิน',
-              onPressed: () => _openCheckinQr(a),
-            ),
-          AppIconButton(
-            icon: Icons.groups,
-            tooltip: 'ดูผู้เข้าร่วม',
-            onPressed: () => _openParticipants(a),
-          ),
-          AppIconButton(
-            icon: Icons.edit,
-            tooltip: 'แก้ไข',
-            onPressed: () => _openForm(existing: a),
-          ),
-          // ที่ซ่อนอยู่แล้วไม่ต้องมีปุ่มลบ — กดไปก็ได้ผลเดิม แต่ชวนให้เข้าใจผิดว่าลบได้
-          if (!a.isHidden)
-            AppIconButton(
-              icon: Icons.delete,
-              danger: true,
-              tooltip: activityWillBeHiddenOnDelete(a) ? 'ซ่อน (มีผู้เข้าร่วมแล้ว ลบไม่ได้)' : 'ลบ',
-              onPressed: () => _delete(a),
-            ),
-        ],
-      );
 
   Widget _buildPagination() => PaginationBar(
         skip: _skip,
@@ -526,6 +531,155 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
           _load();
         },
       );
+}
+
+/// ชิปสถานะฝั่ง staff/admin: สถานะอนุมัติ + "ซ่อนอยู่" ถ้าถูกซ่อนไว้
+///
+/// เป็น [Row] บรรทัดเดียว ไม่ใช่ [Wrap] ด้วยเหตุผลเดียวกับ [ActivityActionButtons]
+class ActivityApprovalChips extends StatelessWidget {
+  const ActivityApprovalChips({super.key, required this.activity});
+
+  final Activity activity;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StatusChip.activityApproval(activity.approvalStatus, dense: true),
+          if (activity.isHidden) ...[
+            const SizedBox(width: AppSpacing.xs),
+            const StatusChip(
+              label: 'ซ่อนอยู่',
+              palette: StatusPalette.neutral,
+              icon: Icons.visibility_off_outlined,
+              dense: true,
+            ),
+          ],
+        ],
+      );
+}
+
+/// ปุ่มจัดการของแถวกิจกรรม — บรรทัดเดียวเสมอ กว้างคงที่ทุกแถว
+///
+/// เดิมใช้ [Wrap] ซึ่ง intrinsic width ของมัน**ไม่นับ spacing** ตารางที่คำนวณความกว้าง
+/// คอลัมน์จาก intrinsic width จึงให้ที่ขาดไปนิดเดียว ปุ่มสุดท้าย (ลบ) เลยตกบรรทัด
+/// และเพราะแถวถูกล็อกความสูงไว้ บรรทัดที่ตกลงมาจึงวาดทับแถวถัดไป
+///
+/// * โหมดปกติ: วางได้ [kActivityActionSlots] ปุ่มในบรรทัดเดียว (แถวที่มีปุ่มน้อยกว่า
+///   เว้นที่ว่างท้ายไว้ ความกว้างคอลัมน์จึงไม่กระโดดตามแถว)
+/// * โหมดย่อ ([compact]): ปุ่มหลัก 1 ปุ่ม + เมนู ⋮ สำหรับที่เหลือ
+class ActivityActionButtons extends StatelessWidget {
+  const ActivityActionButtons({
+    super.key,
+    required this.activity,
+    required this.isAdmin,
+    required this.onAction,
+    this.compact = false,
+  });
+
+  final Activity activity;
+  final bool isAdmin;
+  final bool compact;
+  final ValueChanged<ActivityAction> onAction;
+
+  static const double buttonSize = 32;
+  static const double gap = AppSpacing.xs;
+
+  /// ความกว้างคงที่ของกลุ่มปุ่ม — โหมดย่อ = ปุ่มหลัก + ⋮
+  static double widthFor({required bool compact}) {
+    final slots = compact ? 2 : kActivityActionSlots;
+    return slots * buttonSize + (slots - 1) * gap;
+  }
+
+  static IconData iconOf(ActivityAction action) => switch (action) {
+        ActivityAction.unhide => Icons.visibility,
+        ActivityAction.approve => Icons.check_circle,
+        ActivityAction.checkinQr => Icons.qr_code_2,
+        ActivityAction.participants => Icons.groups,
+        ActivityAction.edit => Icons.edit,
+        ActivityAction.delete => Icons.delete,
+      };
+
+  String labelOf(ActivityAction action) => switch (action) {
+        ActivityAction.unhide => 'เลิกซ่อน',
+        ActivityAction.approve => 'อนุมัติกิจกรรม',
+        ActivityAction.checkinQr => 'แสดง QR เช็กอิน',
+        ActivityAction.participants => 'ดูผู้เข้าร่วม',
+        ActivityAction.edit => 'แก้ไข',
+        ActivityAction.delete =>
+          activityWillBeHiddenOnDelete(activity) ? 'ซ่อน (มีผู้เข้าร่วมแล้ว ลบไม่ได้)' : 'ลบ',
+      };
+
+  Widget _button(ActivityAction action) => AppIconButton(
+        icon: iconOf(action),
+        size: buttonSize,
+        danger: action == ActivityAction.delete,
+        tooltip: labelOf(action),
+        onPressed: () => onAction(action),
+      );
+
+  Widget _overflowMenu(List<ActivityAction> actions) => PopupMenuButton<ActivityAction>(
+        tooltip: 'การจัดการเพิ่มเติม',
+        padding: EdgeInsets.zero,
+        onSelected: onAction,
+        itemBuilder: (_) => [
+          for (final action in actions)
+            PopupMenuItem(
+              value: action,
+              child: Row(
+                children: [
+                  Icon(
+                    iconOf(action),
+                    size: 18,
+                    color: action == ActivityAction.delete ? AppColors.danger : AppColors.sub,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    labelOf(action),
+                    style: action == ActivityAction.delete
+                        ? const TextStyle(color: AppColors.danger)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+        ],
+        child: Container(
+          width: buttonSize,
+          height: buttonSize,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            border: Border.all(color: AppColors.line),
+            borderRadius: BorderRadius.circular(AppRadius.field),
+          ),
+          child: const Icon(Icons.more_vert, size: buttonSize * 0.5, color: AppColors.sub),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = activityActionsFor(activity, isAdmin: isAdmin);
+    final children = compact
+        ? [
+            _button(actions.first),
+            if (actions.length > 1) _overflowMenu(actions.skip(1).toList()),
+          ]
+        : [for (final action in actions) _button(action)];
+
+    return SizedBox(
+      width: widthFor(compact: compact),
+      height: buttonSize,
+      child: Row(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(width: gap),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 /// ฟอร์มเพิ่ม/แก้ไขกิจกรรม — public เพื่อให้เทสต์ pump ตรง ๆ ได้ (หน้าเต็มต้องยิง
