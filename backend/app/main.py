@@ -14,6 +14,7 @@ from app.routers import (
     chatbot,
     criteria,
     dashboard,
+    faculties,
     gold,
     hour_categories,
     notifications,
@@ -87,6 +88,7 @@ def health_check() -> dict:
 
 app.include_router(auth.router)
 app.include_router(students.router)
+app.include_router(faculties.router)
 app.include_router(activities.router)
 app.include_router(participations.router)
 app.include_router(hour_categories.router)

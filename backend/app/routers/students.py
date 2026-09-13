@@ -50,6 +50,7 @@ def list_students(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=200),
     faculty: Optional[str] = None,
+    year_level: Optional[int] = Query(None, ge=1, le=8, description="กรองเฉพาะชั้นปีนี้"),
     status: Optional[StudentStatus] = None,
     search: Optional[str] = Query(None, description="ค้นหาจากชื่อหรือรหัสนิสิต"),
     session: Session = Depends(get_session),
@@ -64,9 +65,14 @@ def list_students(
         query = query.where(Student.id == current_user.student_id)
         count_query = count_query.where(Student.id == current_user.student_id)
 
+    # ตัวกรองทุกตัวคูณกัน (AND) ทั้งกับ search — count ใช้เงื่อนไขชุดเดียวกันเสมอ
+    # เพื่อให้ "ทั้งหมด N คน" ที่แสดงบนหน้าจอเป็นยอดหลังกรอง ไม่ใช่ยอดทั้งระบบ
     if faculty:
         query = query.where(Student.faculty == faculty)
         count_query = count_query.where(Student.faculty == faculty)
+    if year_level is not None:
+        query = query.where(Student.year_level == year_level)
+        count_query = count_query.where(Student.year_level == year_level)
     if status:
         query = query.where(Student.status == status)
         count_query = count_query.where(Student.status == status)

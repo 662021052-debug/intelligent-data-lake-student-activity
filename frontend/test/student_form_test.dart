@@ -4,11 +4,15 @@ import 'package:activity_tracking_frontend/models/student.dart';
 import 'package:activity_tracking_frontend/screens/students_screen.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/widgets/app_form_dialog.dart';
+import 'package:activity_tracking_frontend/widgets/combo_box_field.dart';
 
 // ต้องใช้ธีมจริง — ธีมของแอปตั้ง splashFactory เป็น InkRipple ส่วนดีฟอลต์ M3
 // เป็น InkSparkle ที่ต้องโหลด shader asset ซึ่งไม่มีตอนรัน --no-test-assets
 Widget _wrap(Widget child) =>
     MaterialApp(theme: AppTheme.light, home: Scaffold(body: child));
+
+/// ช่องคณะเป็นช่องที่สาม (รหัสนิสิต · ชื่อ-สกุล · คณะ)
+final _facultyField = find.byType(TextFormField).at(2);
 
 final _existing = Student(
   id: 1,
@@ -277,4 +281,97 @@ void main() {
     });
   });
 
+  group('ช่องเลือกคณะ (combobox)', () {
+    const faculties = [
+      'คณะนิติศาสตร์',
+      'คณะวิทยาศาสตร์และนวัตกรรมดิจิทัล',
+      'คณะวิศวกรรมศาสตร์',
+    ];
+
+    testWidgets('เป็น combobox ไม่ใช่ช่องพิมพ์ล้วน และบอกว่าเลือกหรือพิมพ์ก็ได้',
+        (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog(faculties: faculties)));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ComboBoxField), findsOneWidget);
+      expect(find.text('คณะ *'), findsOneWidget);
+      expect(find.text('เลือกจากรายการ หรือพิมพ์ชื่อคณะใหม่'), findsOneWidget);
+    });
+
+    testWidgets('โฟกัสแล้วเห็นรายชื่อคณะครบทุกคณะ', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog(faculties: faculties)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(_facultyField);
+      await tester.pumpAndSettle();
+
+      for (final faculty in faculties) {
+        expect(find.text(faculty), findsOneWidget, reason: 'ไม่พบ "$faculty" ในรายการ');
+      }
+    });
+
+    testWidgets('พิมพ์แล้วรายการกรองให้เหลือเฉพาะที่ตรง', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog(faculties: faculties)));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(_facultyField, 'วิศว');
+      await tester.pumpAndSettle();
+
+      expect(find.text('คณะวิศวกรรมศาสตร์'), findsWidgets);
+      expect(find.text('คณะนิติศาสตร์'), findsNothing);
+    });
+
+    testWidgets('เลือกจากรายการแล้วค่าลงไปในช่อง', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog(faculties: faculties)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(_facultyField);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('คณะนิติศาสตร์').last);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextFormField>(_facultyField).controller!.text,
+        'คณะนิติศาสตร์',
+      );
+    });
+
+    testWidgets('ยังพิมพ์คณะใหม่ที่ไม่มีในรายการได้', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog(faculties: faculties)));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(_facultyField, 'คณะที่เพิ่งตั้งใหม่');
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextFormField>(_facultyField).controller!.text,
+        'คณะที่เพิ่งตั้งใหม่',
+      );
+    });
+
+    testWidgets('ไม่มีรายชื่อคณะเลย (โหลดไม่สำเร็จ) ก็ยังกรอกได้ตามปกติ', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog()));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(_facultyField, 'คณะวิศวกรรมศาสตร์');
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.widget<TextFormField>(_facultyField).controller!.text,
+        'คณะวิศวกรรมศาสตร์',
+      );
+    });
+
+    testWidgets('เว้นคณะว่างแล้วกดบันทึก ต้องเตือนเหมือนช่องบังคับอื่น', (tester) async {
+      await tester.pumpWidget(_wrap(const StudentFormDialog(faculties: faculties)));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, '6820510466');
+      await tester.tap(find.text('บันทึก'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('กรอกข้อมูล'), findsWidgets);
+    });
+  });
 }

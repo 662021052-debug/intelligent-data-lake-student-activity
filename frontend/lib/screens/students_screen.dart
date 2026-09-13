@@ -9,6 +9,7 @@ import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
+import '../widgets/combo_box_field.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
@@ -33,11 +34,50 @@ class _StudentsScreenState extends State<StudentsScreen> {
   String? _error;
   String _search = '';
   String? _statusFilter;
+  String? _facultyFilter;
+  int? _yearFilter;
+  // รายชื่อคณะที่มีอยู่จริง โหลดครั้งเดียวต่อการเปิดหน้า แล้วใช้ร่วมกันทั้งตัวกรอง
+  // และช่องเลือกคณะในฟอร์ม (ฟอร์มจึงไม่ต้องยิงซ้ำทุกครั้งที่เปิด)
+  List<String> _faculties = [];
   int _requestId = 0;
+
+  /// มีตัวกรองอะไรเปิดอยู่บ้างไหม (ไม่นับช่องค้นหา ซึ่งมีปุ่มล้างของตัวเองอยู่แล้ว)
+  bool get _hasActiveFilters =>
+      _statusFilter != null || _facultyFilter != null || _yearFilter != null;
 
   @override
   void initState() {
     super.initState();
+    _load();
+    _loadFaculties();
+  }
+
+  /// รายชื่อคณะล้มเหลวไม่ควรทำให้ทั้งหน้าพัง — ตัวกรองจะเหลือแค่ "ทุกคณะ" และ
+  /// ช่องคณะในฟอร์มก็ยังพิมพ์เองได้ตามปกติ
+  Future<void> _loadFaculties() async {
+    try {
+      final faculties = await ApiService.fetchStringList('/faculties');
+      if (mounted) setState(() => _faculties = faculties);
+    } catch (_) {
+      // เงียบไว้โดยตั้งใจ — ดูรายละเอียดที่ doc ข้างบน
+    }
+  }
+
+  /// เปลี่ยนตัวกรองหนึ่งตัวแล้วโหลดใหม่ — ต้องกลับไปหน้าแรกเสมอ ไม่งั้นผลลัพธ์ใหม่
+  /// ที่สั้นกว่าเดิมจะเปิดค้างอยู่หน้าที่ไม่มีข้อมูล
+  void _applyFilter(VoidCallback change) {
+    setState(change);
+    _skip = 0;
+    _load();
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _statusFilter = null;
+      _facultyFilter = null;
+      _yearFilter = null;
+    });
+    _skip = 0;
     _load();
   }
 
@@ -57,6 +97,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final query = <String, String>{'skip': '$_skip', 'limit': '$_limit'};
       if (_search.isNotEmpty) query['search'] = _search;
       if (_statusFilter != null) query['status'] = _statusFilter!;
+      if (_facultyFilter != null) query['faculty'] = _facultyFilter!;
+      if (_yearFilter != null) query['year_level'] = '$_yearFilter';
       final page = await ApiService.fetchPage('/students', Student.fromJson, query: query);
       // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่
       if (!mounted || requestId != _requestId) return;
@@ -75,7 +117,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
   Future<void> _openForm({Student? existing}) async {
     final result = await showDialog<StudentSaveResult>(
       context: context,
-      builder: (_) => StudentFormDialog(existing: existing),
+      builder: (_) => StudentFormDialog(existing: existing, faculties: _faculties),
     );
     if (result == null) return;
     _load();
@@ -125,6 +167,28 @@ class _StudentsScreenState extends State<StudentsScreen> {
       filters: [
         DebouncedSearchField(label: 'ค้นหาชื่อ/รหัสนิสิต', onSearch: _onSearch),
         DropdownButton<String?>(
+          value: _facultyFilter,
+          hint: const Text('ทุกคณะ'),
+          items: [
+            const DropdownMenuItem(value: null, child: Text('ทุกคณะ')),
+            for (final faculty in _faculties)
+              DropdownMenuItem(value: faculty, child: Text(faculty)),
+          ],
+          onChanged: (v) => _applyFilter(() => _facultyFilter = v),
+        ),
+        DropdownButton<int?>(
+          value: _yearFilter,
+          hint: const Text('ทุกชั้นปี'),
+          items: const [
+            DropdownMenuItem(value: null, child: Text('ทุกชั้นปี')),
+            DropdownMenuItem(value: 1, child: Text('ชั้นปี 1')),
+            DropdownMenuItem(value: 2, child: Text('ชั้นปี 2')),
+            DropdownMenuItem(value: 3, child: Text('ชั้นปี 3')),
+            DropdownMenuItem(value: 4, child: Text('ชั้นปี 4')),
+          ],
+          onChanged: (v) => _applyFilter(() => _yearFilter = v),
+        ),
+        DropdownButton<String?>(
           value: _statusFilter,
           hint: const Text('สถานะทั้งหมด'),
           items: const [
@@ -132,12 +196,15 @@ class _StudentsScreenState extends State<StudentsScreen> {
             DropdownMenuItem(value: 'active', child: Text('กำลังศึกษา')),
             DropdownMenuItem(value: 'inactive', child: Text('พ้นสภาพ')),
           ],
-          onChanged: (v) {
-            setState(() => _statusFilter = v);
-            _skip = 0;
-            _load();
-          },
+          onChanged: (v) => _applyFilter(() => _statusFilter = v),
         ),
+        // โผล่เฉพาะตอนมีอะไรให้ล้างจริง ๆ ไม่งั้นเป็นปุ่มตายอยู่ข้างตัวกรองตลอดเวลา
+        if (_hasActiveFilters)
+          TextButton.icon(
+            onPressed: _clearFilters,
+            icon: const Icon(Icons.filter_alt_off, size: 18),
+            label: const Text('ล้างตัวกรอง'),
+          ),
         AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
       ],
       // แถบบางบอกว่ากำลังโหลดผลค้นหา โดยไม่ต้องล้างตารางเดิมทิ้ง
@@ -160,7 +227,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   Widget _emptyState() {
-    if (_search.isNotEmpty || _statusFilter != null) return EmptyState.noResults();
+    if (_search.isNotEmpty || _hasActiveFilters) return EmptyState.noResults();
     return const EmptyState(
       icon: Icons.people_outline,
       title: 'ยังไม่มีข้อมูลนิสิต',
@@ -337,7 +404,11 @@ String studentEmailLabel(String? email) =>
 
 class StudentFormDialog extends StatefulWidget {
   final Student? existing;
-  const StudentFormDialog({super.key, this.existing});
+
+  /// คณะที่มีอยู่แล้วในระบบ ใช้เป็นตัวเลือกของช่อง "คณะ" — ว่างได้ (ยังพิมพ์เองได้)
+  final List<String> faculties;
+
+  const StudentFormDialog({super.key, this.existing, this.faculties = const []});
 
   @override
   State<StudentFormDialog> createState() => _StudentFormDialogState();
@@ -501,9 +572,14 @@ class _StudentFormDialogState extends State<StudentFormDialog> {
           decoration: _decoration('ชื่อ-สกุล', required: true, hint: 'เช่น สมชาย ใจดี'),
           validator: requiredValidator,
         ),
-        TextFormField(
+        ComboBoxField(
           controller: _facultyController,
-          decoration: _decoration('คณะ', required: true, hint: 'เช่น วิศวกรรมศาสตร์'),
+          options: widget.faculties,
+          decoration: _decoration(
+            'คณะ',
+            required: true,
+            hint: 'เลือกจากรายการ หรือพิมพ์ชื่อคณะใหม่',
+          ),
           validator: requiredValidator,
         ),
         TextFormField(

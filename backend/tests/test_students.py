@@ -7,13 +7,20 @@ def _admin_headers(client):
     return {"Authorization": f"Bearer {token}"}
 
 
-def make_student(client, student_id="6501001", full_name="ทดสอบ ระบบ", email=None):
+def make_student(
+    client,
+    student_id="6501001",
+    full_name="ทดสอบ ระบบ",
+    email=None,
+    faculty="วิศวกรรมศาสตร์",
+    year_level=2,
+):
     payload = {
         "student_id": student_id,
         "full_name": full_name,
-        "faculty": "วิศวกรรมศาสตร์",
+        "faculty": faculty,
         "major": "วิศวกรรมคอมพิวเตอร์",
-        "year_level": 2,
+        "year_level": year_level,
         "status": "active",
     }
     if email is not None:
@@ -250,6 +257,91 @@ def test_list_students_with_pagination_and_filter(client):
     filtered = client.get("/students", params={"search": "เอ บี"})
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
+
+
+# ---- ตัวกรองคณะ / ชั้นปี และรายชื่อคณะ ----
+
+def _filter_world(client):
+    """นิสิต 4 คน คร่อมสองคณะ สองชั้นปี — พอให้แยกได้ว่าตัวกรองไหนทำงาน"""
+    make_student(client, student_id="6503001", full_name="เอ วิศวะ", faculty="คณะวิศวกรรมศาสตร์", year_level=1)
+    make_student(client, student_id="6503002", full_name="บี วิศวะ", faculty="คณะวิศวกรรมศาสตร์", year_level=4)
+    make_student(client, student_id="6503003", full_name="ซี นิติ", faculty="คณะนิติศาสตร์", year_level=1)
+    make_student(client, student_id="6503004", full_name="ดี นิติ", faculty="คณะนิติศาสตร์", year_level=4)
+
+
+def test_faculties_lists_each_faculty_once_sorted(client):
+    _filter_world(client)
+    # คณะซ้ำต้องไม่โผล่สองครั้ง
+    make_student(client, student_id="6503005", full_name="อี วิศวะ", faculty="คณะวิศวกรรมศาสตร์")
+
+    response = client.get("/faculties")
+
+    assert response.status_code == 200
+    assert response.json() == ["คณะนิติศาสตร์", "คณะวิศวกรรมศาสตร์"]
+
+
+def test_faculties_requires_login(client):
+    """รายชื่อคณะไม่ใช่ข้อมูลสาธารณะ — ต้องล็อกอินก่อนเหมือน endpoint อื่น"""
+    assert client.get("/faculties", headers={"Authorization": "Bearer not-a-token"}).status_code == 401
+
+
+def test_filter_students_by_faculty(client):
+    _filter_world(client)
+
+    body = client.get("/students", params={"faculty": "คณะนิติศาสตร์"}).json()
+
+    assert body["total"] == 2
+    assert {s["full_name"] for s in body["items"]} == {"ซี นิติ", "ดี นิติ"}
+
+
+def test_filter_students_by_year_level(client):
+    _filter_world(client)
+
+    body = client.get("/students", params={"year_level": 4}).json()
+
+    assert body["total"] == 2
+    assert {s["full_name"] for s in body["items"]} == {"บี วิศวะ", "ดี นิติ"}
+
+
+def test_filters_combine_with_each_other_and_with_search(client):
+    _filter_world(client)
+
+    both = client.get(
+        "/students", params={"faculty": "คณะวิศวกรรมศาสตร์", "year_level": 1}
+    ).json()
+    assert both["total"] == 1
+    assert both["items"][0]["full_name"] == "เอ วิศวะ"
+
+    with_search = client.get(
+        "/students",
+        params={"faculty": "คณะนิติศาสตร์", "year_level": 1, "search": "ซี"},
+    ).json()
+    assert with_search["total"] == 1
+    assert with_search["items"][0]["full_name"] == "ซี นิติ"
+
+    # ตัวกรองที่ขัดกันเองต้องได้ศูนย์ ไม่ใช่เงียบ ๆ แล้วคืนทั้งหมด
+    contradictory = client.get(
+        "/students", params={"faculty": "คณะนิติศาสตร์", "search": "วิศวะ"}
+    ).json()
+    assert contradictory["total"] == 0
+    assert contradictory["items"] == []
+
+
+def test_total_counts_after_filtering_not_the_whole_table(client):
+    """total ต้องเป็นยอดหลังกรอง ไม่งั้นแถบแบ่งหน้าจะพาไปหน้าที่ไม่มีข้อมูล"""
+    _filter_world(client)
+
+    body = client.get(
+        "/students", params={"faculty": "คณะวิศวกรรมศาสตร์", "limit": 1}
+    ).json()
+
+    assert body["total"] == 2       # ไม่ใช่ 4
+    assert len(body["items"]) == 1  # จำกัดหน้าละ 1
+
+
+def test_year_level_out_of_range_is_rejected(client):
+    assert client.get("/students", params={"year_level": 0}).status_code == 422
+    assert client.get("/students", params={"year_level": 99}).status_code == 422
 
 
 def test_update_student(client):

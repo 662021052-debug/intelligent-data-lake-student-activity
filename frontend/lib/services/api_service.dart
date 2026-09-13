@@ -126,6 +126,13 @@ class ApiService {
     return data.map((e) => fromJsonT(e as Map<String, dynamic>)).toList();
   }
 
+  /// รายการสตริงล้วน เช่น `GET /faculties` ที่คืน `["คณะ ก", "คณะ ข"]`
+  static Future<List<String>> fetchStringList(String path) async {
+    final response = await http.get(_uri(path, null), headers: _headers());
+    final data = _decode(response) as List;
+    return data.map((e) => e as String).toList();
+  }
+
   static Future<T> fetchObject<T>(
     String path,
     T Function(Map<String, dynamic>) fromJsonT, {
