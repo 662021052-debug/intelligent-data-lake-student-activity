@@ -11,7 +11,7 @@ import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
 import '../utils/format.dart';
 import '../widgets/app_form_dialog.dart';
-import '../widgets/app_sticky_table.dart';
+import '../widgets/app_table_cells.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
@@ -106,45 +106,127 @@ List<ActivityAction> activityActionsFor(Activity a, {required bool isAdmin}) => 
 /// จำนวนปุ่มสูงสุดที่แถวเดียวมีได้ — ใช้กำหนดความกว้างคอลัมน์ "จัดการ" ให้คงที่
 const kActivityActionSlots = 4;
 
-/// ตารางแคบกว่านี้ ยุบปุ่มรองเข้าเมนู ⋮ — ต่ำกว่านี้ฝั่งตรึงจะกินจอเกินครึ่ง
-/// จนคอลัมน์ข้อมูลที่เลื่อนได้เหลือแทบมองไม่เห็น
+/// ตารางแคบกว่านี้ ยุบปุ่มรองเข้าเมนู ⋮ — ปุ่มครบ 4 ปุ่มกินที่ 140px ซึ่งตารางแคบ ๆ
+/// ควรเอาไปให้คอลัมน์ข้อความ (ชื่อ/สถานที่/หมวด) แทน
 const kActivityActionsCompactBelow = 960.0;
 
 bool activityActionsCompact(double tableWidth) => tableWidth < kActivityActionsCompactBelow;
 
-/// คอลัมน์ฝั่งซ้ายของตารางกิจกรรม — ส่วนที่เลื่อนแนวนอนได้เมื่อจอไม่พอ
+/// ช่องไฟระหว่างคอลัมน์ของตารางกิจกรรม — แคบกว่าค่าเริ่มต้นของธีม (24) เพื่อให้ 8 คอลัมน์
+/// พอดีจอ desktop โดยไม่ต้องเลื่อนแนวนอน
+const kActivityColumnSpacing = AppSpacing.lg;
+
+/// ขอบซ้าย-ขวาของตาราง (ช่องว่างก่อนคอลัมน์แรก/หลังคอลัมน์สุดท้าย)
+const kActivityTableMargin = AppSpacing.lg;
+
+/// ความสูงแถว — ล็อกไว้ทุกแถวสูงเท่ากัน ปุ่ม 32px และชิปสถานะอยู่กึ่งกลางพอดี
+const kActivityRowHeight = 56.0;
+
+/// ความกว้างเนื้อหาของคอลัมน์ที่กว้างคงที่ (ไม่รวม padding รอบเซลล์)
+const kActivityHoursCellWidth = 44.0;
+const kActivityStatusCellWidth = 112.0;
+
+/// ความกว้างคอลัมน์ใน Table = เนื้อหา + padding ที่ DataTable ใส่รอบเซลล์เอง
 ///
-/// "วันเวลา" อยู่ถัดจากชื่อเสมอ: ฝั่งเลื่อนได้กว้างราว 1,270px แต่จอ 1440 ให้ที่แค่ ~800px
-/// คอลัมน์ท้าย ๆ จึงจมใต้ฝั่งตรึงจนกว่าจะเลื่อน เดิมวันเวลาอยู่เกือบท้ายเลยเห็นแค่
-/// "1 ก.พ. 25" — ชื่อ+วันคือสิ่งที่ใช้ระบุกิจกรรม ต้องเห็นโดยไม่ต้องเลื่อน
-List<DataColumn> activityScrollColumns() => const [
-      DataColumn(label: Text('ชื่อกิจกรรม')),
-      DataColumn(label: Text('วันเวลา')),
-      DataColumn(label: Text('ประเภท')),
-      DataColumn(label: Text('หมวดชั่วโมง')),
-      DataColumn(label: Text('ชั่วโมง'), numeric: true),
-      DataColumn(label: Text('บังคับ')),
-      DataColumn(label: Text('รับสูงสุด'), numeric: true),
-      DataColumn(label: Text('สถานที่')),
+/// DataTable ให้ padding ครึ่งช่องไฟแต่ละข้าง ยกเว้นคอลัมน์แรก (ขอบตารางด้านหน้า) และ
+/// คอลัมน์สุดท้าย (ขอบตารางด้านหลัง) — columnWidth ที่ส่งไปคือความกว้างรวม padding
+/// ถ้าใส่แค่ความกว้างเนื้อหา เนื้อหาจะโดนบีบเหลือน้อยกว่าที่ตั้งไว้
+TableColumnWidth _fixedColumn(double content, {bool last = false}) => FixedColumnWidth(
+      content +
+          kActivityColumnSpacing / 2 +
+          (last ? kActivityTableMargin : kActivityColumnSpacing / 2),
+    );
+
+/// คอลัมน์ของตารางกิจกรรม ซ้าย→ขวา — พอดีกว้างตาราง ไม่มีการเลื่อนแนวนอน
+///
+/// * ข้อความ (ชื่อ · สถานที่ · ประเภท · หมวดชั่วโมง) แชร์พื้นที่ที่เหลือแบบ flex แล้วตัด … + tooltip
+/// * วันเวลา · ชั่วโมง · สถานะ · จัดการ กว้างคงที่ (เนื้อหาไม่ยาวกว่านี้)
+/// * "บังคับ" กับ "รับสูงสุด" ไม่มีคอลัมน์ของตัวเอง — เป็นป้ายบนชื่อ + อยู่ใน tooltip ของชื่อ
+///   (สองคอลัมน์นี้คือส่วนที่ทำให้ตารางกว้างเกินจอจนต้องเลื่อน)
+///
+/// นิสิตเห็นเฉพาะกิจกรรมที่อนุมัติแล้ว (backend กรองให้) คอลัมน์สถานะจึงเป็นค่าเดียวกันทุกแถว
+/// ไม่ให้ข้อมูลอะไร — ซ่อนเฉพาะมุมมองนิสิต · ลำดับต้องตรงกับ [activityTableCells]
+List<DataColumn> activityTableColumns(bool isStudent, {bool compact = false}) => [
+      DataColumn(label: ActivityColumnLabel('ชื่อกิจกรรม'), columnWidth: const FlexColumnWidth(3)),
+      DataColumn(
+        label: ActivityColumnLabel('วันเวลา'),
+        columnWidth: _fixedColumn(kThaiDateCellWidth),
+      ),
+      DataColumn(label: ActivityColumnLabel('สถานที่'), columnWidth: const FlexColumnWidth(2)),
+      DataColumn(label: ActivityColumnLabel('ประเภท'), columnWidth: const FlexColumnWidth(1.4)),
+      DataColumn(label: ActivityColumnLabel('หมวดชั่วโมง'), columnWidth: const FlexColumnWidth(2)),
+      DataColumn(
+        label: ActivityColumnLabel('ชั่วโมง'),
+        numeric: true,
+        columnWidth: _fixedColumn(kActivityHoursCellWidth),
+      ),
+      if (!isStudent)
+        DataColumn(
+          label: ActivityColumnLabel('สถานะอนุมัติ'),
+          columnWidth: _fixedColumn(kActivityStatusCellWidth),
+        ),
+      DataColumn(
+        label: ActivityColumnLabel('จัดการ'),
+        columnWidth: _fixedColumn(ActivityActionButtons.widthFor(compact: compact), last: true),
+      ),
     ];
 
-/// คอลัมน์ฝั่งขวาที่ถูกตรึงไว้ให้เห็นเสมอ
+/// หัวคอลัมน์ของตารางกิจกรรม — ยอมหดและตัด … แทนที่จะล้นทับคอลัมน์ข้าง ๆ
 ///
-/// "สถานะอนุมัติ" กับปุ่มจัดการคือสองสิ่งที่ผู้ดูแลต้องใช้ทุกแถว ถ้าปล่อยให้เลื่อนหลุด
-/// ออกนอกจอไปกับคอลัมน์อื่น ต้องลากตารางไปขวาทุกครั้งที่อยากกดอะไรสักปุ่ม
-///
-/// นิสิตเห็นเฉพาะกิจกรรมที่อนุมัติแล้ว (backend กรองให้) คอลัมน์สถานะจึงเป็นค่าเดียวกัน
-/// ทุกแถว ไม่ให้ข้อมูลอะไร — ซ่อนเฉพาะมุมมองนิสิต
-List<DataColumn> activityPinnedColumns(bool isStudent) => [
-      if (!isStudent) const DataColumn(label: Text('สถานะอนุมัติ')),
-      const DataColumn(label: Text('จัดการ')),
+/// DataTable วางป้ายหัวคอลัมน์เป็นลูกตรงของ [Row] ที่ไม่มีการหด ป้ายที่กว้างกว่าคอลัมน์
+/// (คอลัมน์แคบคงที่อย่าง "ชั่วโมง" หรือเมื่อผู้ใช้ขยายตัวอักษรของระบบ) จึงล้นออกนอกคอลัมน์
+/// — เป็น [Flexible] เองจึงหดตามคอลัมน์ได้ ส่วนความกว้างของคอลัมน์ยังมาจาก columnWidth
+class ActivityColumnLabel extends Flexible {
+  ActivityColumnLabel(this.text, {super.key})
+      : super(
+          child: Text(text, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
+        );
+
+  /// ข้อความหัวคอลัมน์ (ใช้อ้างถึงคอลัมน์ในเทสและที่อื่น)
+  final String text;
+}
+
+/// เซลล์ของแถวกิจกรรม เรียงตาม [activityTableColumns] — [actions] คือเนื้อหาคอลัมน์ "จัดการ"
+List<DataCell> activityTableCells(
+  Activity a, {
+  required bool isStudent,
+  required Widget actions,
+  List<HourCategory> categories = const [],
+  List<CriteriaSet> criteriaSets = const [],
+  TextStyle? mutedStyle,
+}) =>
+    [
+      DataCell(ActivityNameCell(activity: a)),
+      // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ เวลาเต็มอยู่ใน tooltip · กว้างคงที่ (ดู ThaiDateCell)
+      DataCell(ThaiDateCell(
+        formatThaiDate(a.startAt),
+        tooltip: formatThaiDateTime(a.startAt),
+        style: mutedStyle,
+      )),
+      // คอลัมน์ flex — ตารางกำหนดขอบให้แล้ว TruncatedCell จึงไม่ต้องจำกัดความกว้างเอง
+      DataCell(TruncatedCell(a.location, maxWidth: double.infinity, style: mutedStyle)),
+      DataCell(TruncatedCell(a.activityType, maxWidth: double.infinity, style: mutedStyle)),
+      DataCell(TruncatedCell(
+        activityCriteriaLabel(categories, criteriaSets, a),
+        maxWidth: double.infinity,
+        style: mutedStyle,
+      )),
+      DataCell(NarrowCell(
+        Text(_trimHours(a.hours), textAlign: TextAlign.end),
+        width: kActivityHoursCellWidth,
+      )),
+      if (!isStudent) DataCell(ActivityApprovalChips(activity: a)),
+      DataCell(actions),
     ];
 
-/// คอลัมน์ทั้งตารางตามลำดับซ้าย→ขวา (ฝั่งเลื่อน + ฝั่งตรึง)
-List<DataColumn> activityTableColumns(bool isStudent) => [
-      ...activityScrollColumns(),
-      ...activityPinnedColumns(isStudent),
-    ];
+/// รายละเอียดใต้ชื่อในการ์ดจอแคบ — บรรทัดแรก "ทำอะไร เมื่อไหร่" บรรทัดสอง "ที่ไหน รับกี่คน"
+String activityCardSubtitle(Activity a) =>
+    '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${formatThaiDateTime(a.startAt)}\n'
+    'สถานที่: ${a.location} • รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}';
+
+/// tooltip ของชื่อกิจกรรมในตาราง — ชื่อเต็ม + ข้อมูลที่เคยเป็นคอลัมน์ "รับสูงสุด"/"บังคับ"
+String activityNameTooltip(Activity a) =>
+    '${a.name}\nรับสูงสุด ${a.maxParticipants} คน · ${a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ'}';
 
 class ActivitiesScreen extends StatefulWidget {
   const ActivitiesScreen({super.key});
@@ -395,10 +477,14 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                       builder: (context, constraints) {
                         return constraints.maxWidth > 800
                             ? TableCard(
-                                child: _buildTable(
-                                  canWrite,
-                                  isStudent,
-                                  compact: activityActionsCompact(constraints.maxWidth),
+                                child: ActivitiesTable(
+                                  activities: _activities,
+                                  categories: _categories,
+                                  criteriaSets: _criteriaSets,
+                                  isStudent: isStudent,
+                                  canWrite: canWrite,
+                                  isAdmin: authService.isAdmin,
+                                  onAction: _onAction,
                                 ),
                               )
                             : _buildList(canWrite, isStudent);
@@ -428,67 +514,6 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
     );
   }
 
-  /// ช่องที่เป็นข้อมูลประกอบ ใช้สีจางกว่าชื่อกิจกรรม เพื่อให้กวาดตาหาชื่อได้เร็ว
-  TextStyle? _mutedCell(BuildContext context) =>
-      Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.sub);
-
-  Widget _buildTable(bool canWrite, bool isStudent, {required bool compact}) {
-    final scheme = Theme.of(context).colorScheme;
-    return AppStickyTable(
-      scrollableColumns: activityScrollColumns(),
-      pinnedColumns: activityPinnedColumns(isStudent),
-      rows: [
-        for (final a in _activities)
-          StickyRow(
-            scrollable: [
-              // ชื่อกิจกรรมยาวได้เป็นประโยค — ตัดแล้วบอกเต็มตอนชี้ ไม่ให้ดันคอลัมน์อื่นหลุดจอ
-              DataCell(TruncatedCell(a.name, maxWidth: 220)),
-              // วันเวลาไทย พ.ศ. — ตารางโชว์แค่วันที่ เวลาเต็มอยู่ใน tooltip · อยู่ถัดจากชื่อ
-              // (ดู activityScrollColumns) และกว้างคงที่ (ดู ThaiDateCell)
-              DataCell(ThaiDateCell(
-                formatThaiDate(a.startAt),
-                tooltip: formatThaiDateTime(a.startAt),
-                style: _mutedCell(context),
-              )),
-              DataCell(TruncatedCell(a.activityType,
-                  maxWidth: 110, style: _mutedCell(context))),
-              DataCell(TruncatedCell(
-                activityCriteriaLabel(_categories, _criteriaSets, a),
-                maxWidth: 170,
-                style: _mutedCell(context),
-              )),
-              DataCell(NarrowCell(Text(_trimHours(a.hours)), width: 36)),
-              DataCell(NarrowCell(
-                Tooltip(
-                  message: a.isRequired ? 'กิจกรรมบังคับ' : 'ไม่บังคับ',
-                  child: Icon(
-                    a.isRequired ? Icons.check_circle : Icons.remove,
-                    size: 18,
-                    color: a.isRequired ? StatusPalette.approved.foreground : scheme.outline,
-                  ),
-                ),
-                width: 32,
-              )),
-              DataCell(NarrowCell(Text('${a.maxParticipants}'), width: 40)),
-              DataCell(TruncatedCell(a.location,
-                  maxWidth: 140, style: _mutedCell(context))),
-            ],
-            pinned: [
-              if (!isStudent) DataCell(ActivityApprovalChips(activity: a)),
-              DataCell(canWrite
-                  ? ActivityActionButtons(
-                      activity: a,
-                      isAdmin: authService.isAdmin,
-                      compact: compact,
-                      onAction: (action) => _onAction(a, action),
-                    )
-                  : const SizedBox.shrink()),
-            ],
-          ),
-      ],
-    );
-  }
-
   Widget _buildList(bool canWrite, bool isStudent) {
     return ListView.builder(
       itemCount: _activities.length,
@@ -508,10 +533,7 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
                 ],
               ],
             ),
-            subtitle: Text(
-              '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${formatThaiDateTime(a.startAt)}\n'
-              '${a.location} • รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}',
-            ),
+            subtitle: Text(activityCardSubtitle(a)),
             isThreeLine: true,
             // การ์ดบนจอแคบมีที่ให้ trailing น้อย — ใช้โหมดย่อ (ปุ่มหลัก + ⋮) เสมอ
             trailing: canWrite
@@ -539,29 +561,159 @@ class _ActivitiesScreenState extends State<ActivitiesScreen> {
       );
 }
 
-/// ชิปสถานะฝั่ง staff/admin: สถานะอนุมัติ + "ซ่อนอยู่" ถ้าถูกซ่อนไว้
+/// ตารางกิจกรรมบน desktop — ทุกคอลัมน์พอดีกว้างตาราง ไม่มีการเลื่อนแนวนอน
 ///
-/// เป็น [Row] บรรทัดเดียว ไม่ใช่ [Wrap] ด้วยเหตุผลเดียวกับ [ActivityActionButtons]
+/// ความกว้างคอลัมน์มาจาก [activityTableColumns] (ข้อความ flex · ที่เหลือคงที่) และตัดสินโหมด
+/// ปุ่มจัดการ (ครบ/ย่อ) จากความกว้างที่ได้จริง · ทุกแถวสูง [kActivityRowHeight] เท่ากัน
+class ActivitiesTable extends StatefulWidget {
+  const ActivitiesTable({
+    super.key,
+    required this.activities,
+    required this.isStudent,
+    required this.canWrite,
+    required this.isAdmin,
+    required this.onAction,
+    this.categories = const [],
+    this.criteriaSets = const [],
+  });
+
+  final List<Activity> activities;
+  final bool isStudent;
+  final bool canWrite;
+  final bool isAdmin;
+  final void Function(Activity activity, ActivityAction action) onAction;
+  final List<HourCategory> categories;
+  final List<CriteriaSet> criteriaSets;
+
+  @override
+  State<ActivitiesTable> createState() => _ActivitiesTableState();
+}
+
+class _ActivitiesTableState extends State<ActivitiesTable> {
+  /// แถวที่เมาส์ชี้อยู่ — ไฮไลต์ทั้งแถวให้กวาดตาตามแถวยาว ๆ ได้ไม่หลง
+  int? _hovered;
+
+  void _setHovered(int? index) {
+    if (_hovered == index) return;
+    setState(() => _hovered = index);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.sub);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = activityActionsCompact(constraints.maxWidth);
+        return SizedBox(
+          width: constraints.maxWidth,
+          child: DataTable(
+            columnSpacing: kActivityColumnSpacing,
+            horizontalMargin: kActivityTableMargin,
+            dataRowMinHeight: kActivityRowHeight,
+            dataRowMaxHeight: kActivityRowHeight,
+            columns: activityTableColumns(widget.isStudent, compact: compact),
+            rows: [
+              for (var i = 0; i < widget.activities.length; i++)
+                DataRow(
+                  color: WidgetStatePropertyAll(
+                    i == _hovered ? AppColors.blueBg.withValues(alpha: 0.6) : null,
+                  ),
+                  cells: [
+                    for (final cell in activityTableCells(
+                      widget.activities[i],
+                      isStudent: widget.isStudent,
+                      categories: widget.categories,
+                      criteriaSets: widget.criteriaSets,
+                      mutedStyle: muted,
+                      actions: widget.canWrite
+                          ? ActivityActionButtons(
+                              activity: widget.activities[i],
+                              isAdmin: widget.isAdmin,
+                              compact: compact,
+                              onAction: (action) =>
+                                  widget.onAction(widget.activities[i], action),
+                            )
+                          : const SizedBox.shrink(),
+                    ))
+                      DataCell(MouseRegion(
+                        onEnter: (_) => _setHovered(i),
+                        onExit: (_) => _setHovered(null),
+                        // กินความสูงเต็มแถว ชี้ตรงไหนของแถวก็ติด ไม่ใช่เฉพาะบนตัวอักษร
+                        child: SizedBox(
+                          height: kActivityRowHeight,
+                          child: Align(alignment: Alignment.centerLeft, child: cell.child),
+                        ),
+                      )),
+                  ],
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// ชื่อกิจกรรมในตาราง — ตัด … เมื่อยาว · ป้าย "บังคับ" ต่อท้ายชื่อ
+///
+/// tooltip บอกชื่อเต็ม + รับสูงสุด + บังคับ/ไม่บังคับ แทนสองคอลัมน์ที่เคยทำให้ตารางล้นจอ
+class ActivityNameCell extends StatelessWidget {
+  const ActivityNameCell({super.key, required this.activity});
+
+  final Activity activity;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: activityNameTooltip(activity),
+      waitDuration: const Duration(milliseconds: 400),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              activity.name,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (activity.isRequired) ...[
+            const SizedBox(width: AppSpacing.xs),
+            const StatusChip(label: 'บังคับ', palette: StatusPalette.pending, dense: true),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// ชิปสถานะฝั่ง staff/admin: สถานะอนุมัติ + ไอคอน "ซ่อนอยู่" ถ้าถูกซ่อนไว้
+///
+/// บรรทัดเดียวเสมอ · ซ่อนอยู่เป็นไอคอน (มี tooltip) ไม่ใช่ชิปที่สอง เพื่อให้คอลัมน์สถานะ
+/// กว้างคงที่ได้แคบพอ · ย่อลงเองถ้าตัวอักษรใหญ่เกินคอลัมน์ (FittedBox) แทนที่จะล้นทับคอลัมน์ข้าง ๆ
 class ActivityApprovalChips extends StatelessWidget {
   const ActivityApprovalChips({super.key, required this.activity});
 
   final Activity activity;
 
   @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          StatusChip.activityApproval(activity.approvalStatus, dense: true),
-          if (activity.isHidden) ...[
-            const SizedBox(width: AppSpacing.xs),
-            const StatusChip(
-              label: 'ซ่อนอยู่',
-              palette: StatusPalette.neutral,
-              icon: Icons.visibility_off_outlined,
-              dense: true,
-            ),
+  Widget build(BuildContext context) => FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            StatusChip.activityApproval(activity.approvalStatus, dense: true),
+            if (activity.isHidden) ...[
+              const SizedBox(width: AppSpacing.xs),
+              const Tooltip(
+                message: 'ซ่อนอยู่ — นิสิตไม่เห็นกิจกรรมนี้',
+                child: Icon(Icons.visibility_off_outlined, size: 16, color: AppColors.muted),
+              ),
+            ],
           ],
-        ],
+        ),
       );
 }
 

@@ -1,169 +1,254 @@
+import 'package:activity_tracking_frontend/models/activity.dart';
 import 'package:activity_tracking_frontend/screens/activities_screen.dart';
+import 'package:activity_tracking_frontend/screens/app_shell.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/utils/format.dart';
-import 'package:activity_tracking_frontend/widgets/app_sticky_table.dart';
+import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
+import 'package:activity_tracking_frontend/widgets/app_card.dart';
+import 'package:activity_tracking_frontend/widgets/app_table_cells.dart';
 import 'package:activity_tracking_frontend/widgets/status_chip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-String _labelOf(DataColumn column) => ((column.label as Text).data)!;
+String _labelOf(DataColumn column) => (column.label as ActivityColumnLabel).text;
 
-Widget _wrap(Widget child) =>
-    MaterialApp(theme: AppTheme.light, home: Scaffold(body: child));
+Widget _wrap(Widget child) => MaterialApp(theme: AppTheme.light, home: Scaffold(body: child));
 
-/// ตารางย่อที่มีโครงเหมือนหน้าจัดการกิจกรรม — หน้าจริงยิง API ตอนเปิดซึ่งล้มในเทสต์
-Widget _table({required double width, bool isStudent = false}) {
-  return SizedBox(
-    width: width,
-    child: AppStickyTable(
-      scrollableColumns: activityScrollColumns(),
-      pinnedColumns: activityPinnedColumns(isStudent),
-      rows: [
-        for (var i = 0; i < 3; i++)
-          StickyRow(
-            scrollable: [
-              const DataCell(TruncatedCell(
-                'กิจกรรมชื่อยาวมากจนดันคอลัมน์อื่นหลุดจอถ้าไม่ตัดข้อความ',
-                maxWidth: 220,
-              )),
-              DataCell(ThaiDateCell(
-                formatThaiDate(DateTime(2027, 6, 30, 9, 30)),
-                key: ValueKey('date-$i'),
-              )),
-              const DataCell(TruncatedCell('อบรม/สัมมนา', maxWidth: 110)),
-              const DataCell(TruncatedCell(
-                'ด้านการสร้างนวัตกรรมสังคม (หน่วยใฝ่เรียนรู้ตลอดชีวิต)',
-                maxWidth: 170,
-              )),
-              const DataCell(NarrowCell(Text('6'), width: 36)),
-              const DataCell(NarrowCell(Icon(Icons.remove, size: 18), width: 32)),
-              const DataCell(NarrowCell(Text('120'), width: 40)),
-              const DataCell(TruncatedCell('หอประชุมใหญ่', maxWidth: 140)),
-            ],
-            pinned: [
-              if (!isStudent)
-                const DataCell(StatusChip(
-                  label: 'รออนุมัติ',
-                  palette: StatusPalette.pending,
-                  dense: true,
-                )),
-              DataCell(IconButton(icon: const Icon(Icons.edit), onPressed: () {})),
-            ],
-          ),
-      ],
+const _allLabels = [
+  'ชื่อกิจกรรม',
+  'วันเวลา',
+  'สถานที่',
+  'ประเภท',
+  'หมวดชั่วโมง',
+  'ชั่วโมง',
+  'สถานะอนุมัติ',
+  'จัดการ',
+];
+
+Activity _activity(
+  int id, {
+  String? name,
+  bool required = false,
+  String status = 'approved',
+  bool hidden = false,
+  String location = 'หอประชุมใหญ่',
+}) =>
+    Activity(
+      id: id,
+      name: name ?? 'กิจกรรมทดสอบลำดับที่ $id',
+      activityType: 'อบรม/สัมมนา',
+      hours: 3,
+      isRequired: required,
+      maxParticipants: 120,
+      startAt: DateTime(2027, 6, 30, 9, 30),
+      location: location,
+      approvalStatus: status,
+      isHidden: hidden,
+    );
+
+final _activities = [
+  _activity(
+    1,
+    name: 'ค่ายทักษะการทำงานเป็นทีมและการสื่อสารอย่างสร้างสรรค์ ครั้งที่ 4/2570',
+    required: true,
+  ),
+  _activity(2, status: 'pending', location: 'ศูนย์ประชุมนานาชาติ อาคารเฉลิมพระเกียรติ ชั้น 3'),
+  _activity(3, status: 'pending', hidden: true),
+];
+
+/// หน้าเต็มแบบที่ผู้ใช้เห็นจริง: เปลือกผู้ดูแล (แถบเมนู + ขอบหน้า) + การ์ดตาราง
+/// — ความกว้างที่ตารางได้จึงเท่ากับบนจอจริง ไม่ใช่เท่ากว้างหน้าต่างทั้งหมด
+Future<void> _pumpPage(WidgetTester tester, double width, {String role = 'admin'}) async {
+  tester.view.physicalSize = Size(width, 900);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+  authService.token = 'fake-token';
+  authService.username = role;
+  authService.role = role;
+
+  await tester.pumpWidget(MaterialApp(
+    theme: AppTheme.light,
+    home: AdminPage(
+      activeId: 'activities',
+      title: 'จัดการกิจกรรม',
+      child: TableCard(
+        child: ActivitiesTable(
+          activities: _activities,
+          isStudent: role == 'student',
+          canWrite: role != 'student',
+          isAdmin: role == 'admin',
+          onAction: (_, _) {},
+        ),
+      ),
     ),
-  );
+  ));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
 }
 
 void main() {
+  tearDown(() => authService.logout());
+
   group('คอลัมน์ตารางกิจกรรม', () {
-    test('ฝั่งตรึงมี "สถานะอนุมัติ" + "จัดการ" สำหรับ staff/admin', () {
-      final pinned = activityPinnedColumns(false).map(_labelOf).toList();
-      expect(pinned, ['สถานะอนุมัติ', 'จัดการ']);
+    test('staff/admin: ชื่อ · วันเวลา · สถานที่ · ประเภท · หมวด · ชั่วโมง · สถานะ · จัดการ', () {
+      expect(activityTableColumns(false).map(_labelOf).toList(), _allLabels);
     });
 
-    test('มุมมองนิสิตตรึงแค่คอลัมน์จัดการ ไม่มีสถานะอนุมัติ', () {
-      final pinned = activityPinnedColumns(true).map(_labelOf).toList();
-      expect(pinned, ['จัดการ']);
+    test('มุมมองนิสิตตัดแค่ "สถานะอนุมัติ"', () {
+      expect(
+        activityTableColumns(true).map(_labelOf).toList(),
+        [..._allLabels]..remove('สถานะอนุมัติ'),
+      );
     });
 
-    test('คอลัมน์ที่เลื่อนได้ไม่มีสถานะ/จัดการปนอยู่ (ไม่งั้นจะซ้ำสองที่)', () {
-      final scrollable = activityScrollColumns().map(_labelOf).toList();
-      expect(scrollable, isNot(contains('สถานะอนุมัติ')));
-      expect(scrollable, isNot(contains('จัดการ')));
-      expect(scrollable.first, 'ชื่อกิจกรรม');
+    test('"บังคับ" และ "รับสูงสุด" ไม่มีคอลัมน์แยกแล้ว (ย้ายไปอยู่บนชื่อ)', () {
+      final labels = activityTableColumns(false).map(_labelOf);
+      expect(labels, isNot(contains('บังคับ')));
+      expect(labels, isNot(contains('รับสูงสุด')));
     });
 
-    test('"วันเวลา" อยู่ถัดจากชื่อกิจกรรม ไม่ใช่เกือบท้าย (ไม่งั้นจมใต้ฝั่งตรึง)', () {
-      final scrollable = activityScrollColumns().map(_labelOf).toList();
-      expect(scrollable.take(2), ['ชื่อกิจกรรม', 'วันเวลา']);
-      expect(scrollable.last, 'สถานที่');
+    test('คอลัมน์ข้อความแชร์ความกว้างแบบ flex · ที่เหลือกว้างคงที่', () {
+      final columns = {for (final c in activityTableColumns(false)) _labelOf(c): c};
+      for (final label in ['ชื่อกิจกรรม', 'สถานที่', 'ประเภท', 'หมวดชั่วโมง']) {
+        expect(columns[label]!.columnWidth, isA<FlexColumnWidth>(), reason: label);
+      }
+      for (final label in ['วันเวลา', 'ชั่วโมง', 'สถานะอนุมัติ', 'จัดการ']) {
+        expect(columns[label]!.columnWidth, isA<FixedColumnWidth>(), reason: label);
+      }
+      expect(columns['ชั่วโมง']!.numeric, isTrue);
     });
 
-    test('ชั่วโมง/รับสูงสุด เป็นคอลัมน์ตัวเลข (ชิดขวา กินความกว้างน้อยกว่า)', () {
-      final columns = {
-        for (final c in activityScrollColumns()) _labelOf(c): c.numeric,
-      };
-      expect(columns['ชั่วโมง'], isTrue);
-      expect(columns['รับสูงสุด'], isTrue);
-      expect(columns['ชื่อกิจกรรม'], isFalse);
+    test('ความกว้างคงที่รวม padding ของเซลล์ — เนื้อหาไม่ถูกบีบเหลือน้อยกว่าที่ตั้ง', () {
+      final columns = activityTableColumns(false);
+      final date = columns[1].columnWidth! as FixedColumnWidth;
+      expect(date.value, kThaiDateCellWidth + kActivityColumnSpacing);
+
+      for (final compact in [false, true]) {
+        final actions = activityTableColumns(false, compact: compact).last.columnWidth!
+            as FixedColumnWidth;
+        expect(
+          actions.value,
+          ActivityActionButtons.widthFor(compact: compact) +
+              kActivityColumnSpacing / 2 +
+              kActivityTableMargin,
+        );
+      }
+    });
+
+    test('เซลล์ต่อแถวเท่าจำนวนคอลัมน์ ทั้งมุมมอง staff และนิสิต', () {
+      for (final isStudent in [false, true]) {
+        expect(
+          activityTableCells(_activities.first, isStudent: isStudent, actions: const SizedBox())
+              .length,
+          activityTableColumns(isStudent).length,
+        );
+      }
     });
   });
 
-  group('คอลัมน์สถานะ + จัดการ ต้องเห็นทุกขนาดจอ', () {
-    for (final width in [760.0, 1024.0, 1280.0, 1600.0]) {
-      testWidgets('ที่ความกว้าง ${width.toInt()} ยังเห็นทั้งสองคอลัมน์', (tester) async {
-        tester.view.physicalSize = Size(width, 800);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
-
-        await tester.pumpWidget(_wrap(_table(width: width)));
-        await tester.pumpAndSettle();
+  group('ทุกคอลัมน์พอดีจอ ไม่ต้องเลื่อนแนวนอน', () {
+    for (final width in [1280.0, 1440.0]) {
+      testWidgets('กว้าง ${width.toInt()}: ไม่มีแถบเลื่อนแนวนอน และทุกคอลัมน์อยู่ในจอครบ',
+          (tester) async {
+        await _pumpPage(tester, width);
 
         expect(tester.takeException(), isNull, reason: 'ต้องไม่ overflow');
-        expect(find.text('สถานะอนุมัติ'), findsOneWidget);
-        expect(find.text('จัดการ'), findsOneWidget);
 
-        // เห็นจริง ไม่ใช่แค่มีอยู่ในต้นไม้ — ต้องอยู่ในกรอบจอ
-        final actions = tester.getRect(find.text('จัดการ'));
-        expect(actions.right, lessThanOrEqualTo(width + 0.5),
-            reason: 'คอลัมน์จัดการหลุดขอบขวาที่ความกว้าง $width');
-        expect(actions.left, greaterThanOrEqualTo(0));
-      });
-    }
+        final inCard = find.byType(TableCard);
+        expect(
+          find.descendant(
+            of: inCard,
+            matching: find.byWidgetPredicate((w) =>
+                w is Scrollable &&
+                (w.axisDirection == AxisDirection.left ||
+                    w.axisDirection == AxisDirection.right)),
+          ),
+          findsNothing,
+          reason: 'ตารางต้องไม่มีส่วนที่เลื่อนแนวนอน',
+        );
+        expect(find.descendant(of: inCard, matching: find.byType(Scrollbar)), findsNothing);
 
-    for (final width in [1024.0, 1280.0, 1440.0]) {
-      testWidgets('กว้าง ${width.toInt()}: วันที่ทุกแถวเห็นครบโดยไม่ต้องเลื่อน ไม่จมใต้ฝั่งตรึง',
-          (tester) async {
-        tester.view.physicalSize = Size(width, 800);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
+        final table = tester.getRect(find.byType(DataTable));
+        expect(table.right, lessThanOrEqualTo(width + 0.5), reason: 'ตารางเกินขอบจอ');
 
-        await tester.pumpWidget(_wrap(_table(width: width)));
-        await tester.pumpAndSettle();
-
-        // ขอบซ้ายของฝั่งตรึง = ขอบขวาของพื้นที่ที่ฝั่งเลื่อนได้มองเห็นจริง
-        final pinnedLeft = tester.getRect(find.text('สถานะอนุมัติ')).left;
-        for (var i = 0; i < 3; i++) {
-          final date = tester.getRect(find.byKey(ValueKey('date-$i')));
-          expect(date.right, lessThanOrEqualTo(pinnedLeft),
-              reason: 'แถว $i: วันที่ต้องอยู่ในส่วนที่เห็นได้ (ไม่ถูกฝั่งตรึงบัง)');
-          expect(date.width, kThaiDateCellWidth);
+        for (final label in _allLabels) {
+          // หาเฉพาะในตาราง — แถบเมนูข้างก็มีคำว่า "หมวดชั่วโมง" เหมือนกัน
+          final header = tester.getRect(
+            find.descendant(of: find.byType(DataTable), matching: find.text(label)),
+          );
+          expect(header.left, greaterThanOrEqualTo(table.left - 0.5), reason: '"$label" หลุดซ้าย');
+          expect(header.right, lessThanOrEqualTo(table.right + 0.5), reason: '"$label" หลุดขวา');
         }
+
+        // ปุ่มจัดการทุกแถว (ครบหรือโหมดย่อ) ต้องอยู่ในตาราง ไม่ล้นขอบ
+        final buttons = find.descendant(
+          of: find.byType(ActivitiesTable),
+          matching: find.byWidgetPredicate(
+              (w) => w is AppIconButton || w is PopupMenuButton<ActivityAction>),
+        );
+        expect(buttons, findsWidgets);
+        for (final element in buttons.evaluate()) {
+          final box = element.renderObject! as RenderBox;
+          final rect = box.localToGlobal(Offset.zero) & box.size;
+          expect(rect.right, lessThanOrEqualTo(table.right + 0.5));
+          expect(rect.left, greaterThanOrEqualTo(table.left - 0.5));
+        }
+        expect(find.byType(ActivityActionButtons), findsNWidgets(_activities.length));
+        expect(find.byType(ActivityApprovalChips), findsNWidgets(_activities.length));
       });
     }
 
-    testWidgets('แถบเลื่อนแนวนอนโชว์ตลอด + เว้นที่ไม่ให้ทับแถวสุดท้าย', (tester) async {
-      tester.view.physicalSize = const Size(1024, 800);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
+    testWidgets('ตารางกว้างเท่าการ์ดพอดี — ไม่กว้างเกินจนต้องเลื่อน ไม่แคบกว่าจนเหลือที่ว่าง',
+        (tester) async {
+      await _pumpPage(tester, 1280);
 
-      await tester.pumpWidget(_wrap(_table(width: 1024)));
-      await tester.pumpAndSettle();
-
-      final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar).first);
-      expect(scrollbar.thumbVisibility, isTrue, reason: 'ต้องบอกผู้ใช้ว่ามีคอลัมน์ให้เลื่อนดู');
-      expect(scrollbar.trackVisibility, isTrue);
-
-      final scroll = tester.widget<SingleChildScrollView>(find.byType(SingleChildScrollView).first);
-      expect(scroll.padding, const EdgeInsets.only(bottom: kStickyTableScrollbarGap));
+      final card = tester.getRect(find.descendant(
+        of: find.byType(TableCard),
+        matching: find.byType(AppCard),
+      ));
+      final table = tester.getRect(find.byType(DataTable));
+      expect(table.width, moreOrLessEquals(card.width, epsilon: 2));
     });
 
-    testWidgets('ฝั่งตรึงไม่เลื่อนตามเมื่อเลื่อนตารางไปทางขวา', (tester) async {
-      tester.view.physicalSize = const Size(900, 800);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
+    testWidgets('นิสิต: ไม่มีคอลัมน์สถานะ ไม่มีปุ่มจัดการ และยังพอดีจอ', (tester) async {
+      await _pumpPage(tester, 1280, role: 'student');
 
-      await tester.pumpWidget(_wrap(_table(width: 900)));
-      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('สถานะอนุมัติ'), findsNothing);
+      expect(find.byType(ActivityActionButtons), findsNothing);
+      expect(tester.getRect(find.byType(DataTable)).right, lessThanOrEqualTo(1280.5));
+    });
+  });
 
-      final before = tester.getRect(find.text('จัดการ'));
-      await tester.drag(find.byType(SingleChildScrollView).first, const Offset(-300, 0));
-      await tester.pumpAndSettle();
-      final after = tester.getRect(find.text('จัดการ'));
+  group('ชื่อกิจกรรมรวม "บังคับ" และ "รับสูงสุด" ไว้แทนคอลัมน์แยก', () {
+    test('tooltip ของชื่อบอกชื่อเต็ม รับสูงสุด และบังคับ/ไม่บังคับ', () {
+      final required = activityNameTooltip(_activity(1, name: 'ปฐมนิเทศ', required: true));
+      expect(required, 'ปฐมนิเทศ\nรับสูงสุด 120 คน · กิจกรรมบังคับ');
+      expect(activityNameTooltip(_activity(2, name: 'ค่าย')), contains('ไม่บังคับ'));
+    });
 
-      expect(after, before, reason: 'คอลัมน์ที่ตรึงไว้ต้องอยู่ที่เดิม');
+    testWidgets('ป้าย "บังคับ" ขึ้นเฉพาะกิจกรรมบังคับ และชื่อยาวถูกตัด …', (tester) async {
+      await _pumpPage(tester, 1280);
+
+      final names = find.byType(ActivityNameCell);
+      expect(
+        find.descendant(of: names.at(0), matching: find.widgetWithText(StatusChip, 'บังคับ')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: names.at(1), matching: find.widgetWithText(StatusChip, 'บังคับ')),
+        findsNothing,
+      );
+
+      final name = tester.widget<Text>(find.text(_activities.first.name));
+      expect(name.maxLines, 1);
+      expect(name.overflow, TextOverflow.ellipsis);
+
+      final tooltip = tester.widget<Tooltip>(
+        find.ancestor(of: find.text(_activities.first.name), matching: find.byType(Tooltip)).first,
+      );
+      expect(tooltip.message, activityNameTooltip(_activities.first));
     });
   });
 
@@ -176,11 +261,7 @@ void main() {
       final text = tester.widget<Text>(find.text(full));
       expect(text.maxLines, 1);
       expect(text.overflow, TextOverflow.ellipsis);
-
-      final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
-      expect(tooltip.message, full);
-
-      // กว้างไม่เกินที่กำหนด ไม่ว่าข้อความจะยาวแค่ไหน
+      expect(tester.widget<Tooltip>(find.byType(Tooltip)).message, full);
       expect(tester.getSize(find.byType(TruncatedCell)).width, lessThanOrEqualTo(80));
     });
   });
@@ -192,15 +273,11 @@ void main() {
     });
 
     test('tooltip/การ์ดบอกเวลาเต็มเป็น พ.ศ. เหมือนกัน', () {
-      expect(
-        formatThaiDateTime(DateTime(2027, 2, 1, 9, 30)),
-        '1 ก.พ. 2570 เวลา 09:30 น.',
-      );
+      expect(formatThaiDateTime(DateTime(2027, 2, 1, 9, 30)), '1 ก.พ. 2570 เวลา 09:30 น.');
     });
 
     testWidgets('เซลล์วันที่กว้างคงที่ บรรทัดเดียว และแสดงปี พ.ศ. ครบ 4 หลัก', (tester) async {
-      // วันที่ยาวสุดที่เกิดได้ (วัน 2 หลัก + เดือนตัวย่อยาวสุด) และสั้นสุด
-      const longest = '30 มิ.ย. 2570';
+      const longest = '28 เม.ย. 2570';
       const shortest = '1 ก.พ. 2570';
       await tester.pumpWidget(_wrap(const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -211,30 +288,25 @@ void main() {
       )));
       await tester.pumpAndSettle();
 
-      // ความกว้างไม่ขึ้นกับความยาวข้อความ (หรือฟอนต์ที่ใช้วัดตอนนั้น) — คอลัมน์จึงไม่หดจนตัดปี
       expect(tester.getSize(find.byKey(const ValueKey('long'))).width, kThaiDateCellWidth);
       expect(tester.getSize(find.byKey(const ValueKey('short'))).width, kThaiDateCellWidth);
-
       for (final text in [longest, shortest]) {
         final widget = tester.widget<Text>(find.text(text));
         expect(widget.maxLines, 1);
-        expect(widget.softWrap, isFalse, reason: 'ห้ามตัดปีลงบรรทัดใหม่แล้วโดนความสูงแถวบัง');
+        expect(widget.softWrap, isFalse);
         expect(widget.overflow, isNot(TextOverflow.ellipsis), reason: 'ต้องเห็นปีครบ ไม่ใช่ …');
-        expect(text, endsWith('2570'));
       }
       expect(find.byTooltip('1 ก.พ. 2570 เวลา 09:30 น.'), findsOneWidget);
     });
 
-    test('ความกว้างเซลล์วันที่เผื่อพอสำหรับวันที่ยาวสุดด้วยฟอนต์จริง', () {
-      // "30 มิ.ย. 2570" = 13 ตัวอักษร · Sarabun 14px เฉลี่ยราว 7px/ตัว ≈ 91px
-      expect(kThaiDateCellWidth, greaterThanOrEqualTo(13 * 7 + 16));
+    test('เซลล์วันที่กว้างกว่าวันที่ยาวสุดที่วัดด้วย Sarabun จริง พร้อมเผื่อ', () {
+      expect(kThaiDateCellWidth, greaterThanOrEqualTo(kThaiDateWidestMeasured + 12));
     });
 
-    testWidgets('เซลล์วันเวลาในตารางขึ้นเป็น พ.ศ.', (tester) async {
-      await tester.pumpWidget(_wrap(_table(width: 1280)));
-      await tester.pumpAndSettle();
+    testWidgets('เซลล์วันที่ในตารางขึ้นเป็น พ.ศ.', (tester) async {
+      await _pumpPage(tester, 1440);
 
-      expect(find.text('30 มิ.ย. 2570'), findsWidgets);
+      expect(find.text('30 มิ.ย. 2570'), findsNWidgets(_activities.length));
       expect(find.textContaining('2027-06-30'), findsNothing);
     });
   });
@@ -249,17 +321,22 @@ void main() {
       )));
       await tester.pumpAndSettle();
 
-      final approved = tester.widget<StatusChip>(
-        find.widgetWithText(StatusChip, 'อนุมัติแล้ว'),
-      );
-      final pending = tester.widget<StatusChip>(
-        find.widgetWithText(StatusChip, 'รออนุมัติ'),
-      );
-
+      final approved = tester.widget<StatusChip>(find.widgetWithText(StatusChip, 'อนุมัติแล้ว'));
+      final pending = tester.widget<StatusChip>(find.widgetWithText(StatusChip, 'รออนุมัติ'));
       expect(approved.palette, StatusPalette.approved);
       expect(pending.palette, StatusPalette.pending,
           reason: 'เทาอ่านเหมือนไม่มีอะไรต้องทำ ทั้งที่เป็นคิวรออนุมัติ');
       expect(pending.palette, isNot(StatusPalette.neutral));
+    });
+
+    testWidgets('ซ่อนอยู่เป็นไอคอนพร้อม tooltip ไม่ใช่ชิปที่สอง (คอลัมน์สถานะจึงแคบได้)',
+        (tester) async {
+      await tester.pumpWidget(_wrap(ActivityApprovalChips(activity: _activity(1, hidden: true))));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StatusChip), findsOneWidget);
+      expect(find.byIcon(Icons.visibility_off_outlined), findsOneWidget);
+      expect(find.byTooltip('ซ่อนอยู่ — นิสิตไม่เห็นกิจกรรมนี้'), findsOneWidget);
     });
   });
 
@@ -274,7 +351,6 @@ void main() {
 
     test('staff เห็นสถานะได้ แต่กดอนุมัติเองไม่ได้', () {
       // backend ตอบ 403 ให้ staff อยู่แล้ว (test_staff_cannot_approve_activity)
-      // ฝั่ง UI จึงต้องไม่โชว์ปุ่มที่กดแล้วเด้ง error แน่ ๆ
       expect(canApproveActivity('pending', isAdmin: false), isFalse);
       expect(canApproveActivity('approved', isAdmin: false), isFalse);
     });
@@ -285,8 +361,6 @@ void main() {
 
       authService.role = 'admin';
       expect(canApproveActivity('pending', isAdmin: authService.isAdmin), isTrue);
-
-      authService.logout();
     });
   });
 }

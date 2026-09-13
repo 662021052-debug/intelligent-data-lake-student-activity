@@ -4,7 +4,7 @@ import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-String _labelOf(DataColumn column) => ((column.label as Text).data)!;
+String _labelOf(DataColumn column) => (column.label as ActivityColumnLabel).text;
 
 void main() {
   tearDown(() => authService.logout());
