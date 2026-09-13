@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 
 import '../models/activity.dart';
+import '../models/criteria_set.dart';
 import '../models/hour_category.dart';
 import '../models/participation.dart';
 import '../services/api_service.dart';
@@ -12,6 +13,9 @@ import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../utils/format.dart';
+import 'activities_screen.dart';
+import 'activity_participants_screen.dart';
 import 'app_shell.dart';
 import '../widgets/status_chip.dart';
 
@@ -34,13 +38,39 @@ String _timeRange(Activity a) => '${_twoDigits(a.startAt.hour)}:${_twoDigits(a.s
 
 String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
 
+/// ตัดเวลาออกเพื่อใช้เป็นคีย์ของวัน (ไม่งั้นกิจกรรมคนละเวลาจะอยู่คนละกลุ่ม)
+DateTime activityDayKey(DateTime dt) => DateTime.utc(dt.year, dt.month, dt.day);
+
+/// จัดกิจกรรมเข้ากลุ่มตามวันที่จัด เรียงตามเวลาเริ่มภายในแต่ละวัน
+///
+/// เป็นฟังก์ชันบริสุทธิ์เพื่อให้เทสต์ยืนยันการจัดกลุ่มได้โดยไม่ต้องมีฐานข้อมูล —
+/// ตัวจุด/จำนวนบนปฏิทินและรายการใต้ปฏิทินอ่านจากผลของฟังก์ชันนี้ตัวเดียวกัน
+Map<DateTime, List<Activity>> groupActivitiesByDay(List<Activity> activities) {
+  final grouped = <DateTime, List<Activity>>{};
+  for (final a in activities) {
+    grouped.putIfAbsent(activityDayKey(a.startAt), () => []).add(a);
+  }
+  for (final list in grouped.values) {
+    list.sort((a, b) => a.startAt.compareTo(b.startAt));
+  }
+  return grouped;
+}
+
 /// ปฏิทินกิจกรรม — ดูได้ทั้ง 3 role
 ///
 /// สิทธิ์การมองเห็นเป็นของ backend เหมือนเดิม: ใช้ `GET /activities` ตัวเดียวกับ
 /// หน้ารายการ ซึ่งกรองตาม role อยู่แล้ว (นิสิตเห็นเฉพาะ approved, staff เห็นของ
 /// ตัวเอง, admin เห็นทั้งหมด) หน้านี้แค่จัดกลุ่มตามวันเท่านั้น
 class ActivityCalendarScreen extends StatefulWidget {
-  const ActivityCalendarScreen({super.key});
+  const ActivityCalendarScreen({super.key, this.initialActivities});
+
+  /// กิจกรรมตั้งต้นแทนการเรียก API — **สำหรับเทสต์เท่านั้น**
+  ///
+  /// หน้านี้ยิง API ตอนเปิด ซึ่งในเทสต์ล้มเสมอ (ApiService เรียก `http.get` ตรง
+  /// จึงไม่มีจุดสวม mock client) ช่องทางนี้ให้เทสต์ยืนยันพฤติกรรมจริงของหน้าได้ —
+  /// กดวันแล้วเห็นรายการของวันนั้น — โดยไม่ต้องรื้อ ApiService ทั้งคลาส
+  @visibleForTesting
+  final List<Activity>? initialActivities;
 
   @override
   State<ActivityCalendarScreen> createState() => _ActivityCalendarScreenState();
@@ -49,6 +79,7 @@ class ActivityCalendarScreen extends StatefulWidget {
 class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
   final Map<DateTime, List<Activity>> _byDay = {};
   List<HourCategory> _categories = [];
+  List<CriteriaSet> _criteriaSets = [];
   Map<int, Participation> _ownParticipationByActivity = {};
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
@@ -60,11 +91,15 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
   void initState() {
     super.initState();
     _selectedDay = _dateOnly(DateTime.now());
-    _load();
+    final seeded = widget.initialActivities;
+    if (seeded != null) {
+      _byDay.addAll(groupActivitiesByDay(seeded));
+    } else {
+      _load();
+    }
   }
 
-  /// ตัดเวลาออกเพื่อใช้เป็นคีย์ของวัน (ไม่งั้นกิจกรรมคนละเวลาจะอยู่คนละกลุ่ม)
-  DateTime _dateOnly(DateTime dt) => DateTime.utc(dt.year, dt.month, dt.day);
+  DateTime _dateOnly(DateTime dt) => activityDayKey(dt);
 
   Future<void> _load() async {
     setState(() {
@@ -78,20 +113,19 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
       final participations = authService.role == 'student'
           ? await ApiService.fetchAll('/participations', Participation.fromJson)
           : <Participation>[];
+      // ฟอร์มแก้กิจกรรมต้องมีรายการเกณฑ์ให้เลือก — นิสิตไม่ได้แก้อะไร จึงไม่ต้องโหลด
+      final criteriaSets = authService.canWrite
+          ? await ApiService.fetchList('/criteria-sets', CriteriaSet.fromJson)
+          : <CriteriaSet>[];
 
-      final grouped = <DateTime, List<Activity>>{};
-      for (final a in activities) {
-        grouped.putIfAbsent(_dateOnly(a.startAt), () => []).add(a);
-      }
-      for (final list in grouped.values) {
-        list.sort((a, b) => a.startAt.compareTo(b.startAt));
-      }
+      final grouped = groupActivitiesByDay(activities);
 
       setState(() {
         _byDay
           ..clear()
           ..addAll(grouped);
         _categories = categories;
+        _criteriaSets = criteriaSets;
         _ownParticipationByActivity = {for (final p in participations) p.activityId: p};
       });
     } catch (e) {
@@ -128,6 +162,27 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
     } catch (e) {
       if (mounted) showErrorSnackbar(context, e);
     }
+  }
+
+  /// เปิดหน้าผู้เข้าร่วมของกิจกรรมนั้น — ทางเดียวกับที่หน้าจัดการกิจกรรมใช้
+  void _openParticipants(Activity a) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ActivityParticipantsScreen(activity: a)),
+    );
+  }
+
+  /// แก้กิจกรรมจากปฏิทินได้เลย ไม่ต้องจำชื่อแล้วไปหาในหน้ารายการอีกรอบ
+  Future<void> _edit(Activity a) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => ActivityFormDialog(
+        existing: a,
+        categories: _categories,
+        criteriaSets: _criteriaSets,
+      ),
+    );
+    if (saved == true) await _load();
   }
 
   @override
@@ -191,6 +246,28 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         todayTextStyle: TextStyle(color: scheme.onPrimaryContainer),
         selectedDecoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
       ),
+      calendarBuilders: CalendarBuilders<Activity>(
+        // จุดเปล่า ๆ บอกได้แค่ "มีกิจกรรม" — วันที่มี 1 งานกับ 5 งานดูเหมือนกันหมด
+        // ใส่ตัวเลขลงไปเลยเพื่อให้กวาดตาทั้งเดือนแล้วเห็นว่าวันไหนแน่น
+        markerBuilder: (context, day, events) {
+          if (events.isEmpty) return null;
+          final scheme = Theme.of(context).colorScheme;
+          return Container(
+            width: 16,
+            height: 16,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle),
+            child: Text(
+              '${events.length}',
+              style: TextStyle(
+                color: scheme.onPrimary,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          );
+        },
+      ),
       onDaySelected: (selected, focused) {
         setState(() {
           _selectedDay = _dateOnly(selected);
@@ -228,6 +305,8 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: ListTile(
+        // ฝั่งผู้ดูแลกดที่การ์ดเพื่อเข้าดูผู้เข้าร่วมได้เลย (เหมือนหน้าจัดการกิจกรรม)
+        onTap: authService.canWrite ? () => _openParticipants(a) : null,
         leading: CircleAvatar(
           backgroundColor: theme.colorScheme.primaryContainer,
           child: Text(
@@ -239,7 +318,7 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${_timeRange(a)} • ${a.location}'),
+            Text('${formatThaiDate(a.startAt)} ${_timeRange(a)} • ${a.location}'),
             Text('${a.activityType} • รับ ${a.participantCount}/${a.maxParticipants} คน'),
             Text(
               'ได้ ${_trimHours(a.hours)} ชม. • ${subcategoryPath(_categories, a.subcategoryId)}',
@@ -280,5 +359,27 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
     return FilledButton(onPressed: () => _register(a), child: const Text('สมัคร'));
   }
 
-  Widget _staffStatus(Activity a) => StatusChip.activityApproval(a.approvalStatus, dense: true);
+  /// ฝั่งผู้ดูแล: สถานะอนุมัติ + ทางเข้าไปดู/แก้กิจกรรมนั้น
+  Widget _staffStatus(Activity a) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StatusChip.activityApproval(a.approvalStatus, dense: true),
+          if (authService.canWrite) ...[
+            const SizedBox(width: AppSpacing.xs),
+            AppIconButton(
+              icon: Icons.groups,
+              size: 28,
+              tooltip: 'ดูผู้เข้าร่วม',
+              onPressed: () => _openParticipants(a),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            AppIconButton(
+              icon: Icons.edit,
+              size: 28,
+              tooltip: 'แก้ไขกิจกรรม',
+              onPressed: () => _edit(a),
+            ),
+          ],
+        ],
+      );
 }

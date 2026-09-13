@@ -69,6 +69,8 @@ List<AppNavItem> navItemsForRole(String? role) => switch (role) {
       'admin' => const [
           AppNavItem.dashboard,
           AppNavItem.activities,
+          // วางต่อจาก "จัดการกิจกรรม" เพราะเป็นมุมมองอีกแบบของข้อมูลชุดเดียวกัน
+          AppNavItem.calendar,
           AppNavItem.users,
           AppNavItem.students,
           AppNavItem.hourCategories,
