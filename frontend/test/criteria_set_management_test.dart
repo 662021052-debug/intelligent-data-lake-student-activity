@@ -216,17 +216,21 @@ void main() {
       expect(find.text('แก้ไขชุดเกณฑ์'), findsOneWidget);
       expect(find.text('2570-regular'), findsOneWidget);
       expect(find.text('เกณฑ์ 2570 หลักสูตรปกติ'), findsOneWidget);
-      expect(_fieldText(tester, 2), '2570', reason: 'ปีหลักสูตร');
-      expect(_fieldText(tester, 3), '2570', reason: 'ปีรุ่นที่เริ่มใช้');
-      expect(_fieldText(tester, 4), '60', reason: 'ชั่วโมงรวม');
+      String keyed(String key) =>
+          tester.widget<TextFormField>(find.byKey(ValueKey(key))).controller!.text;
+      expect(keyed('criteria-set-academic-year'), '2570', reason: 'ปีหลักสูตร');
+      expect(keyed('criteria-set-cohort'), '2570', reason: 'ปีรุ่นที่เริ่มใช้');
+      expect(keyed('criteria-set-hours'), '60', reason: 'ชั่วโมงรวม');
+      // โหมดแก้ไขไม่พาไปเพิ่มรายการต่อ — ปุ่มยังเป็น "บันทึก" ธรรมดา
+      expect(find.widgetWithText(FilledButton, 'บันทึก'), findsOneWidget);
     });
 
     testWidgets('กรอกปีรุ่นผิดแล้วกดบันทึก ต้องเตือน ไม่ยิง API', (tester) async {
       await tester.pumpWidget(_wrap(const CriteriaSetFormDialog()));
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextFormField).at(3), '9999');
-      await tester.tap(find.text('บันทึก'));
+      await tester.enterText(find.byKey(const ValueKey('criteria-set-cohort')), '9999');
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
 
       expect(find.text('ปีรุ่นต้องอยู่ระหว่าง 0–2700'), findsOneWidget);

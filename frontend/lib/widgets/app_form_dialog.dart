@@ -52,6 +52,100 @@ class FormSectionHeader extends StatelessWidget {
   }
 }
 
+/// กล่องหัวข้อ + คำอธิบายที่ครอบกลุ่มช่องกรอก — หน้าตาเดียวกับบล็อก "นับเข้าเกณฑ์ชั่วโมง"
+/// ของฟอร์มกิจกรรม
+///
+/// [hero] = บล็อกพระเอกของฟอร์ม (พื้นฟ้ามีกรอบ) ใช้กับช่องที่กำหนดผลลัพธ์หลัก
+/// ส่วนบล็อกธรรมดาเป็นพื้นขาวเส้นบาง — ผู้ใช้เห็นทันทีว่าช่องไหนสำคัญกว่า
+class FormBlock extends StatelessWidget {
+  const FormBlock({
+    super.key,
+    required this.title,
+    this.description,
+    this.hero = false,
+    required this.children,
+  });
+
+  final String title;
+  final String? description;
+  final bool hero;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md + 2, AppSpacing.md + 2, AppSpacing.md + 2, AppSpacing.md),
+      decoration: BoxDecoration(
+        color: hero ? AppColors.blueBg : AppColors.surface,
+        border: Border.all(
+          color: hero ? AppColors.blue.withValues(alpha: 0.3) : AppColors.line,
+          width: hero ? 1.5 : 1,
+        ),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.blueDark),
+          ),
+          if (description != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              description!,
+              style: const TextStyle(fontSize: 12.5, height: 1.5, color: AppColors.sub),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppSpacing.md),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// ช่องกรอกวางคู่กันในแถวเดียว — จอแคบ (< 600) เรียงลงเป็นคอลัมน์
+///
+/// ตัดสินจากความกว้างจอ ไม่ใช่ LayoutBuilder: AlertDialog วัดขนาดแบบ intrinsic ซึ่ง
+/// LayoutBuilder ไม่รองรับ (assert ล้มเมื่อไดอะล็อกอยู่ในพื้นที่สูงไม่จำกัด) ส่วนไดอะล็อกฟอร์ม
+/// กว้างคงที่อยู่แล้ว ความกว้างจอจึงบอกได้พอว่ามีที่วางสองช่องไหม
+class FormFieldRow extends StatelessWidget {
+  const FormFieldRow({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.sizeOf(context).width < 600) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppSpacing.md),
+            children[i],
+          ],
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) const SizedBox(width: AppSpacing.md),
+          Expanded(child: children[i]),
+        ],
+      ],
+    );
+  }
+}
+
 class AppFormDialog extends StatelessWidget {
   const AppFormDialog({
     super.key,

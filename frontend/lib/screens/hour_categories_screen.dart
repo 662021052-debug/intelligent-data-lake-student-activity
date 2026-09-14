@@ -115,9 +115,23 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       _criteriaSets.where((s) => !s.isSystem).toList();
 
   /// เปิดฟอร์มแล้วโหลดใหม่ถ้าบันทึกสำเร็จ — ใช้ร่วมกันทุกฟอร์มของชุดเกณฑ์
+  ///
+  /// ฟอร์มสร้างชุดใหม่ ("บันทึก แล้วเพิ่มรายการเกณฑ์") ส่ง id ของชุดกลับมาแทน true
+  /// → โหลดใหม่แล้วเปิดฟอร์มรายการเกณฑ์ของชุดนั้นต่อทันที (ชุดเปล่ายังใช้นับชั่วโมงไม่ได้)
   Future<void> _openCriteriaForm(Widget dialog) async {
-    final saved = await showDialog<bool>(context: context, builder: (_) => dialog);
-    if (saved == true) await _load();
+    final saved = await showDialog<Object?>(context: context, builder: (_) => dialog);
+    if (saved == true || saved is int) await _load();
+    if (saved is! int || !mounted) return;
+    CriteriaSet? created;
+    for (final set in _criteriaSets) {
+      if (set.id == saved) created = set;
+    }
+    await _openCriteriaForm(RequirementFormDialog(
+      criteriaSetId: saved,
+      learningUnits: _learningUnits,
+      talents: created == null ? const [] : _talentOptions(created),
+      groups: created == null ? const [] : requirementGroupOptions(created),
+    ));
   }
 
   /// ลบของในชุดเกณฑ์ — ข้อความ 400 ของ backend ("มีรายการเกณฑ์ n รายการใช้กลุ่มนี้อยู่")

@@ -47,6 +47,30 @@ String? cohortValidator(String? value) {
 
 // ---------------------------------------------------------------- ชุดเกณฑ์
 
+/// payload ของ POST/PUT `/criteria-sets` — หน้าฟอร์มจัดใหม่ได้ แต่คีย์ 7 ตัวนี้คือสัญญากับ
+/// backend ห้ามเพิ่ม/ลด/เปลี่ยนชื่อ
+Map<String, dynamic> criteriaSetPayload({
+  required String code,
+  required String name,
+  required String academicYear,
+  required String programType,
+  required String cohort,
+  required String hours,
+  required String countingRule,
+}) =>
+    {
+      'code': code.trim(),
+      'name': name.trim(),
+      'academic_year': int.parse(academicYear.trim()),
+      'program_type': programType,
+      'effective_from_cohort': int.parse(cohort.trim()),
+      'total_required_hours': double.parse(hours.trim()),
+      'counting_rule': countingRule,
+    };
+
+/// ปุ่มหลักตอนสร้างชุดใหม่ — ชุดเปล่ายังใช้ไม่ได้ จึงบันทึกแล้วพาไปเพิ่มรายการเกณฑ์ต่อทันที
+const kSaveAndAddRequirementLabel = 'บันทึก แล้วเพิ่มรายการเกณฑ์';
+
 class CriteriaSetFormDialog extends StatefulWidget {
   const CriteriaSetFormDialog({super.key, this.existing, this.existingSets = const []});
 
@@ -103,25 +127,27 @@ class _CriteriaSetFormDialogState extends State<CriteriaSetFormDialog> {
       _saving = true;
       _error = null;
     });
-    final body = {
-      'code': _code.text.trim(),
-      'name': _name.text.trim(),
-      'academic_year': int.parse(_academicYear.text.trim()),
-      'program_type': _programType,
-      'effective_from_cohort': int.parse(_cohort.text.trim()),
-      'total_required_hours': double.parse(_hours.text.trim()),
-      'counting_rule': _countingRule,
-    };
+    final body = criteriaSetPayload(
+      code: _code.text,
+      name: _name.text,
+      academicYear: _academicYear.text,
+      programType: _programType,
+      cohort: _cohort.text,
+      hours: _hours.text,
+      countingRule: _countingRule,
+    );
     try {
       if (_isNew) {
-        await ApiService.create('/criteria-sets', body, (json) => json);
-      } else {
-        await ApiService.update(
-          '/criteria-sets/${widget.existing!.id}',
-          body,
-          (json) => json,
-        );
+        final created = await ApiService.create('/criteria-sets', body, (json) => json);
+        // ส่ง id ชุดใหม่กลับไป หน้าจอจะเปิดฟอร์มรายการเกณฑ์ของชุดนี้ต่อ
+        if (mounted) Navigator.pop(context, created['id'] as int? ?? true);
+        return;
       }
+      await ApiService.update(
+        '/criteria-sets/${widget.existing!.id}',
+        body,
+        (json) => json,
+      );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _error = friendlyError(e));
@@ -144,10 +170,11 @@ class _CriteriaSetFormDialogState extends State<CriteriaSetFormDialog> {
       key: const ValueKey('cohort-preview'),
       padding: const EdgeInsets.only(top: AppSpacing.sm),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
         decoration: BoxDecoration(
-          color: AppColors.blueBg,
-          borderRadius: BorderRadius.circular(AppRadius.card),
+          color: AppColors.surface,
+          border: Border.all(color: AppColors.blue.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(AppRadius.field),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -156,7 +183,7 @@ class _CriteriaSetFormDialogState extends State<CriteriaSetFormDialog> {
               padding: EdgeInsets.only(top: 2),
               child: Icon(Icons.info_outline, size: 16, color: AppColors.blueDark),
             ),
-            const SizedBox(width: AppSpacing.xs),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
                 text,
@@ -176,107 +203,153 @@ class _CriteriaSetFormDialogState extends State<CriteriaSetFormDialog> {
   Widget build(BuildContext context) {
     return AppFormDialog(
       title: _isNew ? 'เพิ่มชุดเกณฑ์ใหม่' : 'แก้ไขชุดเกณฑ์',
+      subtitle: _isNew
+          ? 'สร้างเกณฑ์การเก็บชั่วโมงสำหรับนิสิตรุ่นใหม่ที่มีโครงสร้างต่างจากเดิม'
+          : 'เปลี่ยนปีรุ่นที่เริ่มใช้แล้ว ช่วงรุ่นของชุดข้างเคียงจะปรับตามเอง',
+      width: 540,
+      submitLabel: _isNew ? kSaveAndAddRequirementLabel : 'บันทึก',
       formKey: _formKey,
       saving: _saving,
       error: _error,
       onSubmit: _submit,
       fields: [
-        const FormSectionHeader(
-          'ข้อมูลชุดเกณฑ์',
-          note: 'ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก',
-          first: true,
+        // บล็อกพระเอก: ปีรุ่นเป็นตัวกำหนดว่าใครใช้ชุดนี้ จึงอยู่บนสุดพร้อมพรีวิวผลที่เกิด
+        FormBlock(
+          key: const ValueKey('criteria-set-audience-block'),
+          hero: true,
+          title: 'ชุดนี้ใช้กับนิสิตรุ่นไหน',
+          description: 'ปีรุ่นที่เริ่มใช้คือตัวกำหนดว่านิสิตรหัสไหนจะใช้ชุดนี้ · '
+              'ระบบคำนวณช่วงที่เหลือให้อัตโนมัติ ไม่ต้องกรอกปีสิ้นสุด',
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  key: const ValueKey('criteria-set-cohort'),
+                  controller: _cohort,
+                  decoration: criteriaDecoration(
+                    'ปีรุ่นที่เริ่มใช้ (พ.ศ.)',
+                    required: true,
+                    // "เช่น" นำหน้า — hint เลขล้วนดูเหมือนกรอกแล้ว ผู้ใช้เลยไม่พิมพ์และไม่เห็นพรีวิว
+                hint: 'เช่น 2570',
+                    helper: 'นิสิตที่เข้าศึกษาตั้งแต่ปีนี้เป็นต้นไปจะใช้ชุดนี้ · '
+                        'ห้ามซ้ำในกลุ่มหลักสูตรเดียวกัน',
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: cohortValidator,
+                  // พรีวิวสดตามเลขที่พิมพ์
+                  onChanged: (_) => setState(() {}),
+                ),
+                _cohortPreview(context),
+              ],
+            ),
+          ],
         ),
-        TextFormField(
-          controller: _code,
-          decoration: criteriaDecoration(
-            'รหัสชุด',
-            required: true,
-            hint: 'เช่น 2570-regular',
-            helper: 'ใช้อ้างถึงชุดนี้ทั้งระบบ ห้ามซ้ำกับชุดอื่น',
-          ),
-          validator: requiredValidator,
-        ),
-        TextFormField(
-          controller: _name,
-          decoration: criteriaDecoration(
-            'ชื่อชุดเกณฑ์',
-            required: true,
-            hint: 'เช่น เกณฑ์ 2570 หลักสูตรปกติ (60 ชม.)',
-          ),
-          validator: requiredValidator,
-        ),
-        TextFormField(
-          controller: _academicYear,
-          decoration: criteriaDecoration('ปีหลักสูตร (พ.ศ.)', required: true, hint: '2570'),
-          keyboardType: TextInputType.number,
-          validator: (v) {
-            final year = int.tryParse((v ?? '').trim());
-            if (year == null) return 'กรอกปี พ.ศ. เช่น 2570';
-            if (year < 2500 || year > 2700) return 'ปีหลักสูตรต้องอยู่ระหว่าง 2500–2700';
-            return null;
-          },
-        ),
-        // ช่อง + พรีวิวเป็นก้อนเดียว ไม่ให้ระยะห่างระหว่างช่องของฟอร์มมาคั่นกลาง
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        FormBlock(
+          key: const ValueKey('criteria-set-info-block'),
+          title: 'ข้อมูลชุดเกณฑ์',
+          description: 'ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก',
           children: [
             TextFormField(
-              controller: _cohort,
+              key: const ValueKey('criteria-set-name'),
+              controller: _name,
               decoration: criteriaDecoration(
-                'ปีรุ่นที่เริ่มใช้ (พ.ศ.)',
+                'ชื่อชุดเกณฑ์',
                 required: true,
-                hint: '2570',
-                helper:
-                    'นิสิตที่เข้าศึกษาตั้งแต่ปีนี้เป็นต้นไปจะใช้ชุดนี้ · ห้ามซ้ำในกลุ่มหลักสูตรเดียวกัน',
+                hint: 'เช่น เกณฑ์ 2570 หลักสูตรปกติ (60 ชม.)',
+              ),
+              validator: requiredValidator,
+            ),
+            FormFieldRow(
+              children: [
+                TextFormField(
+                  key: const ValueKey('criteria-set-code'),
+                  controller: _code,
+                  decoration: criteriaDecoration(
+                    'รหัสชุด',
+                    required: true,
+                    hint: 'เช่น 2570-regular',
+                    helper: 'ใช้อ้างถึงชุดนี้ในระบบ ห้ามซ้ำ',
+                  ),
+                  validator: requiredValidator,
+                ),
+                DropdownButtonFormField<String>(
+                  key: const ValueKey('criteria-set-program-type'),
+                  initialValue: _programType,
+                  isExpanded: true,
+                  decoration: criteriaDecoration(
+                    'กลุ่มหลักสูตร',
+                    required: true,
+                    helper: 'ช่วงรุ่นคิดแยกตามกลุ่มหลักสูตร',
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'regular', child: Text('หลักสูตรปกติ')),
+                    DropdownMenuItem(value: 'continuing', child: Text('หลักสูตรต่อเนื่อง')),
+                  ],
+                  // เปลี่ยนกลุ่มหลักสูตรแล้วพรีวิวช่วงรุ่นต้องคิดใหม่ด้วย
+                  onChanged: (v) => setState(() => _programType = v ?? 'regular'),
+                ),
+              ],
+            ),
+            TextFormField(
+              key: const ValueKey('criteria-set-academic-year'),
+              controller: _academicYear,
+              decoration: criteriaDecoration(
+                'ปีหลักสูตร (พ.ศ.)',
+                required: true,
+                // "เช่น" นำหน้า — hint เลขล้วนดูเหมือนกรอกแล้ว ผู้ใช้เลยไม่พิมพ์และไม่เห็นพรีวิว
+                hint: 'เช่น 2570',
+                helper: 'ปีของเล่มหลักสูตรที่เกณฑ์ชุดนี้อ้างอิง',
               ),
               keyboardType: TextInputType.number,
-              validator: cohortValidator,
-              // พรีวิวสดตามเลขที่พิมพ์
-              onChanged: (_) => setState(() {}),
-            ),
-            _cohortPreview(context),
-          ],
-        ),
-        DropdownButtonFormField<String>(
-          initialValue: _programType,
-          isExpanded: true,
-          decoration: criteriaDecoration('กลุ่มหลักสูตร', required: true),
-          items: const [
-            DropdownMenuItem(value: 'regular', child: Text('หลักสูตรปกติ')),
-            DropdownMenuItem(value: 'continuing', child: Text('หลักสูตรต่อเนื่อง')),
-          ],
-          onChanged: (v) => setState(() => _programType = v ?? 'regular'),
-        ),
-        TextFormField(
-          controller: _hours,
-          decoration: criteriaDecoration(
-            'ชั่วโมงรวมของชุด',
-            required: true,
-            hint: '60',
-            helper: 'ผลรวมชั่วโมงของรายการเกณฑ์ควรเท่ากับตัวเลขนี้',
-          ),
-          keyboardType: TextInputType.number,
-          validator: positiveNumberValidator,
-        ),
-        DropdownButtonFormField<String>(
-          initialValue: _countingRule,
-          isExpanded: true,
-          decoration: criteriaDecoration(
-            'วิธีนับความครบ',
-            required: true,
-            helper: 'ต่อรายการ = ต้องครบทุกรายการ · ต่อหน่วย = ดูยอดรวมของหน่วยการเรียนรู้',
-          ),
-          items: const [
-            DropdownMenuItem(
-              value: 'min_per_requirement',
-              child: Text('ครบตามชั่วโมงของแต่ละรายการ'),
-            ),
-            DropdownMenuItem(
-              value: 'total_per_unit',
-              child: Text('ครบตามยอดรวมของหน่วยการเรียนรู้'),
+              validator: (v) {
+                final year = int.tryParse((v ?? '').trim());
+                if (year == null) return 'กรอกปี พ.ศ. เช่น 2570';
+                if (year < 2500 || year > 2700) return 'ปีหลักสูตรต้องอยู่ระหว่าง 2500–2700';
+                return null;
+              },
             ),
           ],
-          onChanged: (v) => setState(() => _countingRule = v ?? 'min_per_requirement'),
+        ),
+        FormBlock(
+          key: const ValueKey('criteria-set-counting-block'),
+          title: 'การนับชั่วโมง',
+          description: 'ต่อรายการ = ต้องครบทุกรายการ · ต่อหน่วย = ดูยอดรวมของหน่วยการเรียนรู้',
+          children: [
+            FormFieldRow(
+              children: [
+                TextFormField(
+                  key: const ValueKey('criteria-set-hours'),
+                  controller: _hours,
+                  decoration: criteriaDecoration(
+                    'ชั่วโมงรวมของชุด',
+                    required: true,
+                    hint: '60',
+                    helper: 'ผลรวมของทุกรายการควรเท่ากับเลขนี้ — ไม่เท่าจะมีคำเตือนบนการ์ดชุด',
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: positiveNumberValidator,
+                ),
+                DropdownButtonFormField<String>(
+                  key: const ValueKey('criteria-set-counting-rule'),
+                  initialValue: _countingRule,
+                  isExpanded: true,
+                  decoration: criteriaDecoration('วิธีนับความครบ', required: true),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'min_per_requirement',
+                      child: Text('ครบตามชั่วโมงของแต่ละรายการ'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'total_per_unit',
+                      child: Text('ครบตามยอดรวมของหน่วยการเรียนรู้'),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _countingRule = v ?? 'min_per_requirement'),
+                ),
+              ],
+            ),
+          ],
         ),
       ],
     );

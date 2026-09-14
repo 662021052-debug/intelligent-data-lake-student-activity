@@ -129,12 +129,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('cohort-preview')), findsNothing);
 
-      await tester.enterText(find.byType(TextFormField).at(3), '2570');
+      await tester.enterText(find.byKey(const ValueKey('criteria-set-cohort')), '2570');
       await tester.pump();
       expect(find.text('ชุดนี้จะใช้กับรหัส 70 ขึ้นไป และทำให้ชุด 2567 เหลือ 67–69'),
           findsOneWidget);
 
-      await tester.enterText(find.byType(TextFormField).at(3), '2575');
+      await tester.enterText(find.byKey(const ValueKey('criteria-set-cohort')), '2575');
       await tester.pump();
       expect(find.text('ชุดนี้จะใช้กับรหัส 75 ขึ้นไป และทำให้ชุด 2567 เหลือ 67–74'),
           findsOneWidget);
