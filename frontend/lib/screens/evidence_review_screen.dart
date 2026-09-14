@@ -10,6 +10,7 @@ import '../utils/ocr_status.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
+import '../widgets/app_table_cells.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/search_field.dart';
@@ -136,8 +137,17 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
 
   String _activityLabel(Participation p) => p.activityName ?? '#${p.activityId}';
 
-  String _uploadedLabel(Participation p) =>
-      p.evidenceUploadedAt == null ? '-' : formatThaiDateTime(p.evidenceUploadedAt!.toLocal());
+  /// วันที่ + เวลาแบบสั้น — ตารางนี้มีหลายคอลัมน์ รูปแบบเต็ม "… เวลา 18:00 น." กินที่จน
+  /// ปุ่ม "ตรวจ" ถูกดันล้นขอบการ์ดที่จอ 1440
+  String _uploadedLabel(Participation p) {
+    final uploaded = p.evidenceUploadedAt;
+    if (uploaded == null) return '-';
+    // backend เก็บ utcnow แบบไม่มีโซนเวลา — .toLocal() เฉย ๆ ไม่แปลงให้ จะเพี้ยน 7 ชม.
+    final local = serverTimeToLocal(uploaded);
+    final time = '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+    return '${formatThaiDate(local)} $time';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -230,8 +240,9 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
         rows: [
           for (final p in _items)
             [
-              DataCell(Text(_studentLabel(p))),
-              DataCell(Text(_activityLabel(p))),
+              // ชื่อยาวตัด … (ชี้ดูเต็มได้) ไม่งั้นตารางกว้างเกินการ์ดและปุ่ม "ตรวจ" ถูกตัด
+              DataCell(TruncatedCell(_studentLabel(p), maxWidth: 200)),
+              DataCell(TruncatedCell(_activityLabel(p), maxWidth: 220)),
               DataCell(Text(_uploadedLabel(p))),
               DataCell(_ocrCell(p)),
               DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
