@@ -31,6 +31,7 @@ from app.models import (
     UserRole,
 )
 from app.checkin import checkin_window, normalize_token
+from app.timeutil import now_th_naive
 from app.ocr import OcrEngine, get_ocr
 from app.schemas import Page, ParticipationCheckin, ParticipationRegister
 from app.storage import ObjectStorage, get_storage
@@ -268,7 +269,9 @@ def register_self(
         # กิจกรรมที่ถูกซ่อน = ถูกยกเลิกในสายตานิสิต จึงสมัครใหม่ไม่ได้ (คนที่สมัคร
         # ไปแล้วยังเก็บประวัติ/ชั่วโมงไว้เหมือนเดิม)
         raise HTTPException(status_code=400, detail="กิจกรรมนี้ยังไม่เปิดรับสมัคร")
-    if activity.start_at <= datetime.utcnow():
+    # start_at เป็นเวลาไทยแบบไม่มีโซน (ดู app/timeutil.py) ต้องเทียบกับเวลาไทย
+    # เดิมเทียบกับ utcnow() ซึ่งช้ากว่า 7 ชม. จึงสมัครได้ทั้งที่กิจกรรมเริ่มไปแล้ว
+    if activity.start_at <= now_th_naive():
         raise HTTPException(status_code=400, detail="กิจกรรมนี้ปิดรับสมัครแล้ว")
 
     existing = session.exec(
@@ -329,11 +332,15 @@ def checkin_with_qr(
     if activity.approval_status != ApprovalStatus.approved or activity.is_hidden:
         raise HTTPException(status_code=400, detail="กิจกรรมนี้ยังไม่เปิดให้เช็กอิน")
 
+    # หน้าต่างเช็กอินคิดจาก start_at ซึ่งเป็นเวลาไทยแบบไม่มีโซน → เทียบกับเวลาไทย
+    # (เดิมเทียบกับ utcnow() หน้าต่างจึงเปิด/ปิดช้าไป 7 ชม.) ส่วน check_in_time ที่บันทึก
+    # ยังเป็น UTC ตามแบบ timestamp ของระบบ — หน้าเว็บแปลงด้วย serverTimeToLocal
     now = datetime.utcnow()
+    now_th = now_th_naive()
     opens_at, closes_at = checkin_window(activity)
-    if now < opens_at:
+    if now_th < opens_at:
         raise HTTPException(status_code=400, detail="ยังไม่ถึงเวลาเช็กอิน")
-    if now > closes_at:
+    if now_th > closes_at:
         raise HTTPException(status_code=400, detail="เลยเวลาเช็กอินแล้ว")
 
     participation = session.exec(

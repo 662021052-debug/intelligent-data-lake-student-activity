@@ -13,6 +13,7 @@ from sqlmodel import select
 from app.auth import hash_password
 from app.checkin import CHECKIN_QUERY_KEY, QR_PREFIX, normalize_token, qr_payload
 from app.config import settings
+from app.timeutil import now_th_naive
 from app.models import (
     Activity,
     ApprovalStatus,
@@ -57,13 +58,13 @@ def _make_linked_student_user(session, client, username="dl_student", student_co
 
 
 def _make_live_activity(session, owner_id, name="กิจกรรมกำลังจัด", max_participants=10):
-    """กิจกรรมที่เริ่มตอนนี้พอดี → อยู่กลางหน้าต่างเช็กอิน"""
+    """กิจกรรมที่เริ่มตอนนี้พอดี (เวลาไทย) → อยู่กลางหน้าต่างเช็กอิน"""
     activity = Activity(
         name=name,
         activity_type="จิตอาสา",
         is_required=False,
         max_participants=max_participants,
-        start_at=datetime.utcnow(),
+        start_at=now_th_naive(),
         location="หอประชุม",
         hours=3,
         created_by=owner_id,
@@ -255,7 +256,7 @@ def test_checkin_rejects_a_link_carrying_someone_elses_code(client, session):
 def test_link_outside_the_window_is_still_rejected(client, session):
     """D1 ไม่เปลี่ยน: ลิงก์ที่ถ่ายรูปส่งต่อยังใช้ได้แค่ในช่วงเวลาเช็กอิน"""
     activity = _make_live_activity(session, _user_id(session, "admin"))
-    activity.start_at = datetime.utcnow() - timedelta(days=2)
+    activity.start_at = now_th_naive() - timedelta(days=2)
     session.add(activity)
     session.commit()
 

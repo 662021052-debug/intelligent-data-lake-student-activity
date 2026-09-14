@@ -4,6 +4,7 @@ from sqlmodel import select
 
 from app.auth import hash_password
 from app.models import Activity, ApprovalStatus, Student, StudentStatus, User, UserRole
+from app.timeutil import now_th_naive
 
 
 def _admin_headers(tokens):
@@ -151,6 +152,35 @@ def test_register_past_activity_rejected(client, session):
 
     response = client.post("/participations/register", json={"activity_id": activity.id}, headers=headers)
     assert response.status_code == 400
+
+
+def test_register_closes_at_thai_start_time_not_utc(client, session):
+    """start_at เป็นเวลาไทยไม่มีโซน — งานที่เริ่มไปแล้ว 1 ชม. (เวลาไทย) ต้องปิดรับสมัคร
+
+    เดิมเทียบกับ utcnow() ซึ่งช้ากว่าเวลาไทย 7 ชม. กิจกรรมนี้จึงยังสมัครได้ทั้งที่เริ่มไปแล้ว
+    """
+    activity = _make_approved_activity(session, _admin_id(session))
+    activity.start_at = now_th_naive() - timedelta(hours=1)
+    session.add(activity)
+    session.commit()
+    # เงื่อนไขที่ทำให้โค้ดเดิมพลาด: ยังเป็น "อนาคต" ถ้าเทียบกับ UTC
+    assert activity.start_at > datetime.utcnow()
+    _, headers = _make_linked_student_user(session, client)
+
+    response = client.post("/participations/register", json={"activity_id": activity.id}, headers=headers)
+    assert response.status_code == 400
+    assert "ปิดรับสมัคร" in response.json()["detail"]
+
+
+def test_register_still_open_shortly_before_thai_start_time(client, session):
+    activity = _make_approved_activity(session, _admin_id(session))
+    activity.start_at = now_th_naive() + timedelta(minutes=30)
+    session.add(activity)
+    session.commit()
+    _, headers = _make_linked_student_user(session, client)
+
+    response = client.post("/participations/register", json={"activity_id": activity.id}, headers=headers)
+    assert response.status_code == 201
 
 
 def test_student_can_cancel_own_pending_registration(client, session):

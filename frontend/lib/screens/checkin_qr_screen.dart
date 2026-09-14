@@ -7,6 +7,7 @@ import '../models/checkin_qr.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../utils/format.dart';
 import '../widgets/checkin_qr_view.dart';
 import '../widgets/dialogs.dart';
 
@@ -39,7 +40,7 @@ class _CheckinQrScreenState extends State<CheckinQrScreen> {
   /// นาฬิกาสำหรับป้าย "เปิด/ปิดรับเช็กอิน" — จอนี้ถูกฉายค้างไว้เป็นชั่วโมง
   /// ป้ายจึงต้องเปลี่ยนเองเมื่อถึงเวลา ไม่ใช่ค้างค่าตอนเปิดหน้า
   Timer? _ticker;
-  DateTime _now = DateTime.now().toUtc();
+  DateTime _now = thaiNowNaive();
 
   @override
   void initState() {
@@ -47,7 +48,7 @@ class _CheckinQrScreenState extends State<CheckinQrScreen> {
     _load();
     _ticker = Timer.periodic(
       const Duration(seconds: 30),
-      (_) => setState(() => _now = DateTime.now().toUtc()),
+      (_) => setState(() => _now = thaiNowNaive()),
     );
   }
 
@@ -67,7 +68,7 @@ class _CheckinQrScreenState extends State<CheckinQrScreen> {
       if (!mounted) return;
       setState(() {
         _qr = qr;
-        _now = DateTime.now().toUtc();
+        _now = thaiNowNaive();
       });
     } catch (e) {
       if (!mounted) return;

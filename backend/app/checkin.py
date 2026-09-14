@@ -83,7 +83,8 @@ def normalize_token(raw: str) -> str:
 
 
 def checkin_window(activity: Activity) -> tuple[datetime, datetime]:
-    """ช่วงเวลาที่เช็กอินได้ของกิจกรรมนี้ (UTC, สอดคล้องกับ start_at ในฐานข้อมูล).
+    """ช่วงเวลาที่เช็กอินได้ของกิจกรรมนี้ — เวลาไทยแบบไม่มีโซน เหมือน start_at
+    (ดู app/timeutil.py) จึงต้องเทียบกับ ``now_th_naive()`` ไม่ใช่ ``utcnow()``.
 
     activity ไม่มี `end_at` ในสคีมา จึงประมาณเวลาจบจาก `activity.hours`
     (จำนวนชั่วโมงที่กิจกรรมให้ = ความยาวกิจกรรม) แล้วบวกเวลาผ่อนผันท้ายงาน

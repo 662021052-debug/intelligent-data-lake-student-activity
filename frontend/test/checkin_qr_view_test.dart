@@ -8,9 +8,10 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:activity_tracking_frontend/models/checkin_qr.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
+import 'package:activity_tracking_frontend/utils/format.dart';
 import 'package:activity_tracking_frontend/widgets/checkin_qr_view.dart';
 
-/// payload ที่ backend ส่งมาจริง — เวลาเป็น UTC แบบไม่มีโซน
+/// payload ที่ backend ส่งมาจริง — เวลาเป็น "เวลาไทยแบบไม่มีโซน" เหมือน start_at ในฐานข้อมูล
 Map<String, dynamic> _payload() => {
       'activity_id': 29,
       'activity_name': 'จิตอาสาพัฒนามหาวิทยาลัย (กำลังจัดอยู่ตอนนี้)',
@@ -21,12 +22,12 @@ Map<String, dynamic> _payload() => {
       'checkin_closes_at': '2026-08-02T14:47:00',
     };
 
-Future<void> _pumpView(WidgetTester tester, {required DateTime nowUtc}) async {
+Future<void> _pumpView(WidgetTester tester, {required DateTime nowTh}) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: AppTheme.light,
       home: Scaffold(
-        body: CheckinQrView(qr: CheckinQr.fromJson(_payload()), now: nowUtc),
+        body: CheckinQrView(qr: CheckinQr.fromJson(_payload()), now: nowTh),
       ),
     ),
   );
@@ -42,26 +43,34 @@ void main() {
       expect(qr.qrPayload, 'https://activity.tsu.ac.th/#/checkin?c=${qr.token}');
     });
 
-    test('ช่วงเวลาเช็กอินคิดเป็น UTC ตรงกับที่ backend บังคับ', () {
+    test('ช่วงเวลาเช็กอินคิดเป็นเวลาไทย ตรงกับที่ backend บังคับ', () {
       final qr = CheckinQr.fromJson(_payload());
 
-      expect(qr.isOpenAt(DateTime.utc(2026, 8, 2, 9, 0)), isTrue);
-      expect(qr.isBeforeOpenAt(DateTime.utc(2026, 8, 2, 9, 0)), isFalse);
+      expect(qr.isOpenAt(DateTime(2026, 8, 2, 9, 0)), isTrue);
+      expect(qr.isBeforeOpenAt(DateTime(2026, 8, 2, 9, 0)), isFalse);
 
       // ก่อนเปิด 1 นาที และหลังปิด 1 นาที ต้องถือว่าปิด
-      expect(qr.isOpenAt(DateTime.utc(2026, 8, 2, 7, 46)), isFalse);
-      expect(qr.isBeforeOpenAt(DateTime.utc(2026, 8, 2, 7, 46)), isTrue);
-      expect(qr.isOpenAt(DateTime.utc(2026, 8, 2, 14, 48)), isFalse);
-      expect(qr.isBeforeOpenAt(DateTime.utc(2026, 8, 2, 14, 48)), isFalse);
+      expect(qr.isOpenAt(DateTime(2026, 8, 2, 7, 46)), isFalse);
+      expect(qr.isBeforeOpenAt(DateTime(2026, 8, 2, 7, 46)), isTrue);
+      expect(qr.isOpenAt(DateTime(2026, 8, 2, 14, 48)), isFalse);
+      expect(qr.isBeforeOpenAt(DateTime(2026, 8, 2, 14, 48)), isFalse);
 
       // ขอบพอดีทั้งสองด้านยังเช็กอินได้
-      expect(qr.isOpenAt(DateTime.utc(2026, 8, 2, 7, 47)), isTrue);
-      expect(qr.isOpenAt(DateTime.utc(2026, 8, 2, 14, 47)), isTrue);
+      expect(qr.isOpenAt(DateTime(2026, 8, 2, 7, 47)), isTrue);
+      expect(qr.isOpenAt(DateTime(2026, 8, 2, 14, 47)), isTrue);
+    });
+
+    test('นาฬิกา UTC ต้องแปลงเป็นเวลาไทยก่อนเทียบ (บั๊กเดิมเทียบ UTC ตรง ๆ)', () {
+      final qr = CheckinQr.fromJson(_payload());
+      // 01:30 UTC = 08:30 เวลาไทย → อยู่ในช่วง 07:47–14:47
+      expect(qr.isOpenAt(thaiNowNaive(DateTime.utc(2026, 8, 2, 1, 30))), isTrue);
+      // ถ้าเอา 01:30 (ตัวเลข UTC) มาเทียบตรง ๆ จะดูเหมือนยังไม่เปิด — คือบั๊กเดิม
+      expect(qr.isBeforeOpenAt(DateTime.utc(2026, 8, 2, 1, 30)), isTrue);
     });
   });
 
   testWidgets('แสดง QR ที่สร้างจาก payload ของกิจกรรม (ไม่ใช่ token เปล่า)', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 9, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 9, 0));
 
     expect(find.byType(QrImageView), findsOneWidget);
     // QrImageView ไม่เปิด data ให้อ่าน จึงผูก payload ไว้เป็น key ของภาพ
@@ -73,34 +82,41 @@ void main() {
   });
 
   testWidgets('แสดงรหัสสำรองไว้ให้กรอกมือเมื่อกล้องใช้ไม่ได้', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 9, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 9, 0));
 
     expect(find.text('b97e85b0dd544be29d3b73063bfb5883'), findsOneWidget);
     expect(find.textContaining('กล้องใช้ไม่ได้?'), findsOneWidget);
   });
 
+  testWidgets('เวลาเริ่มและช่วงเช็กอินบนจอเป็นเวลาไทยตรง ๆ ไม่บวก 7 ชม.', (tester) async {
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 9, 0));
+
+    expect(find.text('กิจกรรมเริ่ม 2026-08-02 08:47 น.'), findsOneWidget);
+    expect(find.text('สแกนเช็กอินได้ 2026-08-02 07:47 – 2026-08-02 14:47 น.'), findsOneWidget);
+  });
+
   testWidgets('อยู่ในช่วงเวลา → ป้าย "เปิดให้เช็กอินแล้ว"', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 9, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 9, 0));
     expect(find.text('เปิดให้เช็กอินแล้ว'), findsOneWidget);
   });
 
   testWidgets('ก่อนเวลา → ป้าย "ยังไม่ถึงเวลาเช็กอิน"', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 6, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 6, 0));
     expect(find.text('ยังไม่ถึงเวลาเช็กอิน'), findsOneWidget);
   });
 
   testWidgets('เลยเวลา → ป้าย "เลยเวลาเช็กอินแล้ว"', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 20, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 20, 0));
     expect(find.text('เลยเวลาเช็กอินแล้ว'), findsOneWidget);
   });
 
   testWidgets('ย้ำกฎ D2 บนจอด้วย: เช็กอินไม่ใช่ชั่วโมง', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 9, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 9, 0));
     expect(find.textContaining('ชั่วโมงยังต้องให้นิสิตส่งหลักฐาน'), findsOneWidget);
   });
 
   testWidgets('ไม่ส่ง onCopyToken ก็ไม่ขึ้นปุ่มคัดลอก', (tester) async {
-    await _pumpView(tester, nowUtc: DateTime.utc(2026, 8, 2, 9, 0));
+    await _pumpView(tester, nowTh: DateTime(2026, 8, 2, 9, 0));
     expect(find.text('คัดลอกรหัส'), findsNothing);
   });
 }

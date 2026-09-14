@@ -21,6 +21,15 @@ DateTime serverTimeToLocal(DateTime value) {
   ).toLocal();
 }
 
+/// "ตอนนี้" ตามเวลาไทยแบบไม่มีโซน — ใช้เทียบกับ `activity.startAt` ที่เก็บเป็นเวลาไทยดิบ ๆ
+///
+/// ตรงกับ `now_th_naive()` ฝั่ง backend จึงตัดสิน "เริ่มไปแล้ว/ปิดรับสมัคร" ตรงกันเสมอ
+/// ไม่ว่าเครื่องผู้ใช้จะตั้งโซนเวลาอะไรไว้
+DateTime thaiNowNaive([DateTime? now]) {
+  final th = (now ?? DateTime.now()).toUtc().add(const Duration(hours: 7));
+  return DateTime(th.year, th.month, th.day, th.hour, th.minute, th.second, th.millisecond);
+}
+
 /// เวลาแบบสั้นสำหรับแสดงผล: `2026-08-02 17:05`
 String formatDateTime(DateTime dt) {
   String two(int n) => n.toString().padLeft(2, '0');

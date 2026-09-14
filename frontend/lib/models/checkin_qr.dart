@@ -41,16 +41,19 @@ class CheckinQr {
 
   /// ตอนนี้อยู่ในช่วงที่นิสิตสแกนได้จริงหรือยัง
   ///
-  /// เทียบเป็น UTC เพราะ backend ส่งเวลามาแบบไม่มีโซน (`datetime.utcnow()`)
-  bool isOpenAt(DateTime nowUtc) =>
-      !nowUtc.isBefore(_asUtc(checkinOpensAt)) && !nowUtc.isAfter(_asUtc(checkinClosesAt));
+  /// `start_at` และช่วงเช็กอินเป็น "เวลาไทยแบบไม่มีโซน" (ดู backend/app/timeutil.py)
+  /// [nowTh] จึงต้องมาจาก `thaiNowNaive()` — เดิมเทียบเป็น UTC ป้ายสถานะเลยเพี้ยน 7 ชม.
+  bool isOpenAt(DateTime nowTh) {
+    final now = _naive(nowTh);
+    return !now.isBefore(_naive(checkinOpensAt)) && !now.isAfter(_naive(checkinClosesAt));
+  }
 
   /// ยังไม่ถึงเวลาเปิดเช็กอิน (ต่างจาก "เลยเวลาแล้ว" ซึ่งก็ปิดเหมือนกัน)
-  bool isBeforeOpenAt(DateTime nowUtc) => nowUtc.isBefore(_asUtc(checkinOpensAt));
+  bool isBeforeOpenAt(DateTime nowTh) => _naive(nowTh).isBefore(_naive(checkinOpensAt));
 
-  static DateTime _asUtc(DateTime value) => value.isUtc
-      ? value
-      : DateTime.utc(
+  /// เทียบด้วยตัวเลขวัน-เวลาล้วน ไม่ให้ธงโซนเวลาของ DateTime มาทำให้เลื่อน
+  static DateTime _naive(DateTime value) => value.isUtc
+      ? DateTime(
           value.year,
           value.month,
           value.day,
@@ -58,5 +61,6 @@ class CheckinQr {
           value.minute,
           value.second,
           value.millisecond,
-        );
+        )
+      : value;
 }

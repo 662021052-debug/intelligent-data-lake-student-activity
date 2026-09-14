@@ -12,7 +12,7 @@ import '../utils/format.dart';
 class CheckinQrView extends StatelessWidget {
   final CheckinQr qr;
 
-  /// เวลาปัจจุบันเป็น UTC (backend ส่งเวลามาเป็น UTC แบบไม่มีโซน)
+  /// เวลาปัจจุบันแบบ "เวลาไทยไม่มีโซน" (`thaiNowNaive()`) — หน่วยเดียวกับ start_at
   final DateTime now;
 
   final VoidCallback? onCopyToken;
@@ -205,11 +205,13 @@ class _WindowDetail extends StatelessWidget {
 
     return Column(
       children: [
-        Text('กิจกรรมเริ่ม ${formatDateTime(serverTimeToLocal(qr.startAt))} น.', style: style),
+        // เวลาไทยอยู่แล้ว แสดงตรง ๆ — serverTimeToLocal มีไว้กับ timestamp จาก utcnow() เท่านั้น
+        // (เดิมส่งผ่านตัวแปลงนั้น เวลาบนจอ QR จึงช้ากว่าจริง 7 ชม.)
+        Text('กิจกรรมเริ่ม ${formatDateTime(qr.startAt)} น.', style: style),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          'สแกนเช็กอินได้ ${formatDateTime(serverTimeToLocal(qr.checkinOpensAt))} – '
-          '${formatDateTime(serverTimeToLocal(qr.checkinClosesAt))} น.',
+          'สแกนเช็กอินได้ ${formatDateTime(qr.checkinOpensAt)} – '
+          '${formatDateTime(qr.checkinClosesAt)} น.',
           textAlign: TextAlign.center,
           style: style,
         ),

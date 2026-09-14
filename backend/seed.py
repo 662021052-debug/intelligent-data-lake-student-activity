@@ -38,6 +38,7 @@ from app.models import (
     UserRole,
 )
 from app.storage import get_storage
+from app.timeutil import now_th_naive
 from seed_evidence import (
     VARIANT_FULL,
     VARIANT_LOW_QUALITY,
@@ -295,7 +296,8 @@ def _upsert_live_activity(
     หน้าต่างเช็กอินผูกกับ ``start_at`` กิจกรรมที่ seed ไว้เมื่อวานจึงหลุดช่วงไปแล้ว
     — ฟังก์ชันนี้ทำให้เรียกซ้ำเพื่อเดโมใหม่ได้โดยไม่ต้อง seed ทั้งฐานข้อมูล
     """
-    started_at = datetime.utcnow() - timedelta(minutes=LIVE_ACTIVITY["started_minutes_ago"])
+    # start_at เป็นเวลาไทยแบบไม่มีโซน (หน้าต่างเช็กอินเทียบกับเวลาไทย)
+    started_at = now_th_naive() - timedelta(minutes=LIVE_ACTIVITY["started_minutes_ago"])
     activity = session.exec(
         select(Activity).where(Activity.name == LIVE_ACTIVITY["name"])
     ).first()
@@ -361,7 +363,7 @@ def refresh_live_activity() -> None:
 
         print(
             f"กิจกรรมเดโมเช็กอิน QR: \"{activity.name}\" (id={activity.id}) "
-            f"เริ่ม {activity.start_at:%Y-%m-%d %H:%M} UTC — ล้างการเช็กอินเดิม {len(already)} รายการ"
+            f"เริ่ม {activity.start_at:%Y-%m-%d %H:%M} (เวลาไทย) — ล้างการเช็กอินเดิม {len(already)} รายการ"
         )
 
 
@@ -688,7 +690,7 @@ def seed() -> None:
         registered_count[live_activity.id] = len(live_participations)
         print(
             f"\nกิจกรรมเดโมเช็กอิน QR: \"{live_activity.name}\" "
-            f"เริ่ม {live_activity.start_at:%Y-%m-%d %H:%M} UTC ({LIVE_ACTIVITY['hours']:g} ชม.) "
+            f"เริ่ม {live_activity.start_at:%Y-%m-%d %H:%M} เวลาไทย ({LIVE_ACTIVITY['hours']:g} ชม.) "
             f"— สมัครล่วงหน้าแล้ว {len(live_participations)} คน ที่เหลือสแกนเป็น walk-up ได้"
         )
 

@@ -7,6 +7,7 @@ from sqlmodel import select
 from app.auth import hash_password
 from app.checkin import QR_PREFIX, normalize_token, qr_payload
 from app.config import settings
+from app.timeutil import now_th_naive
 from app.models import (
     Activity,
     ApprovalStatus,
@@ -69,7 +70,8 @@ def _make_activity(
         activity_type="จิตอาสา",
         is_required=False,
         max_participants=max_participants,
-        start_at=datetime.utcnow() + starts_in,
+        # start_at เป็นเวลาไทยแบบไม่มีโซน (app/timeutil.py) — หน้าต่างเช็กอินเทียบกับเวลาไทย
+        start_at=now_th_naive() + starts_in,
         location="หอประชุม",
         hours=hours,
         created_by=owner_id,
@@ -81,6 +83,26 @@ def _make_activity(
     session.commit()
     session.refresh(activity)
     return activity
+
+
+def test_checkin_window_follows_thai_time_and_still_stores_utc(client, session):
+    """งานที่เริ่มไปแล้ว 30 นาที (เวลาไทย) ต้องเช็กอินได้
+
+    เดิมเทียบหน้าต่างกับ utcnow() ซึ่งช้ากว่าเวลาไทย 7 ชม. จึงตอบ "ยังไม่ถึงเวลาเช็กอิน"
+    ส่วน check_in_time ที่บันทึกยังเป็น UTC เหมือนเดิม (หน้าเว็บแปลงด้วย serverTimeToLocal)
+    """
+    activity = _make_activity(session, _user_id(session, "admin"), starts_in=timedelta(minutes=-30))
+    # เงื่อนไขที่โค้ดเดิมพลาด: เทียบด้วย UTC แล้วยังไม่ถึงเวลาเปิดหน้าต่าง
+    assert datetime.utcnow() < activity.start_at - timedelta(minutes=settings.checkin_open_before_minutes)
+    _, headers = _make_linked_student_user(session, client, username="qr_thai", student_code="9002099")
+
+    before = datetime.utcnow()
+    response = client.post(
+        "/participations/checkin", json={"token": activity.checkin_token}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    checked_in = datetime.fromisoformat(response.json()["check_in_time"])
+    assert before - timedelta(seconds=5) <= checked_in <= datetime.utcnow() + timedelta(seconds=5)
 
 
 # ---------- B1: token ประจำกิจกรรม + endpoint แสดง QR ----------
