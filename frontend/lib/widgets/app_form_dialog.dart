@@ -56,6 +56,7 @@ class AppFormDialog extends StatelessWidget {
   const AppFormDialog({
     super.key,
     required this.title,
+    this.subtitle,
     required this.fields,
     required this.onSubmit,
     this.formKey,
@@ -66,6 +67,9 @@ class AppFormDialog extends StatelessWidget {
   });
 
   final String title;
+
+  /// คำอธิบายสั้น ๆ ใต้หัวข้อ dialog (ไม่ใส่ก็ได้)
+  final String? subtitle;
 
   /// ช่องกรอกของฟอร์ม เรียงบนลงล่าง (คั่นระยะห่างให้อัตโนมัติ)
   final List<Widget> fields;
@@ -81,7 +85,21 @@ class AppFormDialog extends StatelessWidget {
     final theme = Theme.of(context);
 
     return AlertDialog(
-      title: Text(title),
+      title: subtitle == null
+          ? Text(title)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  subtitle!,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
       titlePadding: const EdgeInsets.fromLTRB(
         AppSpacing.xl,
         AppSpacing.xl,

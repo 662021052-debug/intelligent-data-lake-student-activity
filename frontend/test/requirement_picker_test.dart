@@ -185,6 +185,25 @@ void main() {
       expect(find.textContaining('รวมกับกลุ่ม Social 16 ชม.'), findsOneWidget);
     });
 
+    testWidgets('showHeader: false ซ่อนหัวข้อของ picker แต่ยังเลือกได้เหมือนเดิม', (tester) async {
+      Set<int>? changed;
+      await tester.pumpWidget(_wrap(RequirementPicker(
+        criteriaSets: const [_talentSet],
+        selected: const {14},
+        onChanged: (ids) => changed = ids,
+        showHeader: false,
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('รายการเกณฑ์ที่กิจกรรมนี้นับชั่วโมงให้'), findsNothing);
+      expect(find.text('เลือกแล้ว 1 รายการ'), findsNothing);
+      expect(find.text('ล้างทั้งหมด'), findsNothing);
+
+      await tester.tap(find.text('กิจกรรมปฐมนิเทศนิสิต'));
+      await tester.pumpAndSettle();
+      expect(changed, isEmpty, reason: 'ติ๊กออกยังทำงานเหมือนเดิม');
+    });
+
     testWidgets('ยังไม่มีชุดเกณฑ์ในระบบ ก็ไม่พังทั้งฟอร์ม', (tester) async {
       await tester.pumpWidget(_wrap(
         RequirementPicker(criteriaSets: const [], selected: const {}, onChanged: (_) {}),
@@ -219,6 +238,10 @@ void main() {
     });
 
     testWidgets('ไม่เลือกอะไรเลยแล้วกดบันทึก ต้องเตือน ไม่ยิง API', (tester) async {
+      // ฟอร์มยาวขึ้นหลังจัดหน้าใหม่ — ขยายจอให้ช่องที่ต้องพิมพ์อยู่ในจอ
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(_wrap(ActivityFormDialog(
         categories: _categories,
         criteriaSets: const [_talentSet],
@@ -239,7 +262,11 @@ void main() {
       expect(find.textContaining('กรุณาเลือกรายการเกณฑ์อย่างน้อยหนึ่งรายการ'), findsOneWidget);
     });
 
-    testWidgets('โหมดแก้ไขติ๊กรายการเดิมของกิจกรรมไว้ให้', (tester) async {
+    testWidgets('โหมดแก้ไข: รายการเดิมขึ้นเป็น pill · กดเพิ่มเกณฑ์แล้วเห็นติ๊กไว้ในรายการ',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       final existing = Activity(
         id: 5,
         name: 'ค่ายอาสาปี 2568',
@@ -258,10 +285,19 @@ void main() {
       )));
       await tester.pumpAndSettle();
 
-      expect(find.text('เลือกแล้ว 1 รายการ'), findsOneWidget);
+      // มีรายการแล้ว: เห็นเป็น pill ก่อน กล่องรายการพับไว้
+      expect(find.byKey(const ValueKey('requirement-pill-16')), findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsNothing);
+
+      await tester.tap(find.text('เพิ่มเกณฑ์ที่นับเข้า'));
+      await tester.pumpAndSettle();
+
       final checkbox = tester.widget<CheckboxListTile>(
         find.ancestor(
-          of: find.text('การคิด วิจารณญาณ และการแก้ปัญหา'),
+          of: find.descendant(
+            of: find.byType(RequirementPicker),
+            matching: find.text('การคิด วิจารณญาณ และการแก้ปัญหา'),
+          ),
           matching: find.byType(CheckboxListTile),
         ),
       );

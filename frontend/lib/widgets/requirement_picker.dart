@@ -19,7 +19,14 @@ class RequirementPicker extends StatefulWidget {
     required this.selected,
     required this.onChanged,
     this.maxListHeight = 260,
+    this.showHeader = true,
   });
+
+  /// โชว์หัวข้อ "รายการเกณฑ์ที่กิจกรรมนี้นับชั่วโมงให้" + จำนวนที่เลือก + ล้างทั้งหมด
+  ///
+  /// ปิดได้เมื่อวาง picker ในกรอบที่มีหัวข้อของตัวเองอยู่แล้ว (บล็อกเกณฑ์ในฟอร์มกิจกรรม)
+  /// — มีผลแค่การแสดงผล ไม่เปลี่ยนการเลือก/ถอดรายการ
+  final bool showHeader;
 
   final List<CriteriaSet> criteriaSets;
 
@@ -62,28 +69,30 @@ class _RequirementPickerState extends State<RequirementPicker> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'รายการเกณฑ์ที่กิจกรรมนี้นับชั่วโมงให้',
-                style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        if (widget.showHeader) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'รายการเกณฑ์ที่กิจกรรมนี้นับชั่วโมงให้',
+                  style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
               ),
-            ),
-            if (count > 0)
-              TextButton(
-                onPressed: () => widget.onChanged(<int>{}),
-                child: const Text('ล้างทั้งหมด'),
-              ),
-          ],
-        ),
-        Text(
-          count == 0
-              ? 'ยังไม่ได้เลือก — เลือกได้หลายรายการ ชั่วโมงจะเข้าให้ทุกรายการที่เลือก'
-              : 'เลือกแล้ว $count รายการ',
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-        ),
-        const SizedBox(height: AppSpacing.sm),
+              if (count > 0)
+                TextButton(
+                  onPressed: () => widget.onChanged(<int>{}),
+                  child: const Text('ล้างทั้งหมด'),
+                ),
+            ],
+          ),
+          Text(
+            count == 0
+                ? 'ยังไม่ได้เลือก — เลือกได้หลายรายการ ชั่วโมงจะเข้าให้ทุกรายการที่เลือก'
+                : 'เลือกแล้ว $count รายการ',
+            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
         if (widget.criteriaSets.isEmpty)
           _EmptyNote(theme: theme)
         else

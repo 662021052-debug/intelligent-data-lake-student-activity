@@ -26,6 +26,53 @@ import 'checkin_qr_screen.dart';
 
 const _activityTypes = ['จิตอาสา', 'กีฬา', 'วิชาการ', 'ศิลปวัฒนธรรม', 'อบรม/สัมมนา'];
 
+/// ตัวเลือกประเภทในฟอร์ม = 5 ค่าเดิมที่ backend รับ + ค่าเดิมของกิจกรรมที่ไม่อยู่ในรายการ
+///
+/// กิจกรรมเก่า/ที่นำเข้าจากไฟล์อาจมีประเภทอื่น (backend รับ string อะไรก็ได้) — ต้องยังเห็น
+/// และเลือกค้างไว้ ไม่งั้นแค่เปิดแก้ชื่อก็ทำประเภทเดิมหายแบบเงียบ ๆ
+List<String> activityTypeChoices(String? existingType) => [
+      ..._activityTypes,
+      if (existingType != null && existingType.isNotEmpty && !_activityTypes.contains(existingType))
+        existingType,
+    ];
+
+/// body ที่ฟอร์มกิจกรรมส่งไป POST/PUT `/activities` — แยกออกมาเพื่อให้เทสต์ยืนยันได้ว่า
+/// การจัดหน้าฟอร์มใหม่ไม่ได้เปลี่ยนสิ่งที่ backend รับ
+Map<String, dynamic> activityFormPayload({
+  required String name,
+  required String activityType,
+  required int? subcategoryId,
+  required Set<int> requirementIds,
+  required double hours,
+  required bool isRequired,
+  required int maxParticipants,
+  required DateTime startAt,
+  required String location,
+}) =>
+    {
+      'name': name,
+      'activity_type': activityType,
+      'subcategory_id': subcategoryId,
+      'requirement_ids': requirementIds.toList()..sort(),
+      'hours': hours,
+      'is_required': isRequired,
+      'max_participants': maxParticipants,
+      'start_at': startAt.toIso8601String(),
+      'location': location,
+    };
+
+/// ชื่อรายการเกณฑ์ + เส้นทาง "ชุดเกณฑ์ › กลุ่ม" ของทุกรายการ — ใช้ทำ pill ในฟอร์มกิจกรรม
+Map<int, ({String name, String path})> requirementPaths(List<CriteriaSet> criteriaSets) => {
+      for (final set in criteriaSets)
+        for (final group in set.groups)
+          for (final requirement in group.requirements)
+            requirement.id: (
+              name: requirement.name,
+              path: '${set.name} › '
+                  '${group.subtitle == null ? group.name : '${group.name} (${group.subtitle})'}',
+            ),
+    };
+
 String _trimHours(double h) => h == h.roundToDouble() ? h.toInt().toString() : h.toString();
 
 /// ข้อความเดียวกับที่ backend ตอบ (400) เมื่อกันกิจกรรมย้อนหลัง — ฝั่ง UI กันเอง
@@ -878,8 +925,13 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
   late final TextEditingController _maxParticipantsController;
   late final TextEditingController _locationController;
   late final TextEditingController _hoursController;
-  String _activityType = _activityTypes.first;
+  /// ประเภทกิจกรรม — null = ยังไม่ได้เลือก (สร้างใหม่ไม่เลือกค่าแรกให้เงียบ ๆ ต้องกดเลือกเอง)
+  String? _activityType;
   int? _subcategoryId;
+
+  /// กล่องเลือกรายการเกณฑ์กางอยู่ไหม — สร้างใหม่ (ยังไม่มีรายการ) กางไว้เลย
+  /// แก้ไขกิจกรรมที่ผูกรายการแล้วพับไว้ ให้เห็น pill ของสิ่งที่เลือกก่อน
+  late bool _pickerOpen;
   Set<int> _requirementIds = {};
   bool _isRequired = false;
   late DateTime _startAt;
@@ -900,8 +952,10 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
     _hoursController = TextEditingController(
       text: e != null && e.hours > 0 ? _trimHours(e.hours) : '3',
     );
-    _activityType = e?.activityType ?? _activityTypes.first;
+    // โหมดแก้ไขคงค่าเดิมเสมอ แม้ไม่ใช่ 5 ค่าในรายการ (ข้อมูลเก่า/นำเข้า)
+    _activityType = (e?.activityType.isNotEmpty ?? false) ? e!.activityType : null;
     _requirementIds = {...?e?.requirementIds};
+    _pickerOpen = _requirementIds.isEmpty;
     // มีชุดเกณฑ์ให้เลือกแล้ว = ทางหลักคือรายการเกณฑ์ ไม่เดาหมวดชั่วโมงเดิมให้
     // (เดาไว้จะได้กิจกรรมที่ผูกหมวดของรุ่นเก่าติดมาโดยที่ผู้ใช้ไม่ได้ตั้งใจ)
     _subcategoryId = e?.subcategoryId ??
@@ -912,7 +966,11 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
             : null);
     _isRequired = e?.isRequired ?? false;
     _startAt = e?.startAt ?? DateTime.now().add(const Duration(days: 1));
+    // pill ของรายการเกณฑ์บอกชั่วโมงที่นิสิตจะได้ — ต้องเปลี่ยนตามช่องชั่วโมงทันที
+    _hoursController.addListener(_onHoursChanged);
   }
+
+  void _onHoursChanged() => setState(() {});
 
   @override
   void dispose() {
@@ -954,14 +1012,19 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    // ตรวจทุกข้อพร้อมกันแล้วบอกทุกข้อที่ขาดในรอบเดียว — ไม่ให้แก้ข้อหนึ่งแล้วค่อยเจอข้อถัดไป
+    final fieldsValid = _formKey.currentState!.validate();
     // กติกาเดียวกับ backend: ต้องจัดหมวดอย่างน้อยหนึ่งทาง ไม่งั้นกิจกรรมนี้จะไม่นับ
     // ชั่วโมงให้ใครเลย
-    if (_requirementIds.isEmpty && _subcategoryId == null) {
-      setState(() => _error = 'กรุณาเลือกรายการเกณฑ์อย่างน้อยหนึ่งรายการ '
-          'หรือเลือกหมวดชั่วโมงโครงเดิม');
-      return;
+    final missingCriteria = _requirementIds.isEmpty && _subcategoryId == null;
+    if (missingCriteria) {
+      setState(() {
+        _error = 'กรุณาเลือกรายการเกณฑ์อย่างน้อยหนึ่งรายการ '
+            'หรือเลือกหมวดชั่วโมงโครงเดิม';
+        _pickerOpen = true;
+      });
     }
+    if (!fieldsValid || missingCriteria) return;
     final hours = double.tryParse(_hoursController.text.trim());
     if (hours == null || hours <= 0) {
       setState(() => _error = 'กรุณากรอกจำนวนชั่วโมงมากกว่า 0');
@@ -979,17 +1042,17 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
       _error = null;
       _dateError = null;
     });
-    final body = {
-      'name': _nameController.text.trim(),
-      'activity_type': _activityType,
-      'subcategory_id': _subcategoryId,
-      'requirement_ids': _requirementIds.toList()..sort(),
-      'hours': hours,
-      'is_required': _isRequired,
-      'max_participants': int.parse(_maxParticipantsController.text.trim()),
-      'start_at': _startAt.toIso8601String(),
-      'location': _locationController.text.trim(),
-    };
+    final body = activityFormPayload(
+      name: _nameController.text.trim(),
+      activityType: _activityType!,
+      subcategoryId: _subcategoryId,
+      requirementIds: _requirementIds,
+      hours: hours,
+      isRequired: _isRequired,
+      maxParticipants: int.parse(_maxParticipantsController.text.trim()),
+      startAt: _startAt,
+      location: _locationController.text.trim(),
+    );
     try {
       if (widget.existing == null) {
         await ApiService.create('/activities', body, Activity.fromJson);
@@ -1014,8 +1077,11 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // ลำดับตาม mockup: ชื่อ → บล็อกเกณฑ์ (พระเอก) → ชั่วโมง/จำนวนรับ → วันเวลา/สถานที่ → ประเภท (ป้ายรอง)
     return AppFormDialog(
-      title: widget.existing == null ? 'เพิ่มกิจกรรม' : 'แก้ไขกิจกรรม',
+      title: widget.existing == null ? 'สร้างกิจกรรม' : 'แก้ไขกิจกรรม',
+      subtitle: 'กรอกข้อมูลกิจกรรม แล้วเลือกว่านับเข้าเกณฑ์ชั่วโมงข้อไหน',
+      width: 540,
       formKey: _formKey,
       saving: _saving,
       error: _error,
@@ -1023,73 +1089,69 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
       fields: [
         TextFormField(
           controller: _nameController,
-          decoration: const InputDecoration(labelText: 'ชื่อกิจกรรม'),
+          decoration: const InputDecoration(
+            labelText: 'ชื่อกิจกรรม',
+            hintText: 'เช่น อบรมความปลอดภัยไซเบอร์ ครั้งที่ 3/2569',
+          ),
           validator: requiredValidator,
         ),
-        DropdownButtonFormField<String>(
-          initialValue: _activityType,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'ประเภท'),
-          items: _activityTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-          onChanged: (v) => setState(() => _activityType = v ?? _activityTypes.first),
-        ),
-        RequirementPicker(
+        ActivityCriteriaBlock(
           criteriaSets: widget.criteriaSets,
+          categories: widget.categories,
           selected: _requirementIds,
-          onChanged: (ids) => setState(() {
+          subcategoryId: _subcategoryId,
+          hoursText: _hoursController.text,
+          pickerOpen: _pickerOpen,
+          onTogglePicker: () => setState(() => _pickerOpen = !_pickerOpen),
+          onRequirementsChanged: (ids) => setState(() {
             _requirementIds = ids;
             if (ids.isNotEmpty) _error = null;
           }),
+          onSubcategoryChanged: (v) => setState(() => _subcategoryId = v),
         ),
-        // E3: dropdown หมวดชั่วโมง — ชื่อสั้นในช่อง ชื่อเต็มในรายการ ไม่ล้นกรอบ
-        // ไม่บังคับเมื่อเลือกรายการเกณฑ์แล้ว: มีไว้สำหรับนิสิตที่ยังไม่ผูกชุดเกณฑ์
-        SubcategoryDropdown(
-          categories: widget.categories,
-          value: _subcategoryId,
-          onChanged: (v) => setState(() => _subcategoryId = v),
-          labelText: widget.criteriaSets.isEmpty
-              ? 'หมวดชั่วโมง'
-              : 'หมวดชั่วโมงโครงเดิม (ไม่บังคับ)',
-          required: widget.criteriaSets.isEmpty,
-        ),
-        TextFormField(
-          controller: _hoursController,
-          decoration: const InputDecoration(
-            labelText: 'ชั่วโมงที่ได้รับเมื่อเข้าร่วม',
-            hintText: 'เช่น 4',
-          ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          validator: (v) {
-            final n = double.tryParse((v ?? '').trim());
-            return (n == null || n <= 0) ? 'กรอกจำนวนชั่วโมงมากกว่า 0' : null;
-          },
-        ),
-        TextFormField(
-          controller: _maxParticipantsController,
-          decoration: const InputDecoration(labelText: 'จำนวนที่รับ'),
-          keyboardType: TextInputType.number,
-          validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
-        ),
-        TextFormField(
-          controller: _locationController,
-          decoration: const InputDecoration(labelText: 'สถานที่'),
-          validator: requiredValidator,
-        ),
-        InputDecorator(
-          decoration: InputDecoration(
-            labelText: 'วันเวลาเริ่มกิจกรรม',
-            // แสดงใต้ช่องนี้เลย ทั้งของที่ UI กันเองและ 400 ที่ backend ตอบกลับมา
-            errorText: _dateError,
-          ),
-          child: InkWell(
-            onTap: _pickDateTime,
-            child: Row(
-              children: [
-                Expanded(child: Text(formatThaiDateTime(_startAt))),
-                const Icon(Icons.calendar_today, size: 18),
-              ],
+        _FormRow(
+          children: [
+            TextFormField(
+              controller: _hoursController,
+              decoration: const InputDecoration(labelText: 'ชั่วโมงที่ได้รับ', hintText: 'เช่น 4'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) {
+                final n = double.tryParse((v ?? '').trim());
+                return (n == null || n <= 0) ? 'กรอกจำนวนชั่วโมงมากกว่า 0' : null;
+              },
             ),
-          ),
+            TextFormField(
+              controller: _maxParticipantsController,
+              decoration: const InputDecoration(labelText: 'จำนวนที่รับ'),
+              keyboardType: TextInputType.number,
+              validator: (v) => int.tryParse(v ?? '') == null ? 'กรอกตัวเลข' : null,
+            ),
+          ],
+        ),
+        _FormRow(
+          children: [
+            InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'วันเวลาเริ่มกิจกรรม',
+                // แสดงใต้ช่องนี้เลย ทั้งของที่ UI กันเองและ 400 ที่ backend ตอบกลับมา
+                errorText: _dateError,
+              ),
+              child: InkWell(
+                onTap: _pickDateTime,
+                child: Row(
+                  children: [
+                    Expanded(child: Text(formatThaiDateTime(_startAt))),
+                    const Icon(Icons.calendar_today, size: 18),
+                  ],
+                ),
+              ),
+            ),
+            TextFormField(
+              controller: _locationController,
+              decoration: const InputDecoration(labelText: 'สถานที่', hintText: 'เช่น หอประชุม'),
+              validator: requiredValidator,
+            ),
+          ],
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -1098,7 +1160,320 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
           value: _isRequired,
           onChanged: (v) => setState(() => _isRequired = v),
         ),
+        ActivityTypeChips(
+          value: _activityType,
+          existingType: widget.existing?.activityType,
+          onChanged: (v) => setState(() => _activityType = v),
+        ),
       ],
+    );
+  }
+}
+
+/// สองช่องเคียงกันในฟอร์ม — จอแคบซ้อนเป็นแถวเดียวต่อช่อง ไม่บีบจนอ่านไม่ออก
+class _FormRow extends StatelessWidget {
+  const _FormRow({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 420) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0) const SizedBox(height: AppSpacing.md),
+                children[i],
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) const SizedBox(width: AppSpacing.md),
+              Expanded(child: children[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// บล็อก "นับเข้าเกณฑ์ชั่วโมง" — สิ่งเดียวในฟอร์มที่กำหนดว่านิสิตได้ชั่วโมงหมวดไหน
+///
+/// จัดกรอบให้เด่นกว่าช่องอื่น (ผู้ใช้เคยสับสนเพราะช่องประเภทวางปนกันจนดูสำคัญเท่ากัน)
+/// รายการที่เลือกขึ้นเป็น pill พร้อมชั่วโมงที่นิสิตจะได้ · เลือก/ถอดด้วย [RequirementPicker] เดิม
+/// ไม่แตะ logic การผูก · หมวดชั่วโมงโครงเดิมอยู่ในบล็อกนี้ด้วยเพราะเป็นอีกทางที่ให้ชั่วโมง
+class ActivityCriteriaBlock extends StatelessWidget {
+  const ActivityCriteriaBlock({
+    super.key,
+    required this.criteriaSets,
+    required this.categories,
+    required this.selected,
+    required this.subcategoryId,
+    required this.hoursText,
+    required this.pickerOpen,
+    required this.onTogglePicker,
+    required this.onRequirementsChanged,
+    required this.onSubcategoryChanged,
+  });
+
+  final List<CriteriaSet> criteriaSets;
+  final List<HourCategory> categories;
+  final Set<int> selected;
+  final int? subcategoryId;
+
+  /// ค่าในช่องชั่วโมงตอนนี้ — ใช้โชว์ใน pill ว่ารายการนั้นจะได้กี่ชั่วโมง
+  final String hoursText;
+  final bool pickerOpen;
+  final VoidCallback onTogglePicker;
+  final ValueChanged<Set<int>> onRequirementsChanged;
+  final ValueChanged<int?> onSubcategoryChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final paths = requirementPaths(criteriaSets);
+    final hours = double.tryParse(hoursText.trim());
+    final hoursLabel = hours == null || hours <= 0 ? '– ชม.' : '${formatHours(hours)} ชม.';
+    final hasSets = criteriaSets.isNotEmpty;
+    final picked = selected.toList()..sort();
+
+    return Container(
+      key: const ValueKey('activity-criteria-block'),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md + 2, AppSpacing.md + 2, AppSpacing.md + 2, AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.blueBg,
+        border: Border.all(color: AppColors.blue.withValues(alpha: 0.3), width: 1.5),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text.rich(
+            TextSpan(
+              text: 'นับเข้าเกณฑ์ชั่วโมง',
+              children: [TextSpan(text: ' *', style: TextStyle(color: AppColors.blue))],
+            ),
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.blueDark),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            'ตัวนี้คือสิ่งที่กำหนดว่านิสิตได้ชั่วโมงหมวดไหน · เลือกได้หลายข้อ ชั่วโมงจะเข้าให้ทุกข้อที่เลือก',
+            style: TextStyle(fontSize: 12.5, height: 1.5, color: AppColors.sub),
+          ),
+          const SizedBox(height: AppSpacing.md - 1),
+          for (final id in picked)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: _RequirementPill(
+                key: ValueKey('requirement-pill-$id'),
+                name: paths[id]?.name ?? 'รายการเกณฑ์ #$id',
+                path: paths[id]?.path,
+                hoursLabel: hoursLabel,
+                onRemove: () => onRequirementsChanged({...selected}..remove(id)),
+              ),
+            ),
+          if (hasSets)
+            OutlinedButton.icon(
+              onPressed: onTogglePicker,
+              style: OutlinedButton.styleFrom(
+                backgroundColor: AppColors.surface,
+                foregroundColor: AppColors.blueDark,
+                side: BorderSide(color: AppColors.blue.withValues(alpha: 0.6)),
+                minimumSize: const Size.fromHeight(38),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.field)),
+                textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              icon: Icon(pickerOpen ? Icons.expand_less : Icons.add, size: 18),
+              label: Text(pickerOpen ? 'ซ่อนรายการเกณฑ์' : 'เพิ่มเกณฑ์ที่นับเข้า'),
+            ),
+          if (pickerOpen || !hasSets) ...[
+            const SizedBox(height: AppSpacing.sm),
+            // Material ของตัวเอง: แถวติ๊กใน picker เป็น ListTile ที่วาดพื้น/ripple บน Material
+            // ใกล้สุด — ถ้าไม่มี พื้นฟ้าของบล็อกจะบังไว้ (และได้กล่องรายการสีขาวแยกจากพื้นบล็อกด้วย)
+            Material(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.field),
+              clipBehavior: Clip.antiAlias,
+              child: RequirementPicker(
+                criteriaSets: criteriaSets,
+                selected: selected,
+                onChanged: onRequirementsChanged,
+                // หัวข้อ/คำอธิบายอยู่ที่หัวบล็อกแล้ว ไม่ต้องซ้ำ
+                showHeader: false,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          // E3: ทางเดิมสำหรับนิสิตที่ยังไม่ผูกชุดเกณฑ์ — ไม่บังคับเมื่อระบบมีชุดเกณฑ์แล้ว
+          SubcategoryDropdown(
+            categories: categories,
+            value: subcategoryId,
+            onChanged: onSubcategoryChanged,
+            labelText: hasSets ? 'หมวดชั่วโมงโครงเดิม (ไม่บังคับ)' : 'หมวดชั่วโมง',
+            required: !hasSets,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RequirementPill extends StatelessWidget {
+  const _RequirementPill({
+    super.key,
+    required this.name,
+    required this.path,
+    required this.hoursLabel,
+    required this.onRemove,
+  });
+
+  final String name;
+  final String? path;
+  final String hoursLabel;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(11, 8, 2, 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.blue.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(AppRadius.field),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.ink),
+                ),
+                if (path != null)
+                  Text(path!, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
+            decoration: BoxDecoration(
+              color: StatusPalette.approved.background,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              hoursLabel,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: StatusPalette.approved.foreground,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'เอารายการนี้ออก',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 18, color: AppColors.muted),
+            onPressed: onRemove,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ช่อง "ประเภทกิจกรรม" — ป้ายรองไว้ค้นหา/กรอง ไม่เกี่ยวกับการนับชั่วโมง
+///
+/// เป็น chip เลือกหนึ่งค่า (ส่งค่า string เดิม 5 ค่าที่ backend รับ) และต้องกดเลือกเอง —
+/// ไม่มีค่าเริ่มต้นที่ติดมาเงียบ ๆ อีกต่อไป (เดิม dropdown เลือกค่าแรกให้ทุกครั้ง)
+class ActivityTypeChips extends StatelessWidget {
+  const ActivityTypeChips({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.existingType,
+  });
+
+  final String? value;
+
+  /// ประเภทเดิมของกิจกรรมที่กำลังแก้ — ถ้าไม่อยู่ใน 5 ค่า ยังโชว์เป็นชิปเพิ่มให้เลือกคืนได้
+  final String? existingType;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final choices = activityTypeChoices(existingType);
+
+    return FormField<String>(
+      initialValue: value,
+      validator: (v) => (v == null || v.isEmpty) ? 'เลือกประเภทกิจกรรม' : null,
+      builder: (field) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text.rich(
+            TextSpan(
+              text: 'ประเภทกิจกรรม',
+              children: [
+                TextSpan(text: ' *', style: TextStyle(color: AppColors.blue)),
+                TextSpan(
+                  text: '  — ป้ายไว้ค้นหา/กรอง ไม่เกี่ยวกับการนับชั่วโมง',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: AppColors.muted),
+                ),
+              ],
+            ),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              for (final type in choices)
+                ChoiceChip(
+                  label: Text(type),
+                  selected: field.value == type,
+                  showCheckmark: false,
+                  selectedColor: AppColors.blueBg,
+                  backgroundColor: AppColors.surface,
+                  side: BorderSide(
+                    color: field.value == type
+                        ? AppColors.blue.withValues(alpha: 0.35)
+                        : AppColors.line,
+                  ),
+                  shape: const StadiumBorder(),
+                  labelStyle: TextStyle(
+                    fontSize: 13,
+                    fontWeight: field.value == type ? FontWeight.w600 : FontWeight.w500,
+                    color: field.value == type ? AppColors.blueDark : AppColors.sub,
+                  ),
+                  onSelected: (_) {
+                    field.didChange(type);
+                    onChanged(type);
+                  },
+                ),
+            ],
+          ),
+          if (field.hasError)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(
+                field.errorText!,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
