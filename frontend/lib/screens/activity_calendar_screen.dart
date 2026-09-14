@@ -92,6 +92,80 @@ StatusPalette calendarChipPalette(
   return a.approvalStatus == 'approved' ? StatusPalette.approved : StatusPalette.pending;
 }
 
+/// สิ่งที่นิสิตทำได้กับกิจกรรมหนึ่งบนปฏิทิน
+enum CalendarStudentAction {
+  /// เปิดรับอยู่และยังมีที่ — กดสมัครได้
+  register,
+
+  /// ที่นั่งเต็ม
+  full,
+
+  /// กิจกรรมเริ่มไปแล้ว — ปิดรับสมัคร
+  closed,
+
+  /// สมัครแล้วและยังยกเลิกได้
+  cancel,
+
+  /// สมัครแล้วแต่ยกเลิกไม่ได้ (เช็กอินแล้ว หรือหลักฐานอนุมัติแล้ว)
+  locked,
+}
+
+/// ปุ่มฝั่งนิสิตของกิจกรรมนี้ — กติกาเดียวกับ backend
+///
+/// - สมัครแล้ว: ยกเลิกได้ถ้ายังไม่เช็กอินและยังไม่อนุมัติ (`DELETE /participations/{id}`
+///   ปฏิเสธสองเคสนั้นอยู่แล้ว UI จึงไม่ล่อให้กด)
+/// - ยังไม่สมัคร: สมัครแล้วมาก่อน "เต็ม" — คนที่สมัครไว้แล้วต้องยังยกเลิกได้แม้งานเต็ม
+/// - เริ่มไปแล้ว = `start_at <= ตอนนี้` ตรงกับ `POST /participations/register`
+///
+/// [nowTh] ต้องเป็นเวลาไทยแบบไม่มีโซน ([thaiNowNaive]) เพราะ `start_at` เก็บแบบนั้น
+CalendarStudentAction calendarStudentAction(
+  Activity a,
+  Participation? participation, {
+  required DateTime nowTh,
+}) {
+  if (participation != null) {
+    final cancelable =
+        participation.checkInTime == null && participation.evidenceStatus != 'approved';
+    return cancelable ? CalendarStudentAction.cancel : CalendarStudentAction.locked;
+  }
+  if (a.isFull) return CalendarStudentAction.full;
+  if (!a.startAt.isAfter(nowTh)) return CalendarStudentAction.closed;
+  return CalendarStudentAction.register;
+}
+
+DateTime _endOf(Activity a) =>
+    a.startAt.add(Duration(minutes: math.max((a.hours * 60).round(), 1)));
+
+/// กิจกรรมที่สมัครไว้แล้วซึ่งช่วงเวลาทับกับ [target] ในวันเดียวกัน (ไม่นับตัวมันเอง)
+///
+/// งานที่จบพอดีตอนอีกงานเริ่ม (09:00–12:00 กับ 12:00–15:00) ไม่ถือว่าชน
+List<Activity> calendarTimeConflicts(Activity target, Iterable<Activity> registered) {
+  final conflicts = [
+    for (final other in registered)
+      if (other.id != target.id &&
+          _sameDay(other.startAt, target.startAt) &&
+          other.startAt.isBefore(_endOf(target)) &&
+          target.startAt.isBefore(_endOf(other)))
+        other,
+  ];
+  conflicts.sort((a, b) => a.startAt.compareTo(b.startAt));
+  return conflicts;
+}
+
+/// ปุ่มจัดการของ staff/admin บนการ์ดกิจกรรม
+enum CalendarStaffAction { approve, participants, edit }
+
+/// ปุ่มจัดการตามสิทธิ์ — อนุมัติได้เฉพาะ admin และเฉพาะที่ยังไม่อนุมัติ (กติกาเดียวกับหน้าจัดการกิจกรรม)
+List<CalendarStaffAction> calendarStaffActions(
+  Activity a, {
+  required bool isAdmin,
+  required bool canWrite,
+}) =>
+    [
+      if (canApproveActivity(a.approvalStatus, isAdmin: isAdmin)) CalendarStaffAction.approve,
+      if (canWrite) ...[CalendarStaffAction.participants, CalendarStaffAction.edit],
+    ];
+
 /// ตัดเวลาออกเพื่อใช้เป็นคีย์ของวัน (ไม่งั้นกิจกรรมคนละเวลาจะอยู่คนละกลุ่ม)
 DateTime activityDayKey(DateTime dt) => DateTime.utc(dt.year, dt.month, dt.day);
 
@@ -131,11 +205,12 @@ Map<DateTime, List<Activity>> groupActivitiesByDay(List<Activity> activities) {
 /// ปฏิทินกิจกรรม — ตัวเดียวใช้ทั้ง 3 role
 ///
 /// ปฏิทินซ้าย + แผงรายละเอียดวันขวา (จอแคบซ้อนเป็นคอลัมน์เดียว) โครงเหมือนกันทุก role
-/// ต่างกันแค่สีชิป, badge และปุ่มในการ์ดกิจกรรม
+/// ต่างกันแค่สีชิป, badge และปุ่มในการ์ดกิจกรรม:
+/// - นิสิต: สมัครเข้าร่วม / ยกเลิกการสมัคร
+/// - staff/admin: อนุมัติ (admin) / ผู้เข้าร่วม / แก้ไข
 ///
-/// สิทธิ์การมองเห็นเป็นของ backend เหมือนเดิม: ใช้ `GET /activities` ตัวเดียวกับหน้า
-/// รายการ ซึ่งกรองตาม role อยู่แล้ว (นิสิตเห็นเฉพาะ approved, staff เห็นของตัวเอง,
-/// admin เห็นทั้งหมด)
+/// สิทธิ์จริงอยู่ที่ backend เหมือนเดิม: `GET /activities` กรองตาม role อยู่แล้ว
+/// และ endpoint สมัคร/ยกเลิก/อนุมัติ ตรวจ role เอง — ปุ่มที่ซ่อนในหน้านี้เป็นแค่ UX
 class ActivityCalendarScreen extends StatefulWidget {
   const ActivityCalendarScreen({
     super.key,
@@ -163,6 +238,9 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
   List<HourCategory> _categories = [];
   List<CriteriaSet> _criteriaSets = [];
   Map<int, Participation> _ownParticipationByActivity = {};
+
+  /// กิจกรรมที่กำลังรอผลสมัคร/ยกเลิก/อนุมัติ — ปิดปุ่มไว้กันกดซ้ำ
+  final Set<int> _busy = {};
   late DateTime _month;
   late DateTime _selectedDay;
   bool _loading = false;
@@ -170,6 +248,9 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
 
   DateTime get _today => activityDayKey(DateTime.now());
   bool get _isStudent => authService.role == 'student';
+
+  /// โหมดเทสต์ไม่มี API ให้ซิงก์ข้อมูลกลับ
+  bool get _canSync => widget.initialActivities == null;
 
   @override
   void initState() {
@@ -187,11 +268,14 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
     }
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  /// โหลดทุกอย่างใหม่ — [silent] = ซิงก์เงียบ ๆ หลังสมัคร/ยกเลิก ไม่ล้างหน้าจอเป็นตัวหมุน
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
       final categories = await ApiService.fetchList('/hour-categories', HourCategory.fromJson);
@@ -206,6 +290,7 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         criteriaSets = await ApiService.fetchList('/criteria-sets', CriteriaSet.fromJson);
       } catch (_) {}
 
+      if (!mounted) return;
       setState(() {
         _byDay
           ..clear()
@@ -215,13 +300,30 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         _ownParticipationByActivity = {for (final p in participations) p.activityId: p};
       });
     } catch (e) {
-      setState(() => _error = friendlyError(e));
+      if (!mounted) return;
+      if (silent) {
+        showErrorSnackbar(context, e);
+      } else {
+        setState(() => _error = friendlyError(e));
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && !silent) setState(() => _loading = false);
     }
   }
 
   List<Activity> _activitiesOn(DateTime day) => _byDay[activityDayKey(day)] ?? const [];
+
+  Iterable<Activity> get _registeredActivities => _byDay.values
+      .expand((list) => list)
+      .where((a) => _ownParticipationByActivity.containsKey(a.id));
+
+  /// แทนกิจกรรมเดิมในรายการของวัน (หลังสมัคร/ยกเลิก/อนุมัติ) โดยไม่ต้องโหลดใหม่ทั้งหน้า
+  void _replaceActivity(Activity updated) {
+    final list = _byDay[activityDayKey(updated.startAt)];
+    if (list == null) return;
+    final index = list.indexWhere((a) => a.id == updated.id);
+    if (index >= 0) list[index] = updated;
+  }
 
   void _selectDay(DateTime day) {
     setState(() {
@@ -241,30 +343,91 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         _month = DateTime.utc(_today.year, _today.month);
       });
 
+  /// ทำงานกับ API ของกิจกรรม [id] โดยปิดปุ่มระหว่างรอ แล้วซิงก์ข้อมูลจริงกลับแบบเงียบ
+  Future<void> _runBusy(int id, Future<void> Function() action) async {
+    setState(() => _busy.add(id));
+    try {
+      await action();
+    } catch (e) {
+      // เต็มพอดี / หมดเวลา / เน็ตหลุด → แจ้งด้วย snackbar ไม่ทำทั้งหน้าพัง
+      if (mounted) showErrorSnackbar(context, e);
+    } finally {
+      if (mounted) setState(() => _busy.remove(id));
+    }
+    // ที่นั่งจริงอาจเปลี่ยนจากคนอื่นสมัครพร้อมกัน — ดึงของจริงมาทับค่าที่ขยับไว้ในจอ
+    if (mounted && _canSync) await _load(silent: true);
+  }
+
   Future<void> _register(Activity a) async {
+    final id = a.id;
+    if (id == null) return;
+    final conflicts = calendarTimeConflicts(a, _registeredActivities);
     final confirmed = await confirmAction(
       context,
-      title: 'ยืนยันการสมัคร',
+      title: conflicts.isEmpty ? 'ยืนยันการสมัคร' : 'เวลาชนกับกิจกรรมที่สมัครไว้',
       message: 'สมัครเข้าร่วม "${a.name}"\n'
+          '${thaiFullDateLabel(a.startAt)}\n'
           '${activityTimeRange(a)} • ${a.location}\n\n'
           'ได้ ${formatHours(a.hours)} ชั่วโมง\n'
           'นับเข้าหมวด ${activityCriteriaLabel(_categories, _criteriaSets, a)}',
-      detail: 'ชั่วโมงจะถูกนับเมื่อหลักฐานผ่านการอนุมัติ',
-      confirmLabel: 'สมัคร',
-      icon: Icons.how_to_reg,
+      detail: [
+        for (final c in conflicts) '⚠ ชนกับ "${c.name}" (${activityTimeRange(c)})',
+        'ชั่วโมงจะถูกนับเมื่อหลักฐานผ่านการอนุมัติ',
+      ].join('\n'),
+      confirmLabel: conflicts.isEmpty ? 'สมัคร' : 'สมัครต่อ',
+      icon: conflicts.isEmpty ? Icons.how_to_reg : Icons.warning_amber_rounded,
     );
-    if (confirmed != true) return;
-    try {
-      await ApiService.create(
+    if (confirmed != true || !mounted) return;
+
+    await _runBusy(id, () async {
+      final participation = await ApiService.create(
         '/participations/register',
-        {'activity_id': a.id},
+        {'activity_id': id},
         Participation.fromJson,
       );
-      if (mounted) showInfoSnackbar(context, 'สมัคร "${a.name}" เรียบร้อยแล้ว');
-      await _load();
-    } catch (e) {
-      if (mounted) showErrorSnackbar(context, e);
-    }
+      if (!mounted) return;
+      setState(() {
+        _ownParticipationByActivity[id] = participation;
+        _replaceActivity(a.copyWith(participantCount: a.participantCount + 1));
+      });
+      showInfoSnackbar(context, 'สมัคร "${a.name}" แล้ว');
+    });
+  }
+
+  Future<void> _cancel(Participation p, Activity a) async {
+    final id = a.id;
+    if (id == null || p.id == null) return;
+    final confirmed = await confirmAction(
+      context,
+      title: 'ยืนยันการยกเลิก',
+      message: 'ยกเลิกการสมัคร "${a.name}"\n${activityTimeRange(a)} • ${a.location}',
+      detail: 'ที่นั่งจะคืนให้คนอื่นสมัครได้ ถ้าเปลี่ยนใจต้องสมัครใหม่ (ถ้ายังมีที่ว่าง)',
+      confirmLabel: 'ยกเลิกการสมัคร',
+      icon: Icons.cancel_outlined,
+      destructive: true,
+    );
+    if (confirmed != true || !mounted) return;
+
+    await _runBusy(id, () async {
+      await ApiService.delete('/participations/${p.id}');
+      if (!mounted) return;
+      setState(() {
+        _ownParticipationByActivity.remove(id);
+        _replaceActivity(a.copyWith(participantCount: math.max(0, a.participantCount - 1)));
+      });
+      showInfoSnackbar(context, 'ยกเลิกการสมัคร "${a.name}" แล้ว');
+    });
+  }
+
+  Future<void> _approve(Activity a) async {
+    final id = a.id;
+    if (id == null) return;
+    await _runBusy(id, () async {
+      final approved = await ApiService.patch('/activities/$id/approve', Activity.fromJson);
+      if (!mounted) return;
+      setState(() => _replaceActivity(approved));
+      showInfoSnackbar(context, 'อนุมัติ "${a.name}" แล้ว');
+    });
   }
 
   /// เปิดหน้าผู้เข้าร่วมของกิจกรรมนั้น — ทางเดียวกับที่หน้าจัดการกิจกรรมใช้
@@ -295,12 +458,12 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
       title: 'ปฏิทินกิจกรรม',
       subtitle: 'กดที่วันเพื่อดูรายละเอียดกิจกรรมของวันนั้น',
       filters: [
-        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
+        AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: () => _load()),
       ],
       child: _loading
           ? const LoadingState(message: 'กำลังโหลดปฏิทิน...')
           : _error != null
-              ? ErrorState(message: _error!, onRetry: _load)
+              ? ErrorState(message: _error!, onRetry: () => _load())
               : LayoutBuilder(
                   builder: (context, constraints) {
                     if (constraints.maxWidth >= kCalendarWideBreakpoint) {
@@ -819,39 +982,147 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         visualDensity: VisualDensity.compact,
       );
 
-  /// ปุ่มในการ์ดตาม role — งานนี้คงพฤติกรรมเดิมไว้ (สมัคร / ดูผู้เข้าร่วม / แก้ไข)
-  /// ยกเลิกการสมัคร เตือนเวลาชน และอื่น ๆ เป็นของงานที่ 2
+  Widget _icon(IconData icon, {required bool busy}) => busy
+      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+      : Icon(icon, size: 16);
+
+  /// ห่อปุ่มในการ์ดให้ semantics บอกชื่อกิจกรรมด้วย — "สมัครเข้าร่วม: <ชื่อกิจกรรม>"
+  ///
+  /// แผงวันมีปุ่ม "สมัครเข้าร่วม" หลายอันหน้าตาเหมือนกัน screen reader (และเครื่องมือทดสอบ
+  /// ที่อ่าน semantics) จะแยกไม่ออกว่าปุ่มไหนเป็นของกิจกรรมไหน · การกดด้วยนิ้ว/เมาส์ไม่เปลี่ยน
+  ///
+  /// ต้องเป็น `container` — การ์ดที่มีปุ่มเดียว (ฝั่งนิสิต) Flutter จะรวมปุ่มเข้ากับข้อความทั้งการ์ด
+  /// เป็น node เดียว ปุ่มจึงไม่มีตัวตนของตัวเองให้โฟกัส/กด
+  Widget _labelled(Activity a, String label, VoidCallback? onPressed, Widget button) => Semantics(
+        container: true,
+        label: '$label: ${a.name}',
+        button: true,
+        enabled: onPressed != null,
+        onTap: onPressed,
+        excludeSemantics: true,
+        child: button,
+      );
+
+  /// ปุ่มในการ์ดตาม role — นิสิตสมัคร/ยกเลิก · staff/admin อนุมัติ/ผู้เข้าร่วม/แก้ไข
   List<Widget> _cardActions(Activity a) {
+    final id = a.id;
+    final busy = id != null && _busy.contains(id);
+
     if (_isStudent) {
-      if (_ownParticipationByActivity.containsKey(a.id)) return const [];
-      final (label, onPressed) = a.isFull
-          ? ('เต็มแล้ว', null)
-          : a.startAt.isBefore(DateTime.now())
-              ? ('ปิดรับสมัครแล้ว', null)
-              : ('สมัครเข้าร่วม', () => _register(a));
+      final participation = _ownParticipationByActivity[id];
+      final action = calendarStudentAction(a, participation, nowTh: thaiNowNaive());
+      final VoidCallback? register = busy ? null : () => _register(a);
+      final VoidCallback? cancel =
+          busy || participation == null ? null : () => _cancel(participation, a);
       return [
-        FilledButton.icon(
-          onPressed: onPressed,
-          style: _cardButtonStyle,
-          icon: Icon(onPressed == null ? Icons.block : Icons.add, size: 16),
-          label: Text(label),
-        ),
+        switch (action) {
+          CalendarStudentAction.register => _labelled(
+              a,
+              'สมัครเข้าร่วม',
+              register,
+              FilledButton.icon(
+                onPressed: register,
+                style: _cardButtonStyle,
+                icon: _icon(Icons.add, busy: busy),
+                label: const Text('สมัครเข้าร่วม'),
+              ),
+            ),
+          CalendarStudentAction.full => _labelled(
+              a,
+              'เต็มแล้ว',
+              null,
+              FilledButton.icon(
+                onPressed: null,
+                style: _cardButtonStyle,
+                icon: const Icon(Icons.group_off_outlined, size: 16),
+                label: const Text('เต็มแล้ว'),
+              ),
+            ),
+          CalendarStudentAction.closed => _labelled(
+              a,
+              'ปิดรับสมัครแล้ว',
+              null,
+              FilledButton.icon(
+                onPressed: null,
+                style: _cardButtonStyle,
+                icon: const Icon(Icons.lock_clock, size: 16),
+                label: const Text('ปิดรับสมัครแล้ว'),
+              ),
+            ),
+          CalendarStudentAction.cancel => _labelled(
+              a,
+              'ยกเลิกการสมัคร',
+              cancel,
+              OutlinedButton.icon(
+                onPressed: cancel,
+                style: _cardButtonStyle.merge(AppButtonStyles.danger(context)),
+                icon: _icon(Icons.close, busy: busy),
+                label: const Text('ยกเลิกการสมัคร'),
+              ),
+            ),
+          CalendarStudentAction.locked => _labelled(
+              a,
+              'ยกเลิกไม่ได้',
+              null,
+              Tooltip(
+                message: 'เช็กอินหรือหลักฐานได้รับอนุมัติแล้ว จึงยกเลิกไม่ได้',
+                child: OutlinedButton.icon(
+                  onPressed: null,
+                  style: _cardButtonStyle,
+                  icon: const Icon(Icons.lock_outline, size: 16),
+                  label: const Text('ยกเลิกไม่ได้'),
+                ),
+              ),
+            ),
+        },
       ];
     }
-    if (!authService.canWrite) return const [];
+
+    final actions = calendarStaffActions(
+      a,
+      isAdmin: authService.role == 'admin',
+      canWrite: authService.canWrite,
+    );
+    final VoidCallback? approve = busy ? null : () => _approve(a);
+    void participants() => _openParticipants(a);
+    void edit() => _edit(a);
     return [
-      OutlinedButton.icon(
-        onPressed: () => _openParticipants(a),
-        style: _cardButtonStyle,
-        icon: const Icon(Icons.groups_outlined, size: 16),
-        label: const Text('ผู้เข้าร่วม'),
-      ),
-      OutlinedButton.icon(
-        onPressed: () => _edit(a),
-        style: _cardButtonStyle,
-        icon: const Icon(Icons.edit_outlined, size: 16),
-        label: const Text('แก้ไข'),
-      ),
+      for (final action in actions)
+        switch (action) {
+          CalendarStaffAction.approve => _labelled(
+              a,
+              'อนุมัติ',
+              approve,
+              FilledButton.icon(
+                onPressed: approve,
+                style: _cardButtonStyle,
+                icon: _icon(Icons.check_circle_outline, busy: busy),
+                label: const Text('อนุมัติ'),
+              ),
+            ),
+          CalendarStaffAction.participants => _labelled(
+              a,
+              'ผู้เข้าร่วม',
+              participants,
+              OutlinedButton.icon(
+                onPressed: participants,
+                style: _cardButtonStyle,
+                icon: const Icon(Icons.groups_outlined, size: 16),
+                label: const Text('ผู้เข้าร่วม'),
+              ),
+            ),
+          CalendarStaffAction.edit => _labelled(
+              a,
+              'แก้ไข',
+              edit,
+              OutlinedButton.icon(
+                onPressed: edit,
+                style: _cardButtonStyle,
+                icon: const Icon(Icons.edit_outlined, size: 16),
+                label: const Text('แก้ไข'),
+              ),
+            ),
+        },
     ];
   }
 }

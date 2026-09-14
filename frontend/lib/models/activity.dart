@@ -42,6 +42,26 @@ class Activity {
 
   bool get isFull => participantCount >= maxParticipants;
 
+  /// สำเนาที่เปลี่ยนจำนวนผู้สมัคร — ปฏิทินใช้ขยับที่นั่งทันทีหลังสมัคร/ยกเลิก
+  /// โดยไม่ต้องรอโหลดรายการใหม่ทั้งหน้า
+  Activity copyWith({int? participantCount, String? approvalStatus}) => Activity(
+        id: id,
+        name: name,
+        activityType: activityType,
+        subcategoryId: subcategoryId,
+        hours: hours,
+        isRequired: isRequired,
+        maxParticipants: maxParticipants,
+        startAt: startAt,
+        location: location,
+        createdBy: createdBy,
+        approvalStatus: approvalStatus ?? this.approvalStatus,
+        approvedAt: approvedAt,
+        participantCount: participantCount ?? this.participantCount,
+        requirementIds: requirementIds,
+        isHidden: isHidden,
+      );
+
   factory Activity.fromJson(Map<String, dynamic> json) => Activity(
         id: json['id'] as int?,
         name: json['name'] as String,

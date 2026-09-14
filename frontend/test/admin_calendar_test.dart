@@ -3,6 +3,7 @@ import 'package:activity_tracking_frontend/models/participation.dart';
 import 'package:activity_tracking_frontend/screens/activity_calendar_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
+import 'package:activity_tracking_frontend/utils/format.dart';
 import 'package:activity_tracking_frontend/widgets/app_nav.dart';
 import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 import 'package:activity_tracking_frontend/widgets/status_chip.dart';
@@ -387,6 +388,175 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.widget<Text>(title).data, thaiMonthTitle(now));
       expect(_inPanel(find.text(thaiFullDateLabel(now))), findsOneWidget);
+    });
+  });
+
+  group('ปุ่มฝั่งนิสิต (งานที่ 2) — กติกาเดียวกับ backend', () {
+    final nowTh = DateTime(2026, 10, 30, 10, 0);
+    Activity future({int count = 0, int max = 10}) => _activity(
+          startAt: DateTime(2026, 10, 31, 9),
+          approvalStatus: 'approved',
+          participantCount: count,
+          maxParticipants: max,
+        );
+    Participation joined({DateTime? checkIn, String status = 'pending'}) =>
+        Participation(id: 7, studentId: 1, activityId: 1, checkInTime: checkIn, evidenceStatus: status);
+
+    test('เปิดรับ + มีที่ → สมัครได้', () {
+      expect(calendarStudentAction(future(), null, nowTh: nowTh), CalendarStudentAction.register);
+    });
+
+    test('ที่นั่งเต็ม → สมัครไม่ได้', () {
+      expect(calendarStudentAction(future(count: 10), null, nowTh: nowTh), CalendarStudentAction.full);
+    });
+
+    test('ถึงเวลาเริ่มแล้ว → ปิดรับ (รวมวินาทีที่เริ่มพอดี)', () {
+      final a = future();
+      expect(calendarStudentAction(a, null, nowTh: a.startAt), CalendarStudentAction.closed);
+      expect(calendarStudentAction(a, null, nowTh: a.startAt.add(const Duration(minutes: 1))),
+          CalendarStudentAction.closed);
+    });
+
+    test('สมัครแล้ว → ยกเลิกได้ แม้งานจะเต็ม', () {
+      expect(calendarStudentAction(future(count: 10), joined(), nowTh: nowTh), CalendarStudentAction.cancel);
+    });
+
+    test('เช็กอินแล้ว หรือหลักฐานอนุมัติแล้ว → ยกเลิกไม่ได้', () {
+      expect(calendarStudentAction(future(), joined(checkIn: nowTh), nowTh: nowTh), CalendarStudentAction.locked);
+      expect(calendarStudentAction(future(), joined(status: 'approved'), nowTh: nowTh),
+          CalendarStudentAction.locked);
+    });
+
+    test('เวลาไทยจากนาฬิกา UTC: 03:30 UTC = 10:30 ไทย → งาน 10:00 ปิดรับแล้ว', () {
+      final nowTh = thaiNowNaive(DateTime.utc(2026, 10, 31, 3, 30));
+      expect(nowTh, DateTime(2026, 10, 31, 10, 30));
+      final started = _activity(startAt: DateTime(2026, 10, 31, 10), approvalStatus: 'approved');
+      expect(calendarStudentAction(started, null, nowTh: nowTh), CalendarStudentAction.closed,
+          reason: 'ถ้าเทียบกับ UTC (03:30) จะยังสมัครได้ ซึ่งคือบั๊กเดิม');
+    });
+  });
+
+  group('เตือนเวลาชนกับกิจกรรมที่สมัครไว้', () {
+    Activity at(int id, int hour, {double hours = 3, int day = 31}) => _activity(
+          id: id,
+          name: 'งาน $id',
+          startAt: DateTime(2026, 10, day, hour),
+          hours: hours,
+          approvalStatus: 'approved',
+        );
+
+    test('ช่วงเวลาทับกันในวันเดียวกัน = ชน', () {
+      final conflicts = calendarTimeConflicts(at(1, 9), [at(2, 11), at(3, 13)]);
+      expect(conflicts.map((a) => a.id), [2]);
+    });
+
+    test('จบพอดีตอนอีกงานเริ่มไม่นับว่าชน · วันอื่นไม่นับ · ไม่นับตัวเอง', () {
+      expect(calendarTimeConflicts(at(1, 9), [at(2, 12)]), isEmpty);
+      expect(calendarTimeConflicts(at(1, 9), [at(2, 9, day: 30)]), isEmpty);
+      expect(calendarTimeConflicts(at(1, 9), [at(1, 9)]), isEmpty);
+    });
+  });
+
+  group('ปุ่มฝั่ง staff/admin', () {
+    final pending = _activity(startAt: _day, approvalStatus: 'pending');
+    final approved = _activity(startAt: _day, approvalStatus: 'approved');
+
+    test('admin: รออนุมัติมีปุ่มอนุมัติ · อนุมัติแล้วไม่มี', () {
+      expect(calendarStaffActions(pending, isAdmin: true, canWrite: true),
+          [CalendarStaffAction.approve, CalendarStaffAction.participants, CalendarStaffAction.edit]);
+      expect(calendarStaffActions(approved, isAdmin: true, canWrite: true),
+          [CalendarStaffAction.participants, CalendarStaffAction.edit]);
+    });
+
+    test('staff อนุมัติเองไม่ได้ (backend ตอบ 403 อยู่แล้ว)', () {
+      expect(calendarStaffActions(pending, isAdmin: false, canWrite: true),
+          [CalendarStaffAction.participants, CalendarStaffAction.edit]);
+    });
+
+    testWidgets('admin เห็นปุ่ม "อนุมัติ" ของกิจกรรมที่รออยู่ · staff ไม่เห็น', (tester) async {
+      _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 0), approvalStatus: 'pending')]);
+      await _tapDay(tester, _day);
+      expect(_inPanel(find.widgetWithText(FilledButton, 'อนุมัติ')), findsOneWidget);
+
+      _loginAs('staff');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 0), approvalStatus: 'pending')]);
+      await _tapDay(tester, _day);
+      expect(_inPanel(find.text('อนุมัติ')), findsNothing);
+      expect(_inPanel(find.text('ผู้เข้าร่วม')), findsOneWidget);
+    });
+  });
+
+  group('การ์ดนิสิตหลังสมัคร', () {
+    testWidgets('สมัครแล้ว (ยังไม่เช็กอิน) มีปุ่ม "ยกเลิกการสมัคร" · เช็กอินแล้วยกเลิกไม่ได้', (tester) async {
+      _loginAs('student');
+      await _pump(
+        tester,
+        [
+          _activity(id: 1, name: 'ยกเลิกได้', startAt: _at(9, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+          _activity(id: 2, name: 'เช็กอินแล้ว', startAt: _at(13, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+        ],
+        participations: [
+          Participation(id: 11, studentId: 1, activityId: 1),
+          Participation(id: 12, studentId: 1, activityId: 2, checkInTime: DateTime(2026, 1, 1)),
+        ],
+      );
+      await tester.tap(find.byTooltip('เดือนถัดไป'));
+      await tester.pumpAndSettle();
+      await _tapDay(tester, _nextMonthDay);
+
+      final cancelable = find.byKey(const ValueKey('calendar-activity-1'));
+      final locked = find.byKey(const ValueKey('calendar-activity-2'));
+      final cancelButton = tester.widget<ButtonStyleButton>(find.ancestor(
+        of: find.descendant(of: cancelable, matching: find.text('ยกเลิกการสมัคร')),
+        matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+      ));
+      expect(cancelButton.onPressed, isNotNull);
+
+      final lockedButton = tester.widget<ButtonStyleButton>(find.ancestor(
+        of: find.descendant(of: locked, matching: find.text('ยกเลิกไม่ได้')),
+        matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+      ));
+      expect(lockedButton.onPressed, isNull);
+      expect(find.descendant(of: locked, matching: find.text('ยกเลิกการสมัคร')), findsNothing);
+    });
+  });
+
+  test('Activity.copyWith เปลี่ยนเฉพาะจำนวนผู้สมัคร ค่าอื่นคงเดิม', () {
+    final a = _activity(id: 5, startAt: _day, participantCount: 3, maxParticipants: 10);
+    final b = a.copyWith(participantCount: 4);
+    expect(b.participantCount, 4);
+    expect([b.id, b.name, b.startAt, b.maxParticipants, b.approvalStatus],
+        [a.id, a.name, a.startAt, a.maxParticipants, a.approvalStatus]);
+  });
+
+  group('ปุ่มในการ์ดบอกชื่อกิจกรรมผ่าน semantics', () {
+    testWidgets('ปุ่มสมัครของแต่ละการ์ดแยกกันได้ด้วยชื่อกิจกรรม', (tester) async {
+      final semantics = tester.ensureSemantics();
+      _loginAs('student');
+      await _pump(tester, [
+        _activity(id: 1, name: 'งานเช้า', startAt: _at(9, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+        _activity(id: 2, name: 'งานบ่าย', startAt: _at(13, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+      ]);
+      await tester.tap(find.byTooltip('เดือนถัดไป'));
+      await tester.pumpAndSettle();
+      await _tapDay(tester, _nextMonthDay);
+
+      expect(find.bySemanticsLabel('สมัครเข้าร่วม: งานเช้า'), findsOneWidget);
+      expect(find.bySemanticsLabel('สมัครเข้าร่วม: งานบ่าย'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('ปุ่มจัดการของ admin ก็บอกชื่อกิจกรรม', (tester) async {
+      final semantics = tester.ensureSemantics();
+      _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, name: 'ค่ายอาสา', startAt: _at(9, 0), approvalStatus: 'pending')]);
+      await _tapDay(tester, _day);
+
+      expect(find.bySemanticsLabel('อนุมัติ: ค่ายอาสา'), findsOneWidget);
+      expect(find.bySemanticsLabel('ผู้เข้าร่วม: ค่ายอาสา'), findsOneWidget);
+      expect(find.bySemanticsLabel('แก้ไข: ค่ายอาสา'), findsOneWidget);
+      semantics.dispose();
     });
   });
 
