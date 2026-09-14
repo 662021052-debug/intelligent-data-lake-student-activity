@@ -113,8 +113,12 @@ def test_seed_never_overwrites_a_set_an_admin_made(session):
     assert len(same_code) == 1
 
 
-def test_seed_still_enforces_system_sets_when_nothing_is_custom(session):
-    """ชุดระบบที่ค่าเพี้ยนต้องถูกดึงกลับมาให้ตรงเอกสารเหมือนเดิม"""
+def test_seed_leaves_an_existing_official_set_as_it_is(session):
+    """ชุดทางการที่มีอยู่แล้วต้องไม่ถูกดึงกลับให้ตรงเอกสาร — ค่าในฐานคือความจริง
+
+    เดิม seed "ซ่อม" ชุดระบบทุกครั้งที่บูต ตอนนี้ผู้ดูแลแก้ชุดทางการได้แล้ว การซ่อมจึงเท่ากับ
+    ลบงานที่เขาแก้ทิ้งเงียบ ๆ ตอน restart
+    """
     _legacy_hour_structure(session)
     populate(session)
     session.commit()
@@ -122,17 +126,22 @@ def test_seed_still_enforces_system_sets_when_nothing_is_custom(session):
     modern = session.exec(
         select(CriteriaSet).where(CriteriaSet.code == "2567-regular")
     ).first()
-    modern.total_required_hours = 1
-    modern.effective_from_cohort = 9999
+    modern.name = "เกณฑ์ 2567 (ผู้ดูแลแก้ชื่อ)"
+    modern.total_required_hours = 72
     session.add(modern)
     session.commit()
 
-    populate(session)
+    report = populate(session)
     session.commit()
     session.refresh(modern)
 
-    assert modern.total_required_hours == EXPECTED_2567_REGULAR_TOTAL
-    assert modern.effective_from_cohort == 2567
+    assert modern.name == "เกณฑ์ 2567 (ผู้ดูแลแก้ชื่อ)"
+    assert modern.total_required_hours == 72
+    assert modern.is_system is True, "ยังเป็นชุดทางการ แค่ไม่ถูกเขียนทับ"
+    assert report.created == [] and report.updated == []
+    # ข้ามโดยตั้งใจต้องบอกใน log ไม่ใช่เงียบจนดูเหมือนลืมสร้าง
+    assert any("2567-regular" in line for line in report.skipped)
+    assert any(LEGACY_CRITERIA_CODE in line for line in report.skipped)
 
 
 def test_spec_totals_match_the_design_doc():
@@ -293,14 +302,14 @@ def test_running_twice_changes_nothing(session):
     assert second.updated == []
 
 
-def test_rerun_repairs_a_hand_edited_requirement(session):
-    """ค่าที่ถูกแก้จนไม่ตรงเอกสาร ต้องถูกดึงกลับ — ไม่งั้นเกณฑ์ค่อย ๆ เพี้ยนไปเงียบ ๆ."""
+def test_rerun_keeps_an_admin_edited_requirement(session):
+    """หัวใจของการปลดล็อก: แก้รายการเกณฑ์ของชุด 2567 แล้วรัน seed ซ้ำ (= restart) ค่าที่แก้ต้องอยู่"""
     populate(session)
     session.commit()
 
     _, requirements = _requirements(session, "2567-regular")
     orientation = next(r for r in requirements if r.name == "กิจกรรมปฐมนิเทศนิสิต")
-    orientation.required_hours = 99
+    orientation.required_hours = 6
     orientation.is_mandatory = False
     session.add(orientation)
     session.commit()
@@ -309,9 +318,50 @@ def test_rerun_repairs_a_hand_edited_requirement(session):
     session.commit()
 
     session.refresh(orientation)
-    assert orientation.required_hours == 4
-    assert orientation.is_mandatory is True
-    assert any("กิจกรรมปฐมนิเทศนิสิต" in line for line in report.updated)
+    assert orientation.required_hours == 6
+    assert orientation.is_mandatory is False
+    assert report.updated == []
+
+
+def test_rerun_does_not_bring_back_what_an_admin_deleted(session):
+    """ลบรายการ/Talent ในชุดทางการแล้ว restart — ต้องไม่งอกกลับมาจากเอกสาร"""
+    populate(session)
+    session.commit()
+
+    criteria_set, requirements = _requirements(session, "2567-regular")
+    removed = next(r for r in requirements if r.name == "การทำงานร่วมกับผู้อื่น")
+    session.delete(removed)
+    session.commit()
+
+    report = populate(session)
+    session.commit()
+
+    _, after = _requirements(session, "2567-regular")
+    assert "การทำงานร่วมกับผู้อื่น" not in {r.name for r in after}
+    assert len(after) == len(requirements) - 1
+    assert report.created == []
+
+
+def test_existing_legacy_set_is_no_longer_resynced_from_hour_categories(session):
+    """ผลข้างเคียงที่ตั้งใจ: ชุด legacy มีแล้ว seed ไม่แปลงหมวดชั่วโมงที่เพิ่มทีหลังเข้ามาอีก
+
+    เดิมทุกครั้งที่บูต seed ไล่แปลง hourcategory → รายการเกณฑ์ของ legacy ใหม่ ตอนนี้ชุดที่มี
+    อยู่แล้วไม่ถูกแตะ หมวดย่อยที่เพิ่มผ่านหน้าหมวดชั่วโมงหลังจากนี้จึงไม่ไหลเข้าชุด legacy เอง
+    """
+    _legacy_hour_structure(session)
+    populate(session)
+    session.commit()
+    _, before = _requirements(session, LEGACY_CRITERIA_CODE)
+
+    category = session.exec(select(HourCategory).where(HourCategory.name == "พัฒนาทักษะชีวิต")).one()
+    session.add(HourSubcategory(category_id=category.id, name="หมวดย่อยที่เพิ่มทีหลัง", required_hours=2))
+    session.commit()
+
+    populate(session)
+    session.commit()
+
+    _, after = _requirements(session, LEGACY_CRITERIA_CODE)
+    assert {r.name for r in after} == {r.name for r in before}
 
 
 def test_extra_requirements_added_by_hand_are_left_alone(session):

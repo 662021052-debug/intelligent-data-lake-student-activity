@@ -6,11 +6,13 @@ hoursubcategory เดิม) · ชุดเกณฑ์ ``2567-regular`` พ�
 
 แยกจาก ``seed.py`` เพราะคนละชนิดของข้อมูล: seed.py สร้าง *ข้อมูลเดโม* และข้ามทั้งไฟล์
 ทันทีที่เจอบัญชีผู้ใช้สักคน — ซึ่งหลังรัน ``wipe_data.py`` ก็ยังมี staff/admin เหลืออยู่เสมอ
-ไฟล์นี้สร้าง *นิยามเกณฑ์* ที่ต้องมีทุกฐาน ไม่ว่าจะมีข้อมูลจริงอยู่แล้วหรือไม่ จึงเขียนให้
-รันซ้ำได้ (สร้างของที่ขาด · อัปเดตของที่ค่าเพี้ยนจากเอกสาร · ไม่แตะแถวที่คนเพิ่มเองทีหลัง)
+ไฟล์นี้สร้าง *นิยามเกณฑ์* ที่ต้องมีทุกฐาน ไม่ว่าจะมีข้อมูลจริงอยู่แล้วหรือไม่ และถูกเรียก
+ทุกครั้งที่คอนเทนเนอร์บูต จึงเขียนให้รันซ้ำได้โดย **สร้างชุดเฉพาะตอนที่ยังไม่มี code นั้นในฐาน
+ถ้ามีแล้วไม่แตะอะไรในชุดนั้นเลย** — ผู้ดูแลแก้เนื้อหาชุดทางการผ่านหน้าจอได้ ถ้า seed ยังดึงค่า
+กลับให้ตรงเอกสาร งานที่แก้จะหายตอน restart เอกสารจึงเป็นแค่ "ค่าเริ่มต้นของฐานใหม่"
 
 รัน:
-    python seed_criteria.py             # สร้าง/อัปเดตให้ตรงกับเอกสาร
+    python seed_criteria.py             # สร้างชุดที่ยังไม่มี (ชุดที่มีแล้วไม่แตะ)
     python seed_criteria.py --dry-run   # บอกว่าจะเปลี่ยนอะไร โดยไม่เขียนจริง
 """
 
@@ -169,6 +171,8 @@ class Report:
     created: list[str] = field(default_factory=list)
     updated: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # ชุดที่มีอยู่แล้วจึงไม่แตะ — พิมพ์ให้เห็นว่าข้ามโดยตั้งใจ ไม่ใช่ลืมสร้าง
+    skipped: list[str] = field(default_factory=list)
 
 
 def _spec_total_hours(specs: list[RequirementSpec]) -> float:
@@ -217,12 +221,18 @@ def _upsert_criteria_set(
     counting_rule: CountingRule,
     effective_from_cohort: int,
 ) -> Optional[CriteriaSet]:
-    """สร้าง/อัปเดตชุดเกณฑ์ **ทางการ** ให้ตรงกับเอกสาร
+    """สร้างชุดเกณฑ์ **ทางการ** ตามเอกสาร — เฉพาะเมื่อยังไม่มี code นี้ในฐาน
 
-    คืน ``None`` เมื่อ code นั้นถูกชุดที่ผู้ดูแลสร้างเองจองไว้แล้ว — ดู :func:`_is_custom`
+    คืน ``None`` เมื่อมีชุด code นี้อยู่แล้ว ผู้เรียกจึงข้าม Talent/กลุ่ม/รายการเกณฑ์ไปทั้งก้อน:
+
+    * ชุดทางการที่มีอยู่แล้ว → ไม่แตะเลย (ผู้ดูแลอาจแก้ไว้ — ค่าในฐานคือความจริง ไม่ใช่เอกสาร)
+    * ชุดที่ผู้ดูแลสร้างเองจอง code ไว้ → ไม่แตะและเตือน — ดู :func:`_is_custom`
     """
     criteria_set = session.exec(select(CriteriaSet).where(CriteriaSet.code == code)).first()
     if _is_custom(criteria_set, report, code):
+        return None
+    if criteria_set is not None:
+        report.skipped.append(f"criteria_set {code} มีอยู่แล้ว — ไม่แตะ (แก้ผ่านหน้าจอได้)")
         return None
 
     fields = {
@@ -235,19 +245,11 @@ def _upsert_criteria_set(
         "effective_from_cohort": effective_from_cohort,
         "is_system": True,
     }
-    if criteria_set is None:
-        # effective_from/to ปล่อยว่างไว้ตั้งใจ — ตัวเลือกชุดเกณฑ์จริงคือรุ่นของนิสิต (§8)
-        # การเดาวันที่ลงไปจะกลายเป็นข้อมูลที่ดูน่าเชื่อแต่ไม่มีใครยืนยัน
-        criteria_set = CriteriaSet(code=code, **fields)
-        session.add(criteria_set)
-        report.created.append(f"criteria_set {code} ({name}, {total_required_hours:g} ชม.)")
-    else:
-        changed = [k for k, v in fields.items() if getattr(criteria_set, k) != v]
-        for key in changed:
-            setattr(criteria_set, key, fields[key])
-        if changed:
-            session.add(criteria_set)
-            report.updated.append(f"criteria_set {code}: {', '.join(changed)}")
+    # effective_from/to ปล่อยว่างไว้ตั้งใจ — ตัวเลือกชุดเกณฑ์จริงคือรุ่นของนิสิต (§8)
+    # การเดาวันที่ลงไปจะกลายเป็นข้อมูลที่ดูน่าเชื่อแต่ไม่มีใครยืนยัน
+    criteria_set = CriteriaSet(code=code, **fields)
+    session.add(criteria_set)
+    report.created.append(f"criteria_set {code} ({name}, {total_required_hours:g} ชม.)")
     session.flush()
     return criteria_set
 
@@ -550,6 +552,8 @@ def seed_criteria(dry_run: bool = False) -> None:
             print(f"  + {line}")
         for line in report.updated:
             print(f"  ~ {line}")
+        for line in report.skipped:
+            print(f"  = {line}")
         for line in report.warnings:
             print(f"  ! {line}")
 

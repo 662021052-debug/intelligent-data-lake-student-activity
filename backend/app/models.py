@@ -88,8 +88,9 @@ class CriteriaSet(SQLModel, table=True):
     # ระบบเลือกชุดที่ค่านี้ "สูงสุดที่ยังไม่เกินรุ่นของนิสิต" เพิ่มชุดของรุ่นอนาคตจึงทำได้
     # ด้วยการเพิ่มแถว ไม่ต้องแก้โค้ด (ดู app/criteria.py) · 0 = ใช้กับรุ่นเก่าที่สุดเป็นต้นไป
     effective_from_cohort: int = Field(default=0, index=True)
-    # True = เกณฑ์ทางการที่ seed ไว้ — seed_criteria.py เป็นเจ้าของและเขียนทับได้
-    # False = ชุดที่ผู้ดูแลสร้างเอง ตัว seed ต้องไม่แตะ ไม่งั้นงานที่คนทำไว้หายตอน boot
+    # True = เกณฑ์ทางการที่ seed สร้างไว้ (ป้าย "ชุดทางการ") — เนื้อหาในชุดแก้ผ่าน API ได้
+    # แต่ตัวชุดแก้ระดับชุด/ลบไม่ได้ · seed สร้างเฉพาะตอนยังไม่มี code นี้ ไม่เขียนทับของที่แก้ไว้
+    # False = ชุดที่ผู้ดูแลสร้างเอง แก้/ลบได้ทั้งชุด
     is_system: bool = False
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None

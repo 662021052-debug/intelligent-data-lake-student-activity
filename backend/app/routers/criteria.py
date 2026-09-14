@@ -1,4 +1,4 @@
-"""ชุดเกณฑ์ + รายการเกณฑ์ — อ่านได้ทุก role · เขียนได้เฉพาะ admin และเฉพาะชุดที่ไม่ใช่ของระบบ
+"""ชุดเกณฑ์ + รายการเกณฑ์ — อ่านได้ทุก role · เขียนได้เฉพาะ admin
 
 **อ่าน** (`GET`) จัดกลุ่มมาให้พร้อมใช้ เพราะสองชุดเกณฑ์จัดกลุ่มคนละแบบและ UI ไม่ควร
 ต้องรู้กติกานี้เอง:
@@ -12,9 +12,11 @@
 
 กฎกันพลาดที่บังคับไว้ที่นี่ เพราะพลาดแต่ละอย่างมีราคาแพงและตามแก้ยาก:
 
-1. **ชุดของระบบ (`is_system`) แก้/ลบไม่ได้** รวมถึง Talent/รายการเกณฑ์ที่อยู่ข้างใน —
-   เกณฑ์ทางการที่ seed ไว้คือสิ่งที่นิสิต 2,000 คนถูกวัดอยู่ และ ``seed_criteria.py``
-   จะเขียนทับกลับทุกครั้งที่บูตอยู่แล้ว การ "แก้ได้แต่ไม่อยู่" คือกับดัก
+1. **เนื้อหาในชุด (Talent / กลุ่มแชร์เป้า / รายการเกณฑ์) แก้ได้ทุกชุด รวมชุดทางการ** —
+   ผู้ดูแลต้องปรับเกณฑ์ 2567 ได้เหมือนเกณฑ์เดิม และ ``seed_criteria.py`` สร้างชุดเฉพาะตอน
+   ยังไม่มีในฐาน จึงไม่เขียนทับสิ่งที่แก้ไว้ตอนบูต · แต่ **ตัวชุดทางการ (`is_system`)
+   แก้ข้อมูลระดับชุด/ลบไม่ได้** — ปีรุ่นที่เริ่มใช้คือขั้นบันไดที่นิสิตทั้งรุ่นแมปอยู่ ลบหรือ
+   ขยับทีเดียวกระทบคนนับพัน
 2. **ลบชุดที่มีนิสิตผูกอยู่ไม่ได้** — ลบแล้วคนกลุ่มนั้นจะไม่มีเกณฑ์ให้วัดเลย
 3. **``effective_from_cohort`` ห้ามซ้ำใน ``program_type`` เดียวกัน** — ซ้ำเมื่อไหร่
    บันไดการแมปมีสองขั้นที่ความสูงเท่ากัน ผลลัพธ์จึงขึ้นกับลำดับ id ซึ่งไม่ใช่เจตนาของใคร
@@ -93,7 +95,7 @@ def _get_set(session: Session, criteria_set_id: int) -> CriteriaSet:
 
 
 def _reject_system_set(criteria_set: CriteriaSet) -> None:
-    """ชุดเกณฑ์ทางการเป็นแบบอ่านอย่างเดียว — รวมถึงของที่อยู่ข้างในชุดด้วย
+    """ตัวชุดเกณฑ์ทางการแก้ข้อมูลระดับชุด/ลบไม่ได้ — ของข้างในชุดแก้ได้ตามปกติ
 
     403 ไม่ใช่ 409 เพราะเป็นเรื่อง "ไม่มีสิทธิ์แตะของชิ้นนี้" ไม่ใช่ "สถานะตอนนี้ชนกัน"
     ต่อให้ลองใหม่อีกกี่ครั้งก็ยังทำไม่ได้
@@ -171,7 +173,7 @@ def _to_detail(session: Session, criteria_set: CriteriaSet) -> CriteriaSetDetail
 
 
 def _editable_set_of(session: Session, criteria_set_id: int) -> CriteriaSet:
-    """ชุดที่แก้ได้จริง — 404 ถ้าไม่มี, 403 ถ้าเป็นชุดของระบบ"""
+    """ชุดที่แก้ข้อมูลระดับชุด/ลบได้ — 404 ถ้าไม่มี, 403 ถ้าเป็นชุดของระบบ"""
     criteria_set = _get_set(session, criteria_set_id)
     _reject_system_set(criteria_set)
     return criteria_set
@@ -477,7 +479,7 @@ def delete_criteria_set(criteria_set_id: int, session: Session = Depends(get_ses
 def create_talent(
     criteria_set_id: int, payload: TalentWrite, session: Session = Depends(get_session)
 ):
-    _editable_set_of(session, criteria_set_id)
+    _get_set(session, criteria_set_id)  # 404 ถ้าไม่มี · เพิ่มของในชุดทางการได้เหมือนชุดผู้ดูแล
     code = payload.code.strip()
     existing = session.exec(
         select(Talent).where(Talent.criteria_set_id == criteria_set_id, Talent.code == code)
@@ -503,7 +505,7 @@ def create_talent(
 )
 def update_talent(talent_id: int, payload: TalentWrite, session: Session = Depends(get_session)):
     talent = _talent(session, talent_id)
-    _reject_system_set(_get_set(session, talent.criteria_set_id))
+    _get_set(session, talent.criteria_set_id)
 
     code = payload.code.strip()
     clash = session.exec(
@@ -529,7 +531,7 @@ def update_talent(talent_id: int, payload: TalentWrite, session: Session = Depen
 @talent_router.delete("/{talent_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_talent(talent_id: int, session: Session = Depends(get_session)):
     talent = _talent(session, talent_id)
-    _reject_system_set(_get_set(session, talent.criteria_set_id))
+    _get_set(session, talent.criteria_set_id)
 
     used = session.exec(
         select(func.count()).select_from(Requirement).where(Requirement.talent_id == talent_id)
@@ -552,7 +554,7 @@ def delete_talent(talent_id: int, session: Session = Depends(get_session)):
 def create_requirement_group(
     criteria_set_id: int, payload: RequirementGroupWrite, session: Session = Depends(get_session)
 ):
-    _editable_set_of(session, criteria_set_id)
+    _get_set(session, criteria_set_id)  # 404 ถ้าไม่มี · เพิ่มของในชุดทางการได้เหมือนชุดผู้ดูแล
     code = payload.code.strip()
     existing = session.exec(
         select(RequirementGroup).where(
@@ -583,7 +585,7 @@ def update_requirement_group(
     group_id: int, payload: RequirementGroupWrite, session: Session = Depends(get_session)
 ):
     group = _group(session, group_id)
-    _reject_system_set(_get_set(session, group.criteria_set_id))
+    _get_set(session, group.criteria_set_id)
 
     group.code = payload.code.strip()
     group.name = payload.name.strip()
@@ -600,7 +602,7 @@ def update_requirement_group(
 )
 def delete_requirement_group(group_id: int, session: Session = Depends(get_session)):
     group = _group(session, group_id)
-    _reject_system_set(_get_set(session, group.criteria_set_id))
+    _get_set(session, group.criteria_set_id)
 
     used = session.exec(
         select(func.count()).select_from(Requirement).where(Requirement.group_id == group_id)
@@ -623,7 +625,7 @@ def delete_requirement_group(group_id: int, session: Session = Depends(get_sessi
 def create_requirement(
     criteria_set_id: int, payload: RequirementWrite, session: Session = Depends(get_session)
 ):
-    _editable_set_of(session, criteria_set_id)
+    _get_set(session, criteria_set_id)  # 404 ถ้าไม่มี · เพิ่มของในชุดทางการได้เหมือนชุดผู้ดูแล
     _check_requirement_links(session, payload, criteria_set_id)
 
     requirement = Requirement(
@@ -651,7 +653,7 @@ def update_requirement(
     requirement_id: int, payload: RequirementWrite, session: Session = Depends(get_session)
 ):
     requirement = _requirement(session, requirement_id)
-    _reject_system_set(_get_set(session, requirement.criteria_set_id))
+    _get_set(session, requirement.criteria_set_id)
     _check_requirement_links(session, payload, requirement.criteria_set_id)
 
     requirement.name = payload.name.strip()
@@ -674,7 +676,7 @@ def update_requirement(
 )
 def delete_requirement(requirement_id: int, session: Session = Depends(get_session)):
     requirement = _requirement(session, requirement_id)
-    _reject_system_set(_get_set(session, requirement.criteria_set_id))
+    _get_set(session, requirement.criteria_set_id)
 
     linked = session.exec(
         select(func.count())

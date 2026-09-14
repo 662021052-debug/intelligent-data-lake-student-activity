@@ -158,7 +158,7 @@ def test_admin_deletes_a_custom_set_with_its_contents(client, session, unit):
     ).all() == []
 
 
-# --------------------------- กันแก้ชุดของระบบ ---------------------------
+# --------------------------- ตัวชุดทางการ: แก้ระดับชุด/ลบไม่ได้ (ของข้างในแก้ได้) ---------------------------
 def test_system_set_cannot_be_updated(client, system_set):
     response = client.put(
         f"/criteria-sets/{system_set.id}",
@@ -176,11 +176,11 @@ def test_system_set_cannot_be_deleted(client, system_set):
     assert response.status_code == 403
 
 
-def test_contents_of_a_system_set_are_protected_too(client, session, system_set, unit):
-    """แก้ Talent/รายการข้างในชุดทางการก็คือแก้เกณฑ์ทางการ — ต้องกันเหมือนกัน
+def test_contents_of_a_system_set_are_editable(client, session, system_set, unit):
+    """ผู้ดูแลแก้ Talent / กลุ่มแชร์เป้า / รายการเกณฑ์ในชุดทางการ (2567) ได้เหมือนชุดของตัวเอง
 
-    ถ้าปล่อยให้แก้ ผลจะแย่กว่าเดิม: seed จะเขียนทับกลับตอนบูตครั้งถัดไป
-    ผู้ดูแลจึงเจอ "แก้ได้แต่ไม่อยู่" ซึ่งหาสาเหตุยากกว่าโดนห้ามไปเลย
+    ปลอดภัยเพราะ seed_criteria.py ไม่เขียนทับชุดที่มีอยู่แล้ว — แก้แล้วอยู่ ไม่หายตอนบูต
+    (คุมไว้ใน test_seed_criteria.py::test_rerun_keeps_an_admin_edited_requirement)
     """
     talent = Talent(criteria_set_id=system_set.id, code="glocal", name="Glocal")
     group = RequirementGroup(
@@ -202,29 +202,90 @@ def test_contents_of_a_system_set_are_protected_too(client, session, system_set,
     session.refresh(requirement)
 
     headers = _admin_headers(client)
-    assert client.post(
+
+    # เพิ่ม
+    new_talent = client.post(
         f"/criteria-sets/{system_set.id}/talents",
         json={"code": "new", "name": "เพิ่มใหม่"},
         headers=headers,
-    ).status_code == 403
+    )
+    assert new_talent.status_code == 201, new_talent.text
+    new_requirement = client.post(
+        f"/criteria-sets/{system_set.id}/requirements",
+        json={"name": "รายการที่เพิ่มในชุด 2567", "learning_unit_id": unit.id, "required_hours": 2},
+        headers=headers,
+    )
+    assert new_requirement.status_code == 201, new_requirement.text
+
+    # แก้ — และค่าต้องลงฐานจริง
     assert client.put(
         f"/talents/{talent.id}",
         json={"code": "glocal", "name": "แก้ชื่อ", "sort_order": 0},
         headers=headers,
-    ).status_code == 403
-    assert client.delete(f"/talents/{talent.id}", headers=headers).status_code == 403
+    ).status_code == 200
     assert client.put(
         f"/requirement-groups/{group.id}",
         json={"code": "social-16", "name": "แก้ชื่อกลุ่ม", "required_hours": 20},
         headers=headers,
-    ).status_code == 403
-    assert client.delete(f"/requirement-groups/{group.id}", headers=headers).status_code == 403
-    assert client.put(
+    ).status_code == 200
+    response = client.put(
         f"/requirements/{requirement.id}",
-        json={"name": "แก้ชื่อรายการ", "learning_unit_id": unit.id, "required_hours": 4},
+        json={"name": "แก้ชื่อรายการ", "learning_unit_id": unit.id, "required_hours": 6},
         headers=headers,
-    ).status_code == 403
-    assert client.delete(f"/requirements/{requirement.id}", headers=headers).status_code == 403
+    )
+    assert response.status_code == 200, response.text
+    session.expire_all()
+    assert session.get(Talent, talent.id).name == "แก้ชื่อ"
+    assert session.get(RequirementGroup, group.id).required_hours == 20
+    edited = session.get(Requirement, requirement.id)
+    assert (edited.name, edited.required_hours) == ("แก้ชื่อรายการ", 6)
+
+    # ลบ
+    assert client.delete(f"/requirements/{requirement.id}", headers=headers).status_code == 204
+    assert client.delete(
+        f"/requirements/{new_requirement.json()['id']}", headers=headers
+    ).status_code == 204
+    assert client.delete(f"/requirement-groups/{group.id}", headers=headers).status_code == 204
+    assert client.delete(f"/talents/{talent.id}", headers=headers).status_code == 204
+    assert client.delete(
+        f"/talents/{new_talent.json()['id']}", headers=headers
+    ).status_code == 204
+    session.expire_all()
+    assert session.get(CriteriaSet, system_set.id) is not None, "ลบของข้างใน ไม่ใช่ลบชุด"
+
+
+def test_content_rules_still_apply_inside_a_system_set(client, session, system_set, unit):
+    """ปลดล็อกแล้วกฎกันพลาดเดิมต้องยังทำงานกับชุดทางการ — ลบรายการที่กิจกรรมผูกอยู่ไม่ได้"""
+    from app.models import Activity, ApprovalStatus, User, UserRole
+    from datetime import datetime
+
+    requirement = Requirement(
+        criteria_set_id=system_set.id, name="กิจกรรมปฐมนิเทศนิสิต", learning_unit_id=unit.id, required_hours=4
+    )
+    session.add(requirement)
+    session.commit()
+    session.refresh(requirement)
+    staff = session.exec(select(User).where(User.role == UserRole.staff)).first()
+    activity = Activity(
+        name="ปฐมนิเทศ",
+        activity_type="วิชาการ",
+        max_participants=10,
+        start_at=datetime(2026, 7, 1, 9),
+        location="หอประชุม",
+        hours=4,
+        created_by=staff.id,
+        approval_status=ApprovalStatus.approved,
+    )
+    session.add(activity)
+    session.commit()
+    session.refresh(activity)
+    session.add(ActivityRequirement(activity_id=activity.id, requirement_id=requirement.id))
+    session.commit()
+
+    response = client.delete(f"/requirements/{requirement.id}", headers=_admin_headers(client))
+
+    assert response.status_code == 400
+    assert "ผูก" in response.json()["detail"]
 
 
 # --------------------------- กันลบชุดที่มีคนใช้ ---------------------------
@@ -614,7 +675,8 @@ def test_list_exposes_the_fields_the_admin_screen_needs(client):
     assert mine["hours_warning"] is not None
 
 
-def test_system_sets_are_flagged_so_the_screen_can_lock_them(client, system_set):
+def test_system_sets_are_still_flagged_as_official(client, system_set):
+    """is_system ยังส่งมาเป็นป้าย "ชุดทางการ" (หน้าจอใช้ซ่อนปุ่มแก้/ลบระดับชุด)"""
     listed = client.get("/criteria-sets").json()
     official = next(c for c in listed if c["id"] == system_set.id)
 

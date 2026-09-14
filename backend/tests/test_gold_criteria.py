@@ -174,6 +174,85 @@ def test_2567_student_is_measured_on_ten_items_totalling_60_hours(session, crite
     assert all(r["earned_hours"] == 0 and r["completed"] == 0 for r in rows)
 
 
+# ------------------------------------------------------------------ ปลดล็อกชุด 2567
+
+def _admin_headers(client):
+    response = client.post("/auth/login", data={"username": "admin", "password": "admin123"})
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def _requirement_payload(requirement, **overrides):
+    payload = {
+        "name": requirement.name,
+        "learning_unit_id": requirement.learning_unit_id,
+        "talent_id": requirement.talent_id,
+        "group_id": requirement.group_id,
+        "is_mandatory": requirement.is_mandatory,
+        "required_hours": requirement.required_hours,
+        "min_activities": requirement.min_activities,
+        "rule_note": requirement.rule_note,
+        "organizer": requirement.organizer,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_reseed_and_a_no_change_save_keep_every_verdict_identical(client, session, criteria):
+    """regression: บูตใหม่ (รัน seed) + ผู้ดูแลกดบันทึกฟอร์มโดยไม่เปลี่ยนค่า → ผลตัดสินนิสิตต้องเหมือนเดิมทุกตัวเลข"""
+    complete = _student(session, criteria, "6900000031")
+    _give(session, complete, FULL)
+    partial = _student(session, criteria, "6900000032")
+    _give(session, partial, {**FULL, ELECTIVE: 0})
+
+    def verdicts():
+        result = {}
+        for student in (complete, partial):
+            p = _progress(session, student)
+            result[student.id] = (p.completed, p.counted_hours, p.required_hours, [g.name for g in p.gaps])
+        return result
+
+    before = verdicts()
+    assert before[complete.id][0] is True and before[partial.id][0] is False
+
+    seed_criteria(session)
+    session.commit()
+    for name in (ELECTIVE, ORIENTATION, SOCIAL[0]):
+        requirement = _req(session, name)
+        response = client.put(
+            f"/requirements/{requirement.id}",
+            json=_requirement_payload(requirement),
+            headers=_admin_headers(client),
+        )
+        assert response.status_code == 200, response.text
+    session.expire_all()
+
+    assert verdicts() == before
+
+
+def test_admin_edit_to_2567_survives_reseed_and_is_what_students_are_measured_on(client, session, criteria):
+    """แก้ชุด 2567 ผ่าน API → รัน seed ซ้ำ (restart) ค่ายังอยู่ และใช้วัดนิสิตทันที (gold คำนวณสดจากโครง)"""
+    student = _student(session, criteria, "6900000033")
+    _give(session, student, FULL)
+    assert _progress(session, student).completed
+
+    elective = _req(session, ELECTIVE)
+    response = client.put(
+        f"/requirements/{elective.id}",
+        json=_requirement_payload(elective, required_hours=5),
+        headers=_admin_headers(client),
+    )
+    assert response.status_code == 200, response.text
+
+    seed_criteria(session)
+    session.commit()
+    session.expire_all()
+
+    assert _req(session, ELECTIVE).required_hours == 5, "seed ต้องไม่ดึงกลับเป็น 3"
+    p = _progress(session, student)
+    assert not p.completed
+    assert [g.name for g in p.gaps] == [ELECTIVE]
+
+
 # ------------------------------------------------------------------ three cases
 
 def test_complete_student_passes(session, criteria):
