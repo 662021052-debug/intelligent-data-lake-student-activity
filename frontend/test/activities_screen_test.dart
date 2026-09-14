@@ -25,7 +25,7 @@ void main() {
       final staff = activityTableColumns(false).map(_labelOf).toList();
 
       expect(staff.length - student.length, 1);
-      for (final label in ['ชื่อกิจกรรม', 'ประเภท', 'หมวดชั่วโมง', 'ชั่วโมง', 'วันเวลา', 'สถานที่']) {
+      for (final label in ['ชื่อกิจกรรม', 'ประเภท', 'นับเข้าหมวด', 'ชั่วโมงที่ได้', 'วันเวลา', 'สถานที่']) {
         expect(student, contains(label), reason: 'นิสิตต้องยังเห็นคอลัมน์ $label');
       }
     });

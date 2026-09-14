@@ -1,4 +1,5 @@
 import 'package:activity_tracking_frontend/models/activity.dart';
+import 'package:activity_tracking_frontend/models/criteria_set.dart';
 import 'package:activity_tracking_frontend/screens/activities_screen.dart';
 import 'package:activity_tracking_frontend/screens/app_shell.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
@@ -20,8 +21,8 @@ const _allLabels = [
   'วันเวลา',
   'สถานที่',
   'ประเภท',
-  'หมวดชั่วโมง',
-  'ชั่วโมง',
+  'นับเข้าหมวด',
+  'ชั่วโมงที่ได้',
   'สถานะอนุมัติ',
   'จัดการ',
 ];
@@ -59,7 +60,13 @@ final _activities = [
 
 /// หน้าเต็มแบบที่ผู้ใช้เห็นจริง: เปลือกผู้ดูแล (แถบเมนู + ขอบหน้า) + การ์ดตาราง
 /// — ความกว้างที่ตารางได้จึงเท่ากับบนจอจริง ไม่ใช่เท่ากว้างหน้าต่างทั้งหมด
-Future<void> _pumpPage(WidgetTester tester, double width, {String role = 'admin'}) async {
+Future<void> _pumpPage(
+  WidgetTester tester,
+  double width, {
+  String role = 'admin',
+  List<Activity>? activities,
+  List<CriteriaSet> criteriaSets = const [],
+}) async {
   tester.view.physicalSize = Size(width, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
@@ -74,7 +81,8 @@ Future<void> _pumpPage(WidgetTester tester, double width, {String role = 'admin'
       title: 'จัดการกิจกรรม',
       child: TableCard(
         child: ActivitiesTable(
-          activities: _activities,
+          activities: activities ?? _activities,
+          criteriaSets: criteriaSets,
           isStudent: role == 'student',
           canWrite: role != 'student',
           isAdmin: role == 'admin',
@@ -110,13 +118,13 @@ void main() {
 
     test('คอลัมน์ข้อความแชร์ความกว้างแบบ flex · ที่เหลือกว้างคงที่', () {
       final columns = {for (final c in activityTableColumns(false)) _labelOf(c): c};
-      for (final label in ['ชื่อกิจกรรม', 'สถานที่', 'ประเภท', 'หมวดชั่วโมง']) {
+      for (final label in ['ชื่อกิจกรรม', 'สถานที่', 'ประเภท', 'นับเข้าหมวด']) {
         expect(columns[label]!.columnWidth, isA<FlexColumnWidth>(), reason: label);
       }
-      for (final label in ['วันเวลา', 'ชั่วโมง', 'สถานะอนุมัติ', 'จัดการ']) {
+      for (final label in ['วันเวลา', 'ชั่วโมงที่ได้', 'สถานะอนุมัติ', 'จัดการ']) {
         expect(columns[label]!.columnWidth, isA<FixedColumnWidth>(), reason: label);
       }
-      expect(columns['ชั่วโมง']!.numeric, isTrue);
+      expect(columns['ชั่วโมงที่ได้']!.numeric, isTrue);
     });
 
     test('ความกว้างคงที่รวม padding ของเซลล์ — เนื้อหาไม่ถูกบีบเหลือน้อยกว่าที่ตั้ง', () {
@@ -218,6 +226,101 @@ void main() {
       expect(find.text('สถานะอนุมัติ'), findsNothing);
       expect(find.byType(ActivityActionButtons), findsNothing);
       expect(tester.getRect(find.byType(DataTable)).right, lessThanOrEqualTo(1280.5));
+    });
+  });
+
+  group('"ชั่วโมงที่ได้" กับ "นับเข้าหมวด" ต้องไม่สับสนกัน', () {
+    test('หัวคอลัมน์สองอันต่างกันชัด — ไม่มีคำหนึ่งซ้อนอยู่ในอีกคำ', () {
+      final labels = activityTableColumns(false).map(_labelOf).toList();
+      expect(labels, containsAll(['ชั่วโมงที่ได้', 'นับเข้าหมวด']));
+      expect(labels, isNot(contains('ชั่วโมง')), reason: 'หัวเดิมที่ชื่อชนกัน');
+      expect(labels, isNot(contains('หมวดชั่วโมง')), reason: 'หัวเดิมที่ชื่อชนกัน');
+      expect('นับเข้าหมวด', isNot(contains('ชั่วโมง')));
+      expect('ชั่วโมงที่ได้', isNot(contains('หมวด')));
+    });
+
+    test('ชั่วโมงแสดงพร้อมหน่วย "N ชม." ไม่ใช่เลขลอย ๆ', () {
+      expect(activityHoursLabel(_activity(1)), '3 ชม.');
+      final half = Activity(
+        name: 'x',
+        activityType: 'วิชาการ',
+        hours: 4.5,
+        maxParticipants: 10,
+        startAt: DateTime(2027, 1, 1),
+        location: 'y',
+      );
+      expect(activityHoursLabel(half), '4.5 ชม.');
+    });
+
+    testWidgets('เซลล์ชั่วโมงในตารางขึ้น "N ชม." และชิดขวาตรงกับหัวคอลัมน์', (tester) async {
+      await _pumpPage(tester, 1440);
+
+      final inTable = find.byType(DataTable);
+      final cells = find.descendant(of: inTable, matching: find.text('3 ชม.'));
+      expect(cells, findsNWidgets(_activities.length));
+      expect(
+        find.descendant(of: inTable, matching: find.text('3')),
+        findsNothing,
+        reason: 'ต้องไม่มีเลขลอย ๆ ไร้หน่วย',
+      );
+
+      final headerRight = tester
+          .getRect(find.descendant(of: inTable, matching: find.text('ชั่วโมงที่ได้')))
+          .right;
+      for (var i = 0; i < _activities.length; i++) {
+        expect(tester.getRect(cells.at(i)).right, moreOrLessEquals(headerRight, epsilon: 1),
+            reason: 'แถว $i: ตัวเลขต้องชิดขวาตรงหัวคอลัมน์');
+      }
+    });
+
+    testWidgets('"นับเข้าหมวด" ข้อความยาวตัด … และ tooltip บอกชื่อรายการเกณฑ์เต็ม', (tester) async {
+      const longCriteria = 'ด้านการสร้างนวัตกรรมสังคมและการเป็นผู้ประกอบการเพื่อชุมชนท้องถิ่น';
+      final criteriaSets = [
+        const CriteriaSet(
+          id: 1,
+          code: '2567-regular',
+          name: 'เกณฑ์ 2567',
+          groups: [
+            CriteriaGroup(
+              key: 'talent:1',
+              name: 'TSU Social Talent',
+              requirements: [CriteriaRequirement(id: 7, name: longCriteria)],
+            ),
+          ],
+        ),
+      ];
+      final activity = Activity(
+        id: 1,
+        name: 'กิจกรรมทดสอบ',
+        activityType: 'วิชาการ',
+        hours: 3,
+        maxParticipants: 50,
+        startAt: DateTime(2027, 2, 1, 9),
+        location: 'หอประชุม',
+        approvalStatus: 'approved',
+        requirementIds: const [7],
+      );
+      await _pumpPage(tester, 1280, activities: [activity], criteriaSets: criteriaSets);
+
+      expect(tester.takeException(), isNull);
+      final text = tester.widget<Text>(find.text(longCriteria));
+      expect(text.maxLines, 1);
+      expect(text.overflow, TextOverflow.ellipsis);
+      final tooltip = tester.widget<Tooltip>(
+        find.ancestor(of: find.text(longCriteria), matching: find.byType(Tooltip)).first,
+      );
+      expect(tooltip.message, longCriteria);
+
+      // ไม่ล้นเข้าคอลัมน์ "ชั่วโมงที่ได้" ที่อยู่ถัดไป
+      final hoursHeaderLeft = tester
+          .getRect(find.descendant(of: find.byType(DataTable), matching: find.text('ชั่วโมงที่ได้')))
+          .left;
+      expect(
+        tester
+            .getRect(find.ancestor(of: find.text(longCriteria), matching: find.byType(TruncatedCell)))
+            .right,
+        lessThanOrEqualTo(hoursHeaderLeft),
+      );
     });
   });
 

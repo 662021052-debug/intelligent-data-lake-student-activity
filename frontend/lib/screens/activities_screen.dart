@@ -123,7 +123,8 @@ const kActivityTableMargin = AppSpacing.lg;
 const kActivityRowHeight = 56.0;
 
 /// ความกว้างเนื้อหาของคอลัมน์ที่กว้างคงที่ (ไม่รวม padding รอบเซลล์)
-const kActivityHoursCellWidth = 44.0;
+/// ชั่วโมงที่ได้ — กว้างพอสำหรับ "12.5 ชม." และหัว "ชั่วโมงที่ได้" ด้วย Sarabun
+const kActivityHoursCellWidth = 72.0;
 const kActivityStatusCellWidth = 112.0;
 
 /// ความกว้างคอลัมน์ใน Table = เนื้อหา + padding ที่ DataTable ใส่รอบเซลล์เอง
@@ -154,9 +155,11 @@ List<DataColumn> activityTableColumns(bool isStudent, {bool compact = false}) =>
       ),
       DataColumn(label: ActivityColumnLabel('สถานที่'), columnWidth: const FlexColumnWidth(2)),
       DataColumn(label: ActivityColumnLabel('ประเภท'), columnWidth: const FlexColumnWidth(1.4)),
-      DataColumn(label: ActivityColumnLabel('หมวดชั่วโมง'), columnWidth: const FlexColumnWidth(2)),
+      // "นับเข้าหมวด" กับ "ชั่วโมงที่ได้" ตั้งใจให้ไม่มีคำซ้ำกัน — เดิม "หมวดชั่วโมง" คู่กับ
+      // "ชั่วโมง" อ่านแล้วนึกว่าเป็นคอลัมน์เดียวกัน
+      DataColumn(label: ActivityColumnLabel('นับเข้าหมวด'), columnWidth: const FlexColumnWidth(2)),
       DataColumn(
-        label: ActivityColumnLabel('ชั่วโมง'),
+        label: ActivityColumnLabel('ชั่วโมงที่ได้'),
         numeric: true,
         columnWidth: _fixedColumn(kActivityHoursCellWidth),
       ),
@@ -211,8 +214,13 @@ List<DataCell> activityTableCells(
         maxWidth: double.infinity,
         style: mutedStyle,
       )),
+      // ชิดขวาให้ตรงหัวคอลัมน์ (คอลัมน์ตัวเลข) · ย่อลงเองถ้าตัวอักษรใหญ่เกินช่อง แทนการตัดทิ้ง
       DataCell(NarrowCell(
-        Text(_trimHours(a.hours), textAlign: TextAlign.end),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text(activityHoursLabel(a), maxLines: 1, softWrap: false),
+        ),
         width: kActivityHoursCellWidth,
       )),
       if (!isStudent) DataCell(ActivityApprovalChips(activity: a)),
@@ -223,6 +231,9 @@ List<DataCell> activityTableCells(
 String activityCardSubtitle(Activity a) =>
     '${a.activityType} • ได้ ${_trimHours(a.hours)} ชม. • ${formatThaiDateTime(a.startAt)}\n'
     'สถานที่: ${a.location} • รับ ${a.maxParticipants} คน${a.isRequired ? " • บังคับ" : ""}';
+
+/// ชั่วโมงที่ได้จากกิจกรรม พร้อมหน่วย — "3 ชม." / "4.5 ชม." (ไม่ใช่เลขลอย ๆ)
+String activityHoursLabel(Activity a) => '${_trimHours(a.hours)} ชม.';
 
 /// tooltip ของชื่อกิจกรรมในตาราง — ชื่อเต็ม + ข้อมูลที่เคยเป็นคอลัมน์ "รับสูงสุด"/"บังคับ"
 String activityNameTooltip(Activity a) =>
