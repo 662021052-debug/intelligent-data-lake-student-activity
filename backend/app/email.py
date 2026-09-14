@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import socket
+import ssl
 from dataclasses import dataclass, field
 from email.message import EmailMessage as MimeMessage
 from typing import Optional, Protocol, runtime_checkable
@@ -127,3 +129,56 @@ def get_email_sender() -> EmailSender:
     if _sender is None:
         _sender = _build_sender()
     return _sender
+
+
+def email_backend_name(sender: EmailSender) -> str:
+    """"smtp" เมื่อส่งออกจริง นอกนั้น "stub" — ตัวส่งตกเป็น stub ได้แบบเงียบ ๆ
+    (เช่น ลืมส่ง env เข้าคอนเทนเนอร์) จึงต้องบอกให้ชัดว่าตอนนี้ใช้ตัวไหน"""
+    return "smtp" if isinstance(sender, SmtpEmailSender) else "stub"
+
+
+def _server_reply(exc: Exception) -> str:
+    raw = getattr(exc, "smtp_error", b"")
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    return " ".join(text.split())
+
+
+def explain_email_error(exc: Exception) -> tuple[str, str]:
+    """(ชนิด, เหตุผลภาษาไทย) ของการส่งที่ล้ม — ใช้ตอบกลับผู้ดูแลตรง ๆ
+
+    ข้อความมาจากชนิด exception และคำตอบของเซิร์ฟเวอร์เท่านั้น ไม่มีรหัสผ่านหรือค่า config
+    ลับปนออกไป (smtplib ไม่ใส่รหัสผ่านไว้ใน exception อยู่แล้ว)
+    """
+    reply = _server_reply(exc)
+    suffix = f" · เซิร์ฟเวอร์ตอบ: {reply}" if reply else ""
+    # ลำดับสำคัญ: คลาสลูกต้องมาก่อนคลาสแม่ (SMTPException / OSError)
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return (
+            "auth_failed",
+            "SMTP ไม่รับการ login (SMTP_USER/รหัสผ่านไม่ถูก) — Gmail ต้องใช้ App Password 16 ตัว"
+            " ของบัญชีที่เปิด 2-Step Verification ไม่ใช่รหัสผ่านปกติของบัญชี" + suffix,
+        )
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return ("recipient_refused", "เซิร์ฟเวอร์ปฏิเสธที่อยู่ผู้รับ")
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return ("sender_refused", "เซิร์ฟเวอร์ปฏิเสธที่อยู่ผู้ส่ง (SMTP_FROM)" + suffix)
+    if isinstance(exc, smtplib.SMTPNotSupportedError):
+        return (
+            "tls_not_supported",
+            "เซิร์ฟเวอร์ไม่รองรับ STARTTLS/AUTH — ตรวจ SMTP_PORT กับ SMTP_USE_TLS (Gmail: 587 + TLS)",
+        )
+    if isinstance(exc, (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected)):
+        return ("connection_failed", f"ต่อเซิร์ฟเวอร์ SMTP ไม่ติดหรือหลุดกลางทาง ({exc})")
+    if isinstance(exc, smtplib.SMTPException):
+        return ("smtp_error", f"{type(exc).__name__}: {exc}")
+    if isinstance(exc, ssl.SSLError):
+        return ("tls_failed", f"เปิด TLS ไม่สำเร็จ ({exc})")
+    if isinstance(exc, socket.gaierror):
+        return ("dns_failed", "หา SMTP_HOST ไม่เจอ (DNS) — ตรวจชื่อ host หรือเน็ตของคอนเทนเนอร์")
+    if isinstance(exc, TimeoutError):
+        return ("timeout", "ต่อ SMTP หมดเวลา — พอร์ตอาจถูกไฟร์วอลล์/ผู้ให้บริการเน็ตบล็อก")
+    if isinstance(exc, ConnectionRefusedError):
+        return ("connection_refused", "เซิร์ฟเวอร์ไม่รับการเชื่อมต่อ — ตรวจ SMTP_HOST/SMTP_PORT")
+    if isinstance(exc, OSError):
+        return ("network_error", f"{type(exc).__name__}: {exc}")
+    return ("unknown", f"{type(exc).__name__}: {exc}")

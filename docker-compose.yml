@@ -56,6 +56,16 @@ services:
       GEMINI_EMBED_MODEL: ${GEMINI_EMBED_MODEL:-models/gemini-embedding-001}
       VECTOR_BACKEND: ${VECTOR_BACKEND:-memory}
       RAG_TOP_K: ${RAG_TOP_K:-4}
+      # ---- Email (SMTP) — ค่าจริงอยู่ใน .env ที่ root ของโปรเจกต์ (ไม่ถูก commit) ----
+      # image ไม่มีไฟล์ .env ถ้าไม่ส่งตรงนี้ ตัวส่งในคอนเทนเนอร์จะตกเป็น stub แบบเงียบ ๆ
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-stub}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      # .env เขียนได้ทั้ง SMTP_PASSWORD และ SMTP_PASS (config.py รับทั้งสองชื่อ)
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-${SMTP_PASS:-}}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@tsu.ac.th}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     depends_on:
       db:
         condition: service_healthy

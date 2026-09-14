@@ -5,16 +5,26 @@
 เนื้อความและเกณฑ์ผู้รับจึงตรงกันเสมอ ไม่ว่าจะส่งด้วยมือหรือให้ระบบส่งเอง
 """
 
+import logging
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.auth import require_admin
+from app.config import settings
 from app.database import get_session
-from app.email import EmailSender, get_email_sender
-from app.models import Activity, Participation
+from app.email import (
+    EmailMessage,
+    EmailSender,
+    email_backend_name,
+    explain_email_error,
+    get_email_sender,
+)
+from app.models import EMAIL_PATTERN, Activity, Participation
 from app.notifications import (
     NotificationReport,
     announcement_blocker,
@@ -22,6 +32,9 @@ from app.notifications import (
     send_activity_reminders,
     send_at_risk_notifications,
 )
+from app.timeutil import now_th_naive
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/notifications",
@@ -52,6 +65,18 @@ class NotificationResult(BaseModel):
 MAX_LISTED_RECIPIENTS = 50
 
 
+class TestEmailResult(BaseModel):
+    """ผลส่งอีเมลทดสอบ — ok=false พร้อม error_type/reason บอกว่าล้มที่ขั้นไหน"""
+
+    ok: bool
+    to: str
+    backend: str  # smtp = ส่งออกจริง · stub = ไม่ได้ส่งจริง
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    error_type: Optional[str] = None
+    reason: str
+
+
 def _to_result(report: NotificationReport) -> NotificationResult:
     return NotificationResult(
         subject=report.subject,
@@ -62,6 +87,73 @@ def _to_result(report: NotificationReport) -> NotificationResult:
         failed_recipients=report.failed_recipients[:MAX_LISTED_RECIPIENTS],
         skipped_students=report.skipped_students[:MAX_LISTED_RECIPIENTS],
         dry_run=report.dry_run,
+    )
+
+
+@router.post(
+    "/test-email",
+    response_model=TestEmailResult,
+    responses={
+        502: {"model": TestEmailResult, "description": "ต่อ/ส่งผ่าน SMTP ไม่สำเร็จ"},
+        503: {"model": TestEmailResult, "description": "ยังไม่ได้ตั้งค่า SMTP (ตัวส่งเป็น stub)"},
+    },
+)
+def send_test_email(
+    to: str = Query(..., description="ที่อยู่อีเมลปลายทางของฉบับทดสอบ"),
+    sender: EmailSender = Depends(get_email_sender),
+):
+    """ส่งอีเมลทดสอบ 1 ฉบับ เพื่อยืนยันว่าตั้งค่า SMTP ถูกและส่งออกได้จริง
+
+    config ทั้งหมดมาจาก env (EMAIL_BACKEND / SMTP_*) ผ่านตัวส่งตัวเดียวกับที่
+    แจ้งเตือนจริงใช้ — ถ้าฉบับนี้ผ่าน อีเมลแจ้งเตือนก็ส่งออกได้
+    """
+    to = to.strip()
+    if not re.fullmatch(EMAIL_PATTERN, to):
+        raise HTTPException(status_code=422, detail="รูปแบบอีเมลปลายทางไม่ถูกต้อง")
+
+    backend = email_backend_name(sender)
+    base = {
+        "to": to,
+        "backend": backend,
+        "smtp_host": settings.smtp_host or None,
+        "smtp_port": settings.smtp_port,
+    }
+    if backend != "smtp":
+        result = TestEmailResult(
+            ok=False,
+            error_type="not_configured",
+            reason=(
+                "ไม่ได้ส่งจริง: ตัวส่งเป็น stub "
+                f"(EMAIL_BACKEND={settings.email_backend}, "
+                f"SMTP_HOST {'ตั้งแล้ว' if settings.smtp_host else 'ว่าง'}) — "
+                "ตั้ง EMAIL_BACKEND=smtp กับ SMTP_HOST และส่ง env เข้าคอนเทนเนอร์"
+            ),
+            **base,
+        )
+        return JSONResponse(status_code=503, content=result.model_dump())
+
+    sent_at = now_th_naive().strftime("%Y-%m-%d %H:%M")
+    message = EmailMessage(
+        to=to,
+        subject="[ทดสอบ] อีเมลจากระบบกิจกรรมพัฒนานิสิต",
+        body=(
+            "นี่คืออีเมลทดสอบการตั้งค่า SMTP ของระบบกิจกรรมพัฒนานิสิต\n\n"
+            f"ส่งเมื่อ {sent_at} (เวลาไทย) ผ่าน {settings.smtp_host}:{settings.smtp_port}\n"
+            "ถ้าได้รับฉบับนี้ แปลว่าอีเมลแจ้งเตือนของระบบส่งออกได้แล้ว ไม่ต้องตอบกลับ\n"
+        ),
+    )
+    try:
+        sender.send(message)
+    except Exception as exc:  # noqa: BLE001 - ทุกความล้มเหลวต้องกลับไปบอกผู้ดูแล
+        error_type, reason = explain_email_error(exc)
+        logger.warning("test email to %s failed: %s (%s)", to, error_type, type(exc).__name__)
+        result = TestEmailResult(ok=False, error_type=error_type, reason=reason, **base)
+        return JSONResponse(status_code=502, content=result.model_dump())
+
+    return TestEmailResult(
+        ok=True,
+        reason=f"ส่งผ่าน {settings.smtp_host}:{settings.smtp_port} สำเร็จ — เซิร์ฟเวอร์รับอีเมลแล้ว",
+        **base,
     )
 
 
