@@ -232,7 +232,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       ],
       filters: [
         DebouncedSearchField(
-          label: 'ค้นหาหมวด/หมวดย่อย',
+          label: 'ค้นหาหมวด/หมวดย่อย/รายการเกณฑ์',
           onSearch: (value) => setState(() => _search = value),
         ),
         AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
@@ -267,10 +267,9 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
 
   Widget _talentSection(BuildContext context, CriteriaSet? set) {
     final groups = set == null ? <CriteriaGroup>[] : filterCriteriaGroups(set.groups, _search);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return CriteriaSetCard(
+      header: systemCriteriaSectionHeader(set, allSets: _criteriaSets),
       children: [
-        systemCriteriaSectionHeader(set, allSets: _criteriaSets),
         if (set == null)
           _sectionMessage('ยังโหลดโครงสร้าง 2567 ไม่ได้ — กดโหลดใหม่อีกครั้ง')
         else if (groups.isEmpty)
@@ -280,114 +279,42 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
                 : 'ไม่พบรายการที่ตรงกับคำค้นในชุดนี้',
           )
         else
-          for (final group in groups) _talentCard(context, group),
+          for (final (index, group) in groups.indexed)
+            _criteriaGroupTile(set, group, index: index),
       ],
     );
   }
 
-  Widget _talentCard(BuildContext context, CriteriaGroup group) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        key: PageStorageKey('criteria-group-${group.key}-$_search'),
-        shape: const Border(),
-        collapsedShape: const Border(),
-        childrenPadding: EdgeInsets.zero,
-        title: Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.xs,
-          children: [
-            Text(group.name, style: theme.textTheme.titleSmall),
-            if (group.subtitle != null)
-              StatusChip(
-                label: group.subtitle!,
-                palette: StatusPalette.info,
-                dense: true,
-              ),
-          ],
-        ),
-        subtitle: Text(
-          'รายการเกณฑ์ ${group.requirements.length} รายการ',
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-        ),
-        children: [
-          for (final requirement in group.requirements)
-            _requirementRow(context, requirement),
-        ],
-      ),
-    );
-  }
-
-  Widget _requirementRow(BuildContext context, CriteriaRequirement requirement) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.line)),
-      ),
-      child: _requirementDetails(context, requirement),
-    );
-  }
-
-  /// เนื้อหาของรายการเกณฑ์หนึ่งรายการ (ชื่อ · ชั่วโมง · บังคับ/เลือก · หน่วย · กฎกลุ่ม)
+  /// หัวข้อ Talent/PLO หนึ่งหัวข้อพร้อมรายการเกณฑ์ข้างใน — ชุดทางการกับชุดของผู้ดูแลใช้ร่วมกัน
   ///
-  /// แยกจากกรอบแถวเพราะสองส่วนใช้ต่างกัน: ชุดของระบบแสดงอย่างเดียว ส่วนชุดของผู้ดูแล
-  /// ต้องมีปุ่มแก้/ลบต่อท้ายในแถวเดียวกัน
-  Widget _requirementDetails(BuildContext context, CriteriaRequirement requirement) {
-    final theme = Theme.of(context);
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Wrap ไม่ใช่ Row — ชื่อรายการเกณฑ์ยาวมาก บนจอแคบต้องตกบรรทัดได้
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
-            children: [
-              Text(
-                requirement.name,
-                style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.sub),
-              ),
-              Text(
-                '${formatHours(requirement.requiredHours)} ชม.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              StatusChip(
-                label: requirement.isMandatory ? 'บังคับ' : 'เลือก',
-                palette: requirement.isMandatory
-                    ? StatusPalette.pending
-                    : StatusPalette.neutral,
-                dense: true,
-              ),
-            ],
+  /// [editable] = แถวรายการมีปุ่มแก้/ลบ (เฉพาะชุดของผู้ดูแล)
+  Widget _criteriaGroupTile(
+    CriteriaSet set,
+    CriteriaGroup group, {
+    required int index,
+    bool editable = false,
+  }) {
+    return CriteriaGroupTile(
+      key: ValueKey('criteria-group-${set.id}-${group.key}-$_search'),
+      name: group.name,
+      chip: group.subtitle,
+      countLabel: '${group.requirements.length} รายการ',
+      hours: criteriaGroupTargetHours(group, set.requirementGroups),
+      rules: sharedTargetRules(group, set.requirementGroups),
+      // กางหัวข้อแรกไว้ให้เห็นหน้าตารายการ · ตอนค้นหากางทุกหัวข้อให้เห็นสิ่งที่ตรงทันที
+      initiallyExpanded: _search.isNotEmpty || index == 0,
+      children: [
+        for (final (i, requirement) in group.requirements.indexed)
+          CriteriaRequirementRow(
+            index: i,
+            name: requirement.name,
+            subtitle: requirementSubtitle(requirement),
+            mandatory: requirement.isMandatory,
+            hours: requirement.requiredHours,
+            trailing: editable ? _requirementActions(set, group, requirement) : const [],
           ),
-          if (requirement.learningUnitName != null)
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(
-                'นับเข้าหน่วยการเรียนรู้: ${requirement.learningUnitName}',
-                style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-              ),
-            ),
-          if (requirement.groupName != null)
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(
-                'กฎกลุ่ม: ${requirement.groupName} — '
-                'ครบเมื่อยอดรวมของกลุ่มถึง ${formatHours(requirement.requiredHours)} ชม.',
-                style: theme.textTheme.bodySmall?.copyWith(color: AppColors.blueDark),
-              ),
-            ),
-        ],
-      );
+      ],
+    );
   }
 
   // ---------------- ส่วนที่ 2: เกณฑ์เดิม (แก้ไขได้) ----------------
@@ -396,16 +323,18 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     final totalHours = _categories.fold<double>(0, (sum, c) => sum + c.requiredHours);
     final subcategoryCount =
         _categories.fold<int>(0, (sum, c) => sum + c.subcategories.length);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final legacySet = _legacySet;
+    return CriteriaSetCard(
+      header: legacyCriteriaSectionHeader(
+        range: legacySet == null ? null : cohortRangeOf(legacySet, _criteriaSets),
+        title: legacySet?.name ?? 'เกณฑ์เดิม',
+        countingRule: legacySet?.countingRule,
+        totalHours: totalHours,
+        categoryCount: _categories.length,
+        subcategoryCount: subcategoryCount,
+        onAddCategory: () => _openCategoryForm(),
+      ),
       children: [
-        legacyCriteriaSectionHeader(
-          range: _legacySet == null ? null : cohortRangeOf(_legacySet!, _criteriaSets),
-          totalHours: totalHours,
-          categoryCount: _categories.length,
-          subcategoryCount: subcategoryCount,
-          onAddCategory: () => _openCategoryForm(),
-        ),
         if (visible.isEmpty)
           _sectionMessage(
             _search.isEmpty
@@ -413,8 +342,65 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
                 : 'ไม่พบหมวดที่ตรงกับคำค้นในชุดนี้',
           )
         else
-          for (final category in visible) _categoryTile(context, category),
+          for (final category in visible) _categoryTile(category),
       ],
+    );
+  }
+
+  Widget _categoryTile(HourCategory category) {
+    return CriteriaGroupTile(
+      key: ValueKey('hour-category-${category.id}-$_search'),
+      name: category.name,
+      countLabel: 'หมวดย่อย ${category.subcategories.length} รายการ',
+      hours: category.requiredHours,
+      // เปิดค้างไว้ตอนกำลังค้นหา ผู้ใช้จะได้เห็นหมวดย่อยที่ตรงคำค้นทันที
+      initiallyExpanded: _search.isNotEmpty,
+      trailing: [
+        AppIconButton(
+          icon: Icons.add,
+          size: 28,
+          tooltip: 'เพิ่มหมวดย่อย',
+          onPressed: () => _openSubcategoryForm(category: category),
+        ),
+        AppIconButton(
+          icon: Icons.edit,
+          size: 28,
+          tooltip: 'แก้ไขหมวด',
+          onPressed: () => _openCategoryForm(existing: category),
+        ),
+        AppIconButton(
+          icon: Icons.delete,
+          size: 28,
+          danger: true,
+          tooltip: 'ลบหมวด',
+          onPressed: () => _deleteCategory(category),
+        ),
+      ],
+      children: category.subcategories.isEmpty
+          ? [_sectionMessage('ยังไม่มีหมวดย่อย — กดปุ่ม + เพื่อเพิ่ม')]
+          : [
+              for (final (i, sub) in category.subcategories.indexed)
+                CriteriaRequirementRow(
+                  index: i,
+                  name: sub.name,
+                  hours: sub.requiredHours,
+                  trailing: [
+                    AppIconButton(
+                      icon: Icons.edit,
+                      size: 28,
+                      tooltip: 'แก้ไขหมวดย่อย',
+                      onPressed: () => _openSubcategoryForm(category: category, existing: sub),
+                    ),
+                    AppIconButton(
+                      icon: Icons.delete,
+                      size: 28,
+                      danger: true,
+                      tooltip: 'ลบหมวดย่อย',
+                      onPressed: () => _deleteSubcategory(sub),
+                    ),
+                  ],
+                ),
+            ],
     );
   }
 
@@ -422,32 +408,31 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
 
   Widget _customSetSection(BuildContext context, CriteriaSet set) {
     final groups = filterCriteriaGroups(set.groups, _search);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        customCriteriaSectionHeader(
-          set,
-          allSets: _criteriaSets,
-          onEdit: () => _openCriteriaForm(
-            CriteriaSetFormDialog(existing: set, existingSets: _criteriaSets),
-          ),
-          onDelete: () => _deleteCriteriaThing(
-            '/criteria-sets/${set.id}',
-            title: 'ยืนยันการลบชุดเกณฑ์',
-            message: 'ต้องการลบชุดเกณฑ์ "${set.name}" ใช่หรือไม่?',
-            detail: 'Talent และรายการเกณฑ์ในชุดจะถูกลบไปด้วย · '
-                'ลบไม่ได้ถ้ามีนิสิตใช้ชุดนี้อยู่หรือมีกิจกรรมผูกกับรายการเกณฑ์',
-          ),
-          onAddTalent: () => _openCriteriaForm(TalentFormDialog(criteriaSetId: set.id)),
-          onAddGroup: () =>
-              _openCriteriaForm(RequirementGroupFormDialog(criteriaSetId: set.id)),
-          onAddRequirement: () => _openCriteriaForm(RequirementFormDialog(
-            criteriaSetId: set.id,
-            learningUnits: _learningUnits,
-            talents: _talentOptions(set),
-            groups: requirementGroupOptions(set),
-          )),
+    return CriteriaSetCard(
+      header: customCriteriaSectionHeader(
+        set,
+        allSets: _criteriaSets,
+        onEdit: () => _openCriteriaForm(
+          CriteriaSetFormDialog(existing: set, existingSets: _criteriaSets),
         ),
+        onDelete: () => _deleteCriteriaThing(
+          '/criteria-sets/${set.id}',
+          title: 'ยืนยันการลบชุดเกณฑ์',
+          message: 'ต้องการลบชุดเกณฑ์ "${set.name}" ใช่หรือไม่?',
+          detail: 'Talent และรายการเกณฑ์ในชุดจะถูกลบไปด้วย · '
+              'ลบไม่ได้ถ้ามีนิสิตใช้ชุดนี้อยู่หรือมีกิจกรรมผูกกับรายการเกณฑ์',
+        ),
+        onAddTalent: () => _openCriteriaForm(TalentFormDialog(criteriaSetId: set.id)),
+        onAddGroup: () =>
+            _openCriteriaForm(RequirementGroupFormDialog(criteriaSetId: set.id)),
+        onAddRequirement: () => _openCriteriaForm(RequirementFormDialog(
+          criteriaSetId: set.id,
+          learningUnits: _learningUnits,
+          talents: _talentOptions(set),
+          groups: requirementGroupOptions(set),
+        )),
+      ),
+      children: [
         if (set.requirementGroups.isNotEmpty) _sharedTargetGroups(context, set),
         if (groups.isEmpty)
           _sectionMessage(
@@ -456,7 +441,8 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
                 : 'ไม่พบรายการที่ตรงกับคำค้นในชุดนี้',
           )
         else
-          for (final group in groups) _customGroupCard(context, set, group),
+          for (final (index, group) in groups.indexed)
+            _criteriaGroupTile(set, group, index: index, editable: true),
       ],
     );
   }
@@ -471,64 +457,66 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       ];
 
   /// กลุ่มแชร์เป้าของชุด พร้อมปุ่มแก้/ลบ — กลุ่มที่เพิ่งสร้างยังไม่มีสมาชิกจะไม่โผล่
-  /// ในการ์ดรายการเกณฑ์เลย ถ้าไม่แสดงตรงนี้ผู้ดูแลจะไม่รู้ว่าสร้างสำเร็จแล้ว
+  /// ในหัวข้อรายการเกณฑ์เลย ถ้าไม่แสดงตรงนี้ผู้ดูแลจะไม่รู้ว่าสร้างสำเร็จแล้ว
   Widget _sharedTargetGroups(BuildContext context, CriteriaSet set) {
     final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('กลุ่มแชร์เป้าชั่วโมง', style: theme.textTheme.titleSmall),
-            for (final group in set.requirementGroups)
-              Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.sm),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${group.name} — รวม ≥ ${formatHours(group.requiredHours)} ชม.',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                          Text(
-                            _groupMemberSummary(set, group),
-                            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-                          ),
-                        ],
-                      ),
+    return Container(
+      margin: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.sm, AppSpacing.xs, AppSpacing.xs),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.line),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('กลุ่มแชร์เป้าชั่วโมง', style: theme.textTheme.titleSmall),
+          for (final group in set.requirementGroups)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${group.name} — รวม ≥ ${formatHours(group.requiredHours)} ชม.',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                        Text(
+                          _groupMemberSummary(set, group),
+                          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                        ),
+                      ],
                     ),
-                    AppIconButton(
-                      icon: Icons.edit,
-                      size: 28,
-                      tooltip: 'แก้ไขกลุ่มแชร์เป้า',
-                      onPressed: () => _openCriteriaForm(RequirementGroupFormDialog(
-                        criteriaSetId: set.id,
-                        existing: group.toFormJson(),
-                      )),
+                  ),
+                  AppIconButton(
+                    icon: Icons.edit,
+                    size: 28,
+                    tooltip: 'แก้ไขกลุ่มแชร์เป้า',
+                    onPressed: () => _openCriteriaForm(RequirementGroupFormDialog(
+                      criteriaSetId: set.id,
+                      existing: group.toFormJson(),
+                    )),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  AppIconButton(
+                    icon: Icons.delete,
+                    size: 28,
+                    danger: true,
+                    tooltip: 'ลบกลุ่มแชร์เป้า',
+                    onPressed: () => _deleteCriteriaThing(
+                      '/requirement-groups/${group.id}',
+                      title: 'ยืนยันการลบกลุ่มแชร์เป้า',
+                      message: 'ต้องการลบกลุ่ม "${group.name}" ใช่หรือไม่?',
+                      detail: 'ลบไม่ได้ถ้ายังมีรายการเกณฑ์อยู่ในกลุ่มนี้',
                     ),
-                    const SizedBox(width: AppSpacing.xs),
-                    AppIconButton(
-                      icon: Icons.delete,
-                      size: 28,
-                      danger: true,
-                      tooltip: 'ลบกลุ่มแชร์เป้า',
-                      onPressed: () => _deleteCriteriaThing(
-                        '/requirement-groups/${group.id}',
-                        title: 'ยืนยันการลบกลุ่มแชร์เป้า',
-                        message: 'ต้องการลบกลุ่ม "${group.name}" ใช่หรือไม่?',
-                        detail: 'ลบไม่ได้ถ้ายังมีรายการเกณฑ์อยู่ในกลุ่มนี้',
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -540,94 +528,48 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
         : 'รายการในกลุ่ม $members รายการ · ตรวจความครบที่ยอดรวมของกลุ่ม';
   }
 
-  Widget _customGroupCard(BuildContext context, CriteriaSet set, CriteriaGroup group) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        key: PageStorageKey('custom-${set.id}-${group.key}-$_search'),
-        shape: const Border(),
-        collapsedShape: const Border(),
-        childrenPadding: EdgeInsets.zero,
-        title: Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.xs,
-          children: [
-            Text(group.name, style: theme.textTheme.titleSmall),
-            if (group.subtitle != null)
-              StatusChip(label: group.subtitle!, palette: StatusPalette.info, dense: true),
-          ],
-        ),
-        subtitle: Text(
-          'รายการเกณฑ์ ${group.requirements.length} รายการ',
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-        ),
-        children: [
-          for (final requirement in group.requirements)
-            _editableRequirementRow(context, set, group, requirement),
-        ],
-      ),
-    );
-  }
-
-  Widget _editableRequirementRow(
-    BuildContext context,
+  /// ปุ่มแก้/ลบท้ายแถวรายการเกณฑ์ของชุดผู้ดูแล
+  List<Widget> _requirementActions(
     CriteriaSet set,
     CriteriaGroup group,
     CriteriaRequirement requirement,
-  ) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.sm, AppSpacing.sm, AppSpacing.sm),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.line)),
-      ),
-      child: Row(
-        children: [
-          Expanded(child: _requirementDetails(context, requirement)),
-          AppIconButton(
-            icon: Icons.edit,
-            size: 28,
-            tooltip: 'แก้ไขรายการเกณฑ์',
-            onPressed: () => _openCriteriaForm(RequirementFormDialog(
-              criteriaSetId: set.id,
-              learningUnits: _learningUnits,
-              talents: _talentOptions(set),
-              groups: requirementGroupOptions(set),
-              existing: {
-                'id': requirement.id,
-                'name': requirement.name,
-                'required_hours': requirement.requiredHours,
-                'is_mandatory': requirement.isMandatory,
-                'learning_unit_id': _unitIdByName(requirement.learningUnitName),
-                // ต้องส่งค่าเดิมกลับไปด้วย — PUT แทนที่ทั้งแถว ถ้าขาดไป กดบันทึกเฉย ๆ
-                // ก็หลุดออกจากกลุ่ม/Talent โดยไม่รู้ตัว
-                'talent_id': talentIdOfGroup(group),
-                'group_id': requirement.groupId,
-              },
-            )),
+  ) =>
+      [
+        AppIconButton(
+          icon: Icons.edit,
+          size: 28,
+          tooltip: 'แก้ไขรายการเกณฑ์',
+          onPressed: () => _openCriteriaForm(RequirementFormDialog(
+            criteriaSetId: set.id,
+            learningUnits: _learningUnits,
+            talents: _talentOptions(set),
+            groups: requirementGroupOptions(set),
+            existing: {
+              'id': requirement.id,
+              'name': requirement.name,
+              'required_hours': requirement.requiredHours,
+              'is_mandatory': requirement.isMandatory,
+              'learning_unit_id': _unitIdByName(requirement.learningUnitName),
+              // ต้องส่งค่าเดิมกลับไปด้วย — PUT แทนที่ทั้งแถว ถ้าขาดไป กดบันทึกเฉย ๆ
+              // ก็หลุดออกจากกลุ่ม/Talent โดยไม่รู้ตัว
+              'talent_id': talentIdOfGroup(group),
+              'group_id': requirement.groupId,
+            },
+          )),
+        ),
+        AppIconButton(
+          icon: Icons.delete,
+          size: 28,
+          danger: true,
+          tooltip: 'ลบรายการเกณฑ์',
+          onPressed: () => _deleteCriteriaThing(
+            '/requirements/${requirement.id}',
+            title: 'ยืนยันการลบรายการเกณฑ์',
+            message: 'ต้องการลบ "${requirement.name}" ใช่หรือไม่?',
+            detail: 'ลบไม่ได้ถ้ามีกิจกรรมผูกกับรายการนี้อยู่',
           ),
-          const SizedBox(width: AppSpacing.xs),
-          AppIconButton(
-            icon: Icons.delete,
-            size: 28,
-            danger: true,
-            tooltip: 'ลบรายการเกณฑ์',
-            onPressed: () => _deleteCriteriaThing(
-              '/requirements/${requirement.id}',
-              title: 'ยืนยันการลบรายการเกณฑ์',
-              message: 'ต้องการลบ "${requirement.name}" ใช่หรือไม่?',
-              detail: 'ลบไม่ได้ถ้ามีกิจกรรมผูกกับรายการนี้อยู่',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ];
 
   /// id ของหน่วยการเรียนรู้จากชื่อ — payload อ่านส่งมาเป็นชื่อ ไม่ใช่ id
   int? _unitIdByName(String? name) {
@@ -639,109 +581,12 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
   }
 
   Widget _sectionMessage(String message) => Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Text(
           message,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.muted),
         ),
       );
-
-  Widget _categoryTile(BuildContext context, HourCategory category) {
-    final theme = Theme.of(context);
-    final totalSubHours =
-        category.subcategories.fold<double>(0, (sum, s) => sum + s.requiredHours);
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        // เปิดค้างไว้ตอนกำลังค้นหา ผู้ใช้จะได้เห็นหมวดย่อยที่ตรงคำค้นทันที
-        initiallyExpanded: _search.isNotEmpty,
-        key: PageStorageKey('hour-category-${category.id}-$_search'),
-        shape: const Border(),
-        collapsedShape: const Border(),
-        childrenPadding: EdgeInsets.zero,
-        title: Text(category.name, style: theme.textTheme.titleSmall),
-        subtitle: Text(
-          'ต้องการ ${formatHours(category.requiredHours)} ชม. • '
-          'หมวดย่อย ${category.subcategories.length} รายการ '
-          '(รวม ${formatHours(totalSubHours)} ชม.)',
-          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-        ),
-        trailing: Wrap(
-          spacing: AppSpacing.xs,
-          children: [
-            AppIconButton(
-              icon: Icons.add,
-              tooltip: 'เพิ่มหมวดย่อย',
-              onPressed: () => _openSubcategoryForm(category: category),
-            ),
-            AppIconButton(
-              icon: Icons.edit,
-              tooltip: 'แก้ไขหมวด',
-              onPressed: () => _openCategoryForm(existing: category),
-            ),
-            AppIconButton(
-              icon: Icons.delete,
-              danger: true,
-              tooltip: 'ลบหมวด',
-              onPressed: () => _deleteCategory(category),
-            ),
-          ],
-        ),
-        children: category.subcategories.isEmpty
-            ? [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(42, 0, AppSpacing.lg, AppSpacing.md),
-                  child: Text(
-                    'ยังไม่มีหมวดย่อย — กดปุ่ม + เพื่อเพิ่ม',
-                    style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
-                  ),
-                ),
-              ]
-            : [
-                for (final sub in category.subcategories)
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(42, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
-                    decoration: const BoxDecoration(
-                      border: Border(top: BorderSide(color: AppColors.line)),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            sub.name,
-                            style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.sub),
-                          ),
-                        ),
-                        Text(
-                          '${formatHours(sub.requiredHours)} ชม.',
-                          style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        AppIconButton(
-                          icon: Icons.edit,
-                          size: 28,
-                          tooltip: 'แก้ไขหมวดย่อย',
-                          onPressed: () =>
-                              _openSubcategoryForm(category: category, existing: sub),
-                        ),
-                        const SizedBox(width: AppSpacing.xs),
-                        AppIconButton(
-                          icon: Icons.delete,
-                          size: 28,
-                          danger: true,
-                          tooltip: 'ลบหมวดย่อย',
-                          onPressed: () => _deleteSubcategory(sub),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-      ),
-    );
-  }
-
 }
 
 /// id ของ Talent จากกุญแจหัวข้อ ("talent:3" → 3) · หัวข้ออื่น/"talent:none" → null
@@ -824,6 +669,87 @@ class CriteriaRangeHint extends StatelessWidget {
   }
 }
 
+/// ป้ายสั้นของวิธีนับความครบ — ใช้ในการ์ด metric ใต้หัวชุด
+String countingRuleShortLabel(String rule) =>
+    rule == 'total_per_unit' ? 'ต่อหน่วย' : 'ต่อรายการ';
+
+/// ตัวเลขย่อหนึ่งใบใต้หัวการ์ดชุดเกณฑ์ ("60 ชม." / "ชั่วโมงรวม")
+class CriteriaMetric {
+  const CriteriaMetric(this.value, this.label);
+  final String value;
+  final String label;
+}
+
+/// metric 3 ใบของชุดเกณฑ์: ชั่วโมงรวม · จำนวนหัวข้อ (Talent หรือหน่วย) · วิธีนับความครบ
+List<CriteriaMetric> criteriaSetMetrics(CriteriaSet set) => [
+      CriteriaMetric('${formatHours(set.totalRequiredHours)} ชม.', 'ชั่วโมงรวม'),
+      CriteriaMetric(
+        '${set.groups.length} ${set.groupedBy == 'talent' ? 'กลุ่ม' : 'หน่วย'}',
+        set.groupNoun,
+      ),
+      CriteriaMetric(countingRuleShortLabel(set.countingRule), 'วิธีนับความครบ'),
+    ];
+
+/// รายการในหัวข้อที่อยู่กลุ่มแชร์เป้าเดียวกัน — กุญแจคือ id กลุ่ม (หรือชื่อ ถ้า payload ไม่มี id)
+Map<Object, List<CriteriaRequirement>> _sharedMembers(CriteriaGroup group) {
+  final members = <Object, List<CriteriaRequirement>>{};
+  for (final requirement in group.requirements) {
+    final key = requirement.groupId ?? requirement.groupName;
+    if (key == null) continue;
+    members.putIfAbsent(key, () => []).add(requirement);
+  }
+  return members;
+}
+
+RequirementGroupOption? _sharedOption(
+  List<CriteriaRequirement> members,
+  List<RequirementGroupOption> shared,
+) {
+  final id = members.first.groupId;
+  for (final option in shared) {
+    if (option.id == id) return option;
+  }
+  return null;
+}
+
+/// ชั่วโมงเป้าของหน่วยทั้งกลุ่ม — ใช้ในกรณีที่ไม่มีข้อมูลกลุ่มจาก requirement_groups
+double _sharedTarget(List<CriteriaRequirement> members, List<RequirementGroupOption> shared) =>
+    _sharedOption(members, shared)?.requiredHours ??
+    members.map((r) => r.requiredHours).reduce(math.max);
+
+/// ป้าย "รวม N ชม." ของหัวข้อ — รายการในกลุ่มแชร์เป้านับเป้าของกลุ่มครั้งเดียว
+///
+/// PLO 3 มี "แนวคิด…" 4 ชม. + สองด้านที่แชร์เป้า 16 ชม. → 20 ไม่ใช่ 36
+double criteriaGroupTargetHours(CriteriaGroup group, List<RequirementGroupOption> shared) {
+  var total = 0.0;
+  for (final requirement in group.requirements) {
+    if (requirement.groupId == null && requirement.groupName == null) {
+      total += requirement.requiredHours;
+    }
+  }
+  for (final members in _sharedMembers(group).values) {
+    total += _sharedTarget(members, shared);
+  }
+  return total;
+}
+
+/// แถบกฎของกลุ่มแชร์เป้าที่อยู่ในหัวข้อนี้ (ว่าง = ไม่มีกฎพิเศษ)
+List<String> sharedTargetRules(CriteriaGroup group, List<RequirementGroupOption> shared) => [
+      for (final members in _sharedMembers(group).values)
+        '${_sharedOption(members, shared)?.name ?? members.first.groupName ?? 'กลุ่มแชร์เป้า'}: '
+            '${members.length} รายการเลือกรวมกันต้อง ≥ '
+            '${formatHours(_sharedTarget(members, shared))} ชม. (ตรวจผลรวมอัตโนมัติ)',
+    ];
+
+/// บรรทัดย่อยใต้ชื่อรายการเกณฑ์
+String? requirementSubtitle(CriteriaRequirement requirement) {
+  final parts = [
+    if (requirement.learningUnitName != null) 'หน่วยการเรียนรู้: ${requirement.learningUnitName}',
+    if (requirement.groupId != null || requirement.groupName != null) 'ใช้เป้าร่วมของกลุ่ม',
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
 /// หัวข้อส่วนชุดทางการที่ระบบ seed (โครงสร้าง 2567) — ไม่มีปุ่มใดเลย
 ///
 /// [allSets] = ชุดทั้งหมดจาก `GET /criteria-sets` ใช้หาชุดถัดไปเพื่อตัดปลายช่วงรุ่น
@@ -841,6 +767,7 @@ CriteriaSetHeader systemCriteriaSectionHeader(
         ? 'ยังโหลดช่วงรุ่นของชุดนี้ไม่ได้'
         : criteriaAudience(range, academicYear ?? currentAcademicYear()),
     totalHours: set?.totalRequiredHours ?? 0,
+    metrics: set == null ? null : criteriaSetMetrics(set),
     palette: StatusPalette.info,
     note: set == null ? null : 'รหัสชุด ${set.code}',
     warning: set?.hoursWarning,
@@ -855,6 +782,8 @@ CriteriaSetHeader systemCriteriaSectionHeader(
 /// [range] = ช่วงรุ่นของชุดเกณฑ์เดิมที่คำนวณแล้ว (null ถ้ายังโหลดชุดเกณฑ์ไม่ได้)
 CriteriaSetHeader legacyCriteriaSectionHeader({
   required CohortRange? range,
+  String title = 'เกณฑ์เดิม',
+  String? countingRule,
   required double totalHours,
   required int categoryCount,
   required int subcategoryCount,
@@ -863,14 +792,20 @@ CriteriaSetHeader legacyCriteriaSectionHeader({
 }) =>
     CriteriaSetHeader(
       badge: 'ชุดที่ 2',
-      title: 'เกณฑ์เดิม',
+      title: title,
       rangeLabel: range?.pillLabel,
       audience: range == null
           ? 'ใช้กับนิสิตรุ่นก่อนหน้าที่ยังไม่มีชุดของตัวเอง'
           : criteriaAudience(range, academicYear ?? currentAcademicYear()),
       totalHours: totalHours,
-      palette: StatusPalette.neutral,
-      note: '$categoryCount หน่วยการเรียนรู้ · $subcategoryCount หมวดย่อย',
+      metrics: [
+        CriteriaMetric('${formatHours(totalHours)} ชม.', 'ชั่วโมงรวม'),
+        CriteriaMetric('$categoryCount หน่วย', 'หน่วยการเรียนรู้'),
+        if (countingRule != null)
+          CriteriaMetric(countingRuleShortLabel(countingRule), 'วิธีนับความครบ'),
+      ],
+      palette: StatusPalette.info,
+      note: '$subcategoryCount หมวดย่อย',
       capabilities: 'เพิ่มได้: หมวดใหญ่ (ปุ่มด้านล่าง) · หมวดย่อย (ปุ่ม + ท้ายหมวดใหญ่) — '
           'แก้/ลบได้ทั้งสองระดับจากปุ่มในแต่ละแถว · '
           'มีผลเฉพาะ${range?.studentsLabel ?? 'นิสิตรุ่นก่อนหน้า'}',
@@ -905,6 +840,7 @@ CriteriaSetHeader customCriteriaSectionHeader(
       programTypeLabel: set.programTypeLabel,
     ),
     totalHours: set.totalRequiredHours,
+    metrics: criteriaSetMetrics(set),
     palette: StatusPalette.approved,
     note: 'รหัสชุด ${set.code}',
     warning: set.hoursWarning,
@@ -932,10 +868,55 @@ CriteriaSetHeader customCriteriaSectionHeader(
   );
 }
 
-/// หัวข้อของชุดเกณฑ์หนึ่งชุด — ป้ายสี + ชื่อชุด + บอกว่าใช้กับนิสิตรุ่นไหน + ชั่วโมงรวม
+/// การ์ดของชุดเกณฑ์หนึ่งชุด — หัวการ์ด + หัวข้อ Talent/หน่วยอยู่ในกรอบเดียวกัน
 ///
-/// ทั้งสองส่วนในหน้านี้หน้าตาคล้ายกันมาก (การ์ดพับได้เหมือนกัน) ถ้าไม่มีแถบสีคั่น
-/// ผู้ดูแลจะเลื่อนผ่านแล้วอ่านต่อเป็นชุดเดียวกัน — ป้ายกับสีจึงเป็นตัวบอกเขตแดน
+/// เดิมหัวข้อกับการ์ดรายการแยกกันลอย ๆ พอเลื่อนเร็ว ๆ แยกไม่ออกว่าการ์ดไหนเป็นของชุดไหน
+/// รวมเป็นกรอบเดียวแล้วขอบเขตของชุดเห็นได้เอง
+class CriteriaSetCard extends StatelessWidget {
+  const CriteriaSetCard({super.key, required this.header, this.children = const []});
+
+  final Widget header;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.frame),
+        border: Border.all(color: AppColors.line),
+        boxShadow: const [
+          BoxShadow(color: kCardShadowColor, blurRadius: 22, offset: Offset(0, 6)),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      // Material โปร่งใสให้ InkWell ของหัวข้อมีระลอกบนพื้นขาวของการ์ด
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            header,
+            if (children.isNotEmpty) ...[
+              const Divider(height: 1, thickness: 1, color: AppColors.line),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.sm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: children,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// หัวของชุดเกณฑ์หนึ่งชุด — ป้าย "ชุดที่ N" → ชื่อ → ป้ายช่วงรหัส (เด่น) → ป้ายล็อกชิดขวา
+/// ตามด้วยปีเข้าศึกษา + metric 3 ใบ + สิ่งที่ทำได้ในชุดนี้
 class CriteriaSetHeader extends StatelessWidget {
   const CriteriaSetHeader({
     super.key,
@@ -945,6 +926,7 @@ class CriteriaSetHeader extends StatelessWidget {
     required this.totalHours,
     required this.palette,
     this.rangeLabel,
+    this.metrics,
     this.note,
     this.warning,
     this.readOnly = false,
@@ -969,6 +951,9 @@ class CriteriaSetHeader extends StatelessWidget {
   /// ป้ายช่วงรหัสที่คำนวณจากชุดถัดไป ("ใช้กับรหัส 67–69") — ตัวหลักที่บอกว่าชุดนี้ของใคร
   final String? rangeLabel;
   final double totalHours;
+
+  /// การ์ดตัวเลขย่อ — null = มีใบเดียวคือชั่วโมงรวม
+  final List<CriteriaMetric>? metrics;
   final StatusPalette palette;
   final String? note;
 
@@ -985,85 +970,112 @@ class CriteriaSetHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final shownMetrics =
+        metrics ?? [CriteriaMetric('${formatHours(totalHours)} ชม.', 'ชั่วโมงรวม')];
+    const lock = _LockPill();
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.md + 2, AppSpacing.lg, AppSpacing.md + 2),
       decoration: BoxDecoration(
-        color: palette.background,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        // แถบสีด้านซ้ายทำให้เห็นขอบเขตของส่วนได้แม้เลื่อนเร็ว ๆ
+        // ไล่สีอ่อนจากโทนของชุดลงมาเป็นเทาอมฟ้า — แยกหัวออกจากเนื้อหาโดยไม่ต้องใช้กรอบหนา
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color.lerp(palette.background, AppColors.surface, 0.35)!,
+            const Color(0xFFF7F9FC),
+          ],
+        ),
         border: Border(left: BorderSide(color: palette.accent, width: 4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
-            children: [
-              StatusChip(label: badge, palette: palette, dense: true),
-              Text(
-                title,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: palette.foreground,
-                ),
-              ),
-              Text(
-                '· รวม ${formatHours(totalHours)} ชม.',
-                style: theme.textTheme.titleSmall?.copyWith(color: palette.foreground),
-              ),
-              if (rangeLabel != null)
+          LayoutBuilder(builder: (context, constraints) {
+            // จอกว้าง: ป้ายล็อกชิดขวา · จอแคบ: ต่อท้ายในแถวเดียวกันแล้วตกบรรทัดเอง
+            final wide = constraints.maxWidth >= 640;
+            final top = Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              children: [
                 Container(
-                  key: const ValueKey('cohort-range-pill'),
-                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.blue),
+                    color: palette.foreground,
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    rangeLabel!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: AppColors.blueDark,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    badge,
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: AppColors.surface, fontWeight: FontWeight.w700),
                   ),
                 ),
-              if (readOnly)
-                const StatusChip(
-                  label: 'เกณฑ์ทางการ (อ่านอย่างเดียว)',
-                  palette: StatusPalette.neutral,
-                  icon: Icons.lock_outline,
-                  dense: true,
+                Text(
+                  title,
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700, color: AppColors.ink),
                 ),
-              if (onEdit != null)
-                AppIconButton(icon: Icons.edit, size: 28, tooltip: 'แก้ไขชุดเกณฑ์', onPressed: onEdit),
-              if (onDelete != null)
-                AppIconButton(
-                  icon: Icons.delete,
-                  size: 28,
-                  danger: true,
-                  tooltip: 'ลบชุดเกณฑ์',
-                  onPressed: onDelete,
-                ),
+                if (rangeLabel != null)
+                  Container(
+                    key: const ValueKey('cohort-range-pill'),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.blue,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                    ),
+                    child: Text(
+                      rangeLabel!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.surface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                if (readOnly && !wide) lock,
+                if (onEdit != null)
+                  AppIconButton(
+                      icon: Icons.edit, size: 28, tooltip: 'แก้ไขชุดเกณฑ์', onPressed: onEdit),
+                if (onDelete != null)
+                  AppIconButton(
+                    icon: Icons.delete,
+                    size: 28,
+                    danger: true,
+                    tooltip: 'ลบชุดเกณฑ์',
+                    onPressed: onDelete,
+                  ),
+              ],
+            );
+            if (!readOnly || !wide) return top;
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: top),
+                const SizedBox(width: AppSpacing.sm),
+                const Padding(padding: EdgeInsets.only(top: 2), child: lock),
+              ],
+            );
+          }),
+          const SizedBox(height: AppSpacing.xs + 2),
+          Wrap(
+            spacing: AppSpacing.xs,
+            runSpacing: 2,
+            children: [
+              Text(audience, style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub)),
+              if (note != null) ...[
+                Text('·', style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted)),
+                Text(note!, style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub)),
+              ],
             ],
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            audience,
-            style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.ink),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            key: const ValueKey('criteria-metrics'),
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [for (final metric in shownMetrics) _MetricTile(metric)],
           ),
-          if (note != null)
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: Text(
-                note!,
-                style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub),
-              ),
-            ),
           if (warning != null)
             Padding(
               padding: const EdgeInsets.only(top: AppSpacing.sm),
@@ -1085,20 +1097,20 @@ class CriteriaSetHeader extends StatelessWidget {
             ),
           if (capabilities != null)
             Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              padding: const EdgeInsets.only(top: AppSpacing.sm + 2),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     readOnly ? Icons.lock_outline : Icons.edit_note,
                     size: 16,
-                    color: palette.foreground,
+                    color: AppColors.muted,
                   ),
                   const SizedBox(width: AppSpacing.xs),
                   Expanded(
                     child: Text(
                       capabilities!,
-                      style: theme.textTheme.bodySmall?.copyWith(color: AppColors.ink),
+                      style: theme.textTheme.bodySmall?.copyWith(color: AppColors.sub),
                     ),
                   ),
                 ],
@@ -1113,6 +1125,317 @@ class CriteriaSetHeader extends StatelessWidget {
                 children: actions,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ป้าย "เกณฑ์ทางการ · อ่านอย่างเดียว" — หน้าตาเดียวกับ StatusChip สีเทา แต่ข้อความตกบรรทัดได้
+/// (StatusChip ใช้ Row ที่หดไม่ได้ พอจอแคบ ป้ายยาวแบบนี้จะล้นขอบการ์ด)
+class _LockPill extends StatelessWidget {
+  const _LockPill();
+
+  @override
+  Widget build(BuildContext context) {
+    const palette = StatusPalette.neutral;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
+      decoration: BoxDecoration(
+        color: palette.background,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.lock_outline, size: 14, color: palette.foreground),
+          const SizedBox(width: AppSpacing.xs),
+          Flexible(
+            child: Text(
+              'เกณฑ์ทางการ · อ่านอย่างเดียว',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: palette.foreground),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile(this.metric);
+
+  final CriteriaMetric metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 88),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.line),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            metric.value,
+            style: theme.textTheme.titleSmall
+                ?.copyWith(color: AppColors.blueDark, fontWeight: FontWeight.w700),
+          ),
+          Text(metric.label, style: theme.textTheme.labelSmall?.copyWith(color: AppColors.muted)),
+        ],
+      ),
+    );
+  }
+}
+
+/// หัวข้อ Talent/หน่วยที่พับได้: ▸/▾ + ชื่อ + ป้าย PLO + จำนวนรายการ + ป้าย "รวม N ชม."
+///
+/// [rules] = แถบกฎกลุ่มแชร์เป้า แสดงใต้หัวข้อตลอดแม้พับอยู่ เพราะเป็นกติกาที่อ่านข้ามไม่ได้
+class CriteriaGroupTile extends StatefulWidget {
+  const CriteriaGroupTile({
+    super.key,
+    required this.name,
+    required this.countLabel,
+    this.chip,
+    this.hours,
+    this.rules = const [],
+    this.trailing = const [],
+    this.children = const [],
+    this.initiallyExpanded = false,
+  });
+
+  final String name;
+  final String? chip;
+  final String countLabel;
+  final double? hours;
+  final List<String> rules;
+  final List<Widget> trailing;
+  final List<Widget> children;
+  final bool initiallyExpanded;
+
+  @override
+  State<CriteriaGroupTile> createState() => _CriteriaGroupTileState();
+}
+
+class _CriteriaGroupTileState extends State<CriteriaGroupTile> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final meta = [
+      Text(widget.countLabel, style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted)),
+      if (widget.hours != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppColors.blueBg,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Text(
+            'รวม ${formatHours(widget.hours!)} ชม.',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: AppColors.blueDark, fontWeight: FontWeight.w700),
+          ),
+        ),
+    ];
+    final name = Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.xs,
+      children: [
+        Text(widget.name, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+        if (widget.chip != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppColors.blue,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              widget.chip!,
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(color: AppColors.surface, fontWeight: FontWeight.w700),
+            ),
+          ),
+      ],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.md),
+            child: LayoutBuilder(builder: (context, constraints) {
+              final chevron = Icon(
+                _expanded ? Icons.expand_more : Icons.chevron_right,
+                size: 20,
+                color: AppColors.muted,
+              );
+              // จอแคบ: จำนวน/ชั่วโมง/ปุ่มลงไปบรรทัดที่สอง ชื่อหัวข้อจะได้ไม่ถูกบีบเหลือคำเดียว
+              if (constraints.maxWidth < 520) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    chevron,
+                    const SizedBox(width: AppSpacing.xs),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          name,
+                          const SizedBox(height: AppSpacing.xs),
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: AppSpacing.sm,
+                            runSpacing: AppSpacing.xs,
+                            children: [...meta, ...widget.trailing],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  chevron,
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(child: name),
+                  const SizedBox(width: AppSpacing.sm),
+                  for (final item in [...meta, ...widget.trailing]) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    item,
+                  ],
+                ],
+              );
+            }),
+          ),
+        ),
+        for (final rule in widget.rules)
+          Container(
+            key: const ValueKey('shared-target-rule'),
+            margin: const EdgeInsets.fromLTRB(AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.sm),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: StatusPalette.approved.background,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.balance, size: 16, color: StatusPalette.approved.foreground),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    rule,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: StatusPalette.approved.foreground,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_expanded && widget.children.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.xs, 0, AppSpacing.xs, AppSpacing.sm),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: widget.children,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// แถวรายการเกณฑ์ (หรือหมวดย่อยของเกณฑ์เดิม): ชื่อ + ป้ายบังคับ/เลือก + บรรทัดย่อย · ชั่วโมงชิดขวา
+///
+/// แถวคู่มีพื้นอ่อนให้ไล่สายตาข้ามแถวได้ · ป้ายใช้ StatusChip สีเดียวกับฟอร์มกิจกรรม
+class CriteriaRequirementRow extends StatelessWidget {
+  const CriteriaRequirementRow({
+    super.key,
+    required this.index,
+    required this.name,
+    required this.hours,
+    this.subtitle,
+    this.mandatory,
+    this.trailing = const [],
+  });
+
+  final int index;
+  final String name;
+  final double hours;
+  final String? subtitle;
+
+  /// null = ไม่มีแนวคิดบังคับ/เลือก (หมวดย่อยของเกณฑ์เดิม)
+  final bool? mandatory;
+  final List<Widget> trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm + 2, AppSpacing.sm, AppSpacing.sm + 2),
+      decoration: BoxDecoration(
+        color: index.isEven ? AppColors.fieldFill : null,
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    Text(
+                      name,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: AppColors.ink, fontWeight: FontWeight.w500),
+                    ),
+                    if (mandatory != null)
+                      StatusChip(
+                        label: mandatory! ? 'บังคับ' : 'เลือก',
+                        palette: mandatory! ? StatusPalette.pending : StatusPalette.neutral,
+                        dense: true,
+                      ),
+                  ],
+                ),
+                if (subtitle != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subtitle!,
+                      style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Text(
+            '${formatHours(hours)} ชม.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: AppColors.blueDark, fontWeight: FontWeight.w700),
+          ),
+          for (final item in trailing) ...[
+            const SizedBox(width: AppSpacing.xs),
+            item,
+          ],
         ],
       ),
     );

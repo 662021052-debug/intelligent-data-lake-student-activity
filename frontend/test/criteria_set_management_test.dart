@@ -147,7 +147,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('ใช้กับนิสิตรหัส 70 ขึ้นไป (เข้าศึกษา 2570)'), findsOneWidget);
-      expect(find.text('· รวม 60 ชม.'), findsOneWidget);
+      expect(find.text('60 ชม.'), findsOneWidget, reason: 'การ์ด metric ชั่วโมงรวม');
     });
 
     testWidgets('โชว์ hours_warning เมื่อชั่วโมงยังไม่ครบ', (tester) async {

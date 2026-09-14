@@ -133,7 +133,8 @@ void main() {
       expect(find.text('ชุดที่ 1'), findsOneWidget);
       expect(find.text('โครงสร้าง 2567'), findsOneWidget);
       expect(find.text('สำหรับนิสิตรหัส 67 ขึ้นไป (ปัจจุบัน ปี 1-3)'), findsOneWidget);
-      expect(find.text('· รวม 60 ชม.'), findsOneWidget);
+      expect(find.text('60 ชม.'), findsOneWidget);
+      expect(find.text('ชั่วโมงรวม'), findsOneWidget);
       expect(find.text('นิยามชุดนี้กำหนดไว้ในระบบ แก้ผ่านหน้านี้ไม่ได้'), findsOneWidget);
     });
 
@@ -167,7 +168,9 @@ void main() {
             matching: find.byType(Container),
           ).first,
         );
-        return ((container.decoration as BoxDecoration).color)!;
+        // หัวการ์ดเป็นพื้นไล่สีจากโทนของชุด — เทียบสีต้นของไล่สี
+        final gradient = (container.decoration as BoxDecoration).gradient as LinearGradient;
+        return gradient.colors.first;
       }
 
       expect(background('set1'), isNot(background('set2')));
