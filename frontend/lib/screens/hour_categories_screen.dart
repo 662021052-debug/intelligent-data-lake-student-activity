@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/criteria_set.dart';
@@ -7,6 +9,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../utils/cohort_range.dart';
 import '../utils/format.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/app_form_dialog.dart';
@@ -52,6 +55,17 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       if (set.groupedBy == 'talent') return set;
     }
     return null;
+  }
+
+  /// ชุดเกณฑ์ที่ส่วน "เกณฑ์เดิม" แทน (จัดกลุ่มด้วยหน่วยการเรียนรู้ รุ่นต่ำสุดของหลักสูตรปกติ)
+  /// — ข้อมูลส่วนนั้นมาจาก `/hour-categories` แต่ช่วงรุ่นต้องคิดจากชุดเกณฑ์จริง
+  CriteriaSet? get _legacySet {
+    CriteriaSet? found;
+    for (final set in _criteriaSets) {
+      if (set.groupedBy != 'learning_unit' || set.programType != 'regular') continue;
+      if (found == null || set.effectiveFromCohort < found.effectiveFromCohort) found = set;
+    }
+    return found;
   }
 
   @override
@@ -210,7 +224,8 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       // เดาไม่ออกว่ากดแล้วของใหม่จะไปโผล่ในชุดไหน
       actions: [
         FilledButton.icon(
-          onPressed: () => _openCriteriaForm(const CriteriaSetFormDialog()),
+          onPressed: () =>
+              _openCriteriaForm(CriteriaSetFormDialog(existingSets: _criteriaSets)),
           icon: const Icon(Icons.add, size: 18),
           label: const Text(kAddCriteriaSetLabel),
         ),
@@ -237,6 +252,12 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
                       const SizedBox(height: AppSpacing.xl),
                       _customSetSection(context, set),
                     ],
+                    if (_criteriaSets.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      CriteriaRangeHint(
+                        text: criteriaRangeHint(_criteriaSets, currentAcademicYear()),
+                      ),
+                    ],
                   ],
                 ),
     );
@@ -249,7 +270,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        systemCriteriaSectionHeader(set),
+        systemCriteriaSectionHeader(set, allSets: _criteriaSets),
         if (set == null)
           _sectionMessage('ยังโหลดโครงสร้าง 2567 ไม่ได้ — กดโหลดใหม่อีกครั้ง')
         else if (groups.isEmpty)
@@ -379,6 +400,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         legacyCriteriaSectionHeader(
+          range: _legacySet == null ? null : cohortRangeOf(_legacySet!, _criteriaSets),
           totalHours: totalHours,
           categoryCount: _categories.length,
           subcategoryCount: subcategoryCount,
@@ -405,7 +427,10 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       children: [
         customCriteriaSectionHeader(
           set,
-          onEdit: () => _openCriteriaForm(CriteriaSetFormDialog(existing: set)),
+          allSets: _criteriaSets,
+          onEdit: () => _openCriteriaForm(
+            CriteriaSetFormDialog(existing: set, existingSets: _criteriaSets),
+          ),
           onDelete: () => _deleteCriteriaThing(
             '/criteria-sets/${set.id}',
             title: 'ยืนยันการลบชุดเกณฑ์',
@@ -751,38 +776,104 @@ List<CriteriaGroup> filterCriteriaGroups(List<CriteriaGroup> groups, String sear
 const kAddCriteriaSetLabel = 'เพิ่มชุดเกณฑ์ใหม่';
 
 /// ปุ่มเพิ่มหมวดของโครงเก่า — อยู่ในกรอบ "เกณฑ์เดิม" เท่านั้น และบอกรุ่นในชื่อปุ่มเลย
-const kAddLegacyCategoryLabel = 'เพิ่มหมวดใหญ่ (รหัส 66 ลงไป)';
+const kAddLegacyCategoryLabel = 'เพิ่มหมวดใหญ่ (รหัส ≤66)';
+
+/// บรรทัดรองใต้ชื่อชุด — ปีที่เข้าศึกษาแบบเต็ม + (ชั้นปีตอนนี้) · กลุ่มหลักสูตร
+///
+/// ตัวหลักคือป้ายรหัสบนหัวการ์ด (คงที่ทุกปี) ชั้นปีอยู่ในวงเล็บเพราะเลื่อนทุกปีการศึกษา
+String criteriaAudience(CohortRange range, int academicYear, {String? programTypeLabel}) =>
+    '${range.entryYearsLabel} (${range.currentYearLevels(academicYear)})'
+    '${programTypeLabel == null ? '' : ' · $programTypeLabel'}';
+
+/// บรรทัดช่วยจำท้ายหน้า — ยกตัวอย่างด้วยปีรุ่นถัดไปจริง และผลที่เกิดกับชุดเดิมจริง
+String criteriaRangeHint(List<CriteriaSet> sets, int academicYear) {
+  final latest = sets
+      .where((s) => s.programType == 'regular')
+      .fold<int>(0, (m, s) => math.max(m, s.effectiveFromCohort));
+  final example = math.max(academicYear + 1, latest + 1);
+  final preview = previewCohort(cohort: example, programType: 'regular', sets: sets);
+  final adjust = preview.changes.isEmpty
+      ? ''
+      : 'ระบบจะปรับ${preview.changes.map((c) => c.sentence).join(' และ ')} ให้อัตโนมัติ และ';
+  return 'อยากได้เกณฑ์รุ่นใหม่ (เช่น $example)? กด "$kAddCriteriaSetLabel" '
+      'แล้วตั้ง "ปีรุ่นที่เริ่มใช้ = $example" — $adjustรหัส ${preview.range.codes} '
+      'เข้าชุดใหม่เอง โดยไม่ต้องแก้ชุดเก่า';
+}
+
+class CriteriaRangeHint extends StatelessWidget {
+  const CriteriaRangeHint({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      key: const ValueKey('criteria-range-hint'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.lightbulb_outline, size: 16, color: AppColors.muted),
+        const SizedBox(width: AppSpacing.xs),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.muted),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 /// หัวข้อส่วนชุดทางการที่ระบบ seed (โครงสร้าง 2567) — ไม่มีปุ่มใดเลย
-CriteriaSetHeader systemCriteriaSectionHeader(CriteriaSet? set) => CriteriaSetHeader(
-      badge: 'ชุดที่ 1',
-      title: set?.name ?? 'โครงสร้าง 2567',
-      audience: set?.audienceLabel ?? 'สำหรับนิสิตรหัส 67 ขึ้นไป (ปัจจุบัน ปี 1-3)',
-      totalHours: set?.totalRequiredHours ?? 0,
-      palette: StatusPalette.info,
-      note: set == null ? null : 'รหัสชุด ${set.code}',
-      warning: set?.hoursWarning,
-      readOnly: true,
-      capabilities: 'ดูได้อย่างเดียว — เพิ่ม/แก้/ลบ Talent หรือรายการเกณฑ์ในชุดนี้ไม่ได้ · '
-          'ถ้ารุ่นใหม่ใช้เกณฑ์ต่างออกไป ให้กด "$kAddCriteriaSetLabel" ด้านบน',
-    );
+///
+/// [allSets] = ชุดทั้งหมดจาก `GET /criteria-sets` ใช้หาชุดถัดไปเพื่อตัดปลายช่วงรุ่น
+CriteriaSetHeader systemCriteriaSectionHeader(
+  CriteriaSet? set, {
+  List<CriteriaSet> allSets = const [],
+  int? academicYear,
+}) {
+  final range = set == null ? null : cohortRangeOf(set, allSets);
+  return CriteriaSetHeader(
+    badge: 'ชุดที่ 1',
+    title: set?.name ?? 'โครงสร้าง 2567',
+    rangeLabel: range?.pillLabel,
+    audience: range == null
+        ? 'ยังโหลดช่วงรุ่นของชุดนี้ไม่ได้'
+        : criteriaAudience(range, academicYear ?? currentAcademicYear()),
+    totalHours: set?.totalRequiredHours ?? 0,
+    palette: StatusPalette.info,
+    note: set == null ? null : 'รหัสชุด ${set.code}',
+    warning: set?.hoursWarning,
+    readOnly: true,
+    capabilities: 'ดูได้อย่างเดียว — เพิ่ม/แก้/ลบ Talent หรือรายการเกณฑ์ในชุดนี้ไม่ได้ · '
+        'ถ้ารุ่นใหม่ใช้เกณฑ์ต่างออกไป ให้กด "$kAddCriteriaSetLabel" ด้านบน',
+  );
+}
 
 /// หัวข้อส่วนเกณฑ์เดิม (หมวดใหญ่ → หมวดย่อย) — ปุ่มเพิ่มหมวดใหญ่อยู่ในกรอบนี้ที่เดียว
+///
+/// [range] = ช่วงรุ่นของชุดเกณฑ์เดิมที่คำนวณแล้ว (null ถ้ายังโหลดชุดเกณฑ์ไม่ได้)
 CriteriaSetHeader legacyCriteriaSectionHeader({
+  required CohortRange? range,
   required double totalHours,
   required int categoryCount,
   required int subcategoryCount,
   required VoidCallback onAddCategory,
+  int? academicYear,
 }) =>
     CriteriaSetHeader(
       badge: 'ชุดที่ 2',
       title: 'เกณฑ์เดิม',
-      audience: 'สำหรับนิสิตรหัส 66 ลงไป (ปัจจุบัน ปี 4)',
+      rangeLabel: range?.pillLabel,
+      audience: range == null
+          ? 'ใช้กับนิสิตรุ่นก่อนหน้าที่ยังไม่มีชุดของตัวเอง'
+          : criteriaAudience(range, academicYear ?? currentAcademicYear()),
       totalHours: totalHours,
       palette: StatusPalette.neutral,
       note: '$categoryCount หน่วยการเรียนรู้ · $subcategoryCount หมวดย่อย',
       capabilities: 'เพิ่มได้: หมวดใหญ่ (ปุ่มด้านล่าง) · หมวดย่อย (ปุ่ม + ท้ายหมวดใหญ่) — '
-          'แก้/ลบได้ทั้งสองระดับจากปุ่มในแต่ละแถว · มีผลเฉพาะนิสิตรหัส 66 ลงไป',
+          'แก้/ลบได้ทั้งสองระดับจากปุ่มในแต่ละแถว · '
+          'มีผลเฉพาะ${range?.studentsLabel ?? 'นิสิตรุ่นก่อนหน้า'}',
       actions: [
         OutlinedButton.icon(
           onPressed: onAddCategory,
@@ -795,19 +886,24 @@ CriteriaSetHeader legacyCriteriaSectionHeader({
 /// หัวข้อส่วนชุดที่ผู้ดูแลสร้างเอง — แก้ข้อมูลชุด + ปุ่มเพิ่มของทุกชนิดอยู่ในกรอบนี้
 CriteriaSetHeader customCriteriaSectionHeader(
   CriteriaSet set, {
+  List<CriteriaSet> allSets = const [],
+  int? academicYear,
   required VoidCallback onEdit,
   required VoidCallback onDelete,
   required VoidCallback onAddTalent,
   required VoidCallback onAddGroup,
   required VoidCallback onAddRequirement,
 }) {
-  final shortCode = set.effectiveFromCohort > 0
-      ? 'รหัส ${(set.effectiveFromCohort % 100).toString().padLeft(2, '0')} ขึ้นไป'
-      : 'รุ่นที่ยังไม่มีชุดของตัวเอง';
+  final range = cohortRangeOf(set, allSets);
   return CriteriaSetHeader(
     badge: 'ชุดของผู้ดูแล',
     title: set.name,
-    audience: '${set.audienceLabel} · ${set.programTypeLabel}',
+    rangeLabel: range.pillLabel,
+    audience: criteriaAudience(
+      range,
+      academicYear ?? currentAcademicYear(),
+      programTypeLabel: set.programTypeLabel,
+    ),
     totalHours: set.totalRequiredHours,
     palette: StatusPalette.approved,
     note: 'รหัสชุด ${set.code}',
@@ -815,7 +911,7 @@ CriteriaSetHeader customCriteriaSectionHeader(
     onEdit: onEdit,
     onDelete: onDelete,
     capabilities: 'แก้ได้ทั้งชุด: ข้อมูลชุด (ปุ่มดินสอ) · เพิ่ม Talent · กลุ่มแชร์เป้า · '
-        'รายการเกณฑ์ (ปุ่มด้านล่าง) · แก้/ลบรายการจากปุ่มในแต่ละแถว — มีผลกับนิสิต$shortCode',
+        'รายการเกณฑ์ (ปุ่มด้านล่าง) · แก้/ลบรายการจากปุ่มในแต่ละแถว — มีผลกับ${range.studentsLabel}',
     actions: [
       OutlinedButton.icon(
         onPressed: onAddTalent,
@@ -848,6 +944,7 @@ class CriteriaSetHeader extends StatelessWidget {
     required this.audience,
     required this.totalHours,
     required this.palette,
+    this.rangeLabel,
     this.note,
     this.warning,
     this.readOnly = false,
@@ -868,6 +965,9 @@ class CriteriaSetHeader extends StatelessWidget {
 
   /// ใช้กับนิสิตกลุ่มไหน — เป็นสิ่งที่ผู้ดูแลต้องรู้ก่อนอ่านตัวเกณฑ์
   final String audience;
+
+  /// ป้ายช่วงรหัสที่คำนวณจากชุดถัดไป ("ใช้กับรหัส 67–69") — ตัวหลักที่บอกว่าชุดนี้ของใคร
+  final String? rangeLabel;
   final double totalHours;
   final StatusPalette palette;
   final String? note;
@@ -915,6 +1015,23 @@ class CriteriaSetHeader extends StatelessWidget {
                 '· รวม ${formatHours(totalHours)} ชม.',
                 style: theme.textTheme.titleSmall?.copyWith(color: palette.foreground),
               ),
+              if (rangeLabel != null)
+                Container(
+                  key: const ValueKey('cohort-range-pill'),
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppColors.blue),
+                  ),
+                  child: Text(
+                    rangeLabel!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.blueDark,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               if (readOnly)
                 const StatusChip(
                   label: 'เกณฑ์ทางการ (อ่านอย่างเดียว)',

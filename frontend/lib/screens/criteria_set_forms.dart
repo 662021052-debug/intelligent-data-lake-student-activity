@@ -9,7 +9,9 @@ import 'package:flutter/material.dart';
 import '../models/criteria_set.dart';
 import '../models/learning_unit.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../utils/cohort_range.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
 
@@ -46,10 +48,13 @@ String? cohortValidator(String? value) {
 // ---------------------------------------------------------------- ชุดเกณฑ์
 
 class CriteriaSetFormDialog extends StatefulWidget {
-  const CriteriaSetFormDialog({super.key, this.existing});
+  const CriteriaSetFormDialog({super.key, this.existing, this.existingSets = const []});
 
   /// null = สร้างชุดใหม่
   final CriteriaSet? existing;
+
+  /// ชุดที่มีอยู่ทั้งหมด — ใช้พรีวิวว่าปีรุ่นที่กรอกทำให้ช่วงรุ่นของชุดไหนเปลี่ยน
+  final List<CriteriaSet> existingSets;
 
   @override
   State<CriteriaSetFormDialog> createState() => _CriteriaSetFormDialogState();
@@ -125,6 +130,48 @@ class _CriteriaSetFormDialogState extends State<CriteriaSetFormDialog> {
     }
   }
 
+  /// "ชุดนี้จะใช้กับรหัส 70 ขึ้นไป และทำให้ชุด 2567 เหลือ 67–69" — ช่วงรุ่นไม่ได้กรอก
+  /// ตรง ๆ แต่คำนวณจากชุดถัดไป ผู้ดูแลจึงต้องเห็นผลก่อนกดบันทึก
+  Widget _cohortPreview(BuildContext context) {
+    final text = cohortPreviewText(
+      cohortText: _cohort.text,
+      programType: _programType,
+      sets: widget.existingSets,
+      editing: widget.existing,
+    );
+    if (text == null) return const SizedBox.shrink();
+    return Padding(
+      key: const ValueKey('cohort-preview'),
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+        decoration: BoxDecoration(
+          color: AppColors.blueBg,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Icon(Icons.info_outline, size: 16, color: AppColors.blueDark),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Expanded(
+              child: Text(
+                text,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppColors.blueDark, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppFormDialog(
@@ -169,16 +216,26 @@ class _CriteriaSetFormDialogState extends State<CriteriaSetFormDialog> {
             return null;
           },
         ),
-        TextFormField(
-          controller: _cohort,
-          decoration: criteriaDecoration(
-            'ปีรุ่นที่เริ่มใช้ (พ.ศ.)',
-            required: true,
-            hint: '2570',
-            helper: 'นิสิตที่เข้าศึกษาตั้งแต่ปีนี้เป็นต้นไปจะใช้ชุดนี้ · ห้ามซ้ำในกลุ่มหลักสูตรเดียวกัน',
-          ),
-          keyboardType: TextInputType.number,
-          validator: cohortValidator,
+        // ช่อง + พรีวิวเป็นก้อนเดียว ไม่ให้ระยะห่างระหว่างช่องของฟอร์มมาคั่นกลาง
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: _cohort,
+              decoration: criteriaDecoration(
+                'ปีรุ่นที่เริ่มใช้ (พ.ศ.)',
+                required: true,
+                hint: '2570',
+                helper:
+                    'นิสิตที่เข้าศึกษาตั้งแต่ปีนี้เป็นต้นไปจะใช้ชุดนี้ · ห้ามซ้ำในกลุ่มหลักสูตรเดียวกัน',
+              ),
+              keyboardType: TextInputType.number,
+              validator: cohortValidator,
+              // พรีวิวสดตามเลขที่พิมพ์
+              onChanged: (_) => setState(() {}),
+            ),
+            _cohortPreview(context),
+          ],
         ),
         DropdownButtonFormField<String>(
           initialValue: _programType,

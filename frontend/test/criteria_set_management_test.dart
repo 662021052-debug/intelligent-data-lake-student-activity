@@ -3,6 +3,7 @@ import 'package:activity_tracking_frontend/models/learning_unit.dart';
 import 'package:activity_tracking_frontend/screens/criteria_set_forms.dart';
 import 'package:activity_tracking_frontend/screens/hour_categories_screen.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
+import 'package:activity_tracking_frontend/utils/cohort_range.dart';
 import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -481,6 +482,8 @@ void main() {
         (tester) async {
       var added = 0;
       await tester.pumpWidget(_wrap(legacyCriteriaSectionHeader(
+        range: const CohortRange(from: 0, until: 2566),
+        academicYear: 2569,
         totalHours: 60,
         categoryCount: 5,
         subcategoryCount: 20,
@@ -490,11 +493,12 @@ void main() {
 
       final button = inHeader(find.widgetWithText(OutlinedButton, kAddLegacyCategoryLabel));
       expect(button, findsOneWidget);
-      expect(kAddLegacyCategoryLabel, contains('66 ลงไป'));
-      expect(find.textContaining('สำหรับนิสิตรหัส 66 ลงไป'), findsOneWidget);
+      expect(kAddLegacyCategoryLabel, contains('≤66'));
+      expect(inHeader(find.text('ใช้กับรหัส ≤66')), findsOneWidget);
+      expect(find.text('เข้าศึกษาปี 2566 ลงไป (ปัจจุบัน = ปี 4 ขึ้นไป)'), findsOneWidget);
       expect(inHeader(find.textContaining('เพิ่มได้: หมวดใหญ่')), findsOneWidget);
       expect(inHeader(find.textContaining('หมวดย่อย')), findsWidgets);
-      expect(inHeader(find.textContaining('มีผลเฉพาะนิสิตรหัส 66 ลงไป')), findsOneWidget);
+      expect(inHeader(find.textContaining('มีผลเฉพาะนิสิตรหัส ≤66')), findsOneWidget);
 
       await tester.tap(button);
       expect(added, 1);
