@@ -22,6 +22,9 @@ COPY seed.py .
 COPY seed_criteria.py .
 COPY seed_evidence.py .
 COPY wipe_data.py .
+# สคริปต์เข้า image ได้ แต่ไฟล์รายชื่อ (seed/*.xlsx) ไม่เข้า — เป็นข้อมูลส่วนบุคคล
+# ต้อง `docker compose cp` เข้าไปเองก่อนรันในคอนเทนเนอร์ (ดู docstring ของสคริปต์)
+COPY load_students.py .
 COPY alembic.ini .
 COPY alembic ./alembic
 

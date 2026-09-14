@@ -148,6 +148,11 @@ class StudentBase(SQLModel):
 
 class Student(StudentBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # สถานะ "ผ่าน/ไม่ผ่าน" เกณฑ์กิจกรรมตามไฟล์รายชื่อที่นำเข้า (load_students.py) —
+    # เป็นคำตัดสินของต้นทาง ณ วันที่ได้ไฟล์มา ไม่ใช่ผลที่ระบบคำนวณเอง ใช้สร้างข้อมูลจำลอง
+    # และเทียบความถูกต้องกับ completion ที่ระบบคำนวณได้ None = ไม่ได้มาจากไฟล์
+    # อยู่ที่ตารางเท่านั้น (ไม่อยู่ใน StudentBase) API จึงไม่รับ/ไม่ส่งค่านี้
+    source_passed: Optional[bool] = None
 
     participations: list["Participation"] = Relationship(back_populates="student")
 
