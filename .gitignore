@@ -12,3 +12,6 @@ backend/seed/*.xlsx
 backend/seed/students_69.xlsx
 backup_before_wipe.sql
 *.sql.bak
+
+# git worktree ของ Claude Code (แต่ละอันเป็น checkout แยก ไม่ใช่ไฟล์ของ repo นี้)
+.claude/worktrees/
