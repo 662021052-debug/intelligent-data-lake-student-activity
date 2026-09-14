@@ -6,6 +6,8 @@ class Participation {
   final double hoursEarned;
   final String evidenceStatus; // pending | approved | rejected
   final String? activityName;
+  final String? studentName;
+  final String? studentCode; // รหัสนิสิต ไม่ใช่ id ในฐาน
   final bool hasEvidence;
   final DateTime? evidenceUploadedAt;
   // Silver-layer OCR summary, folded into the participation payload.
@@ -22,6 +24,8 @@ class Participation {
     this.hoursEarned = 0,
     this.evidenceStatus = 'pending',
     this.activityName,
+    this.studentName,
+    this.studentCode,
     this.hasEvidence = false,
     this.evidenceUploadedAt,
     this.hasOcr = false,
@@ -40,6 +44,8 @@ class Participation {
         hoursEarned: (json['hours_earned'] as num?)?.toDouble() ?? 0,
         evidenceStatus: json['evidence_status'] as String? ?? 'pending',
         activityName: json['activity_name'] as String?,
+        studentName: json['student_name'] as String?,
+        studentCode: json['student_code'] as String?,
         hasEvidence: json['has_evidence'] as bool? ?? false,
         evidenceUploadedAt: json['evidence_uploaded_at'] == null
             ? null

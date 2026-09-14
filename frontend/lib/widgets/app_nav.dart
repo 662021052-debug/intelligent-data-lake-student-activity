@@ -39,6 +39,11 @@ class AppNavItem {
     label: 'การเข้าร่วมกิจกรรม',
     icon: Icons.fact_check_outlined,
   );
+  static const evidenceReview = AppNavItem(
+    id: 'evidence_review',
+    label: 'ตรวจหลักฐาน',
+    icon: Icons.document_scanner_outlined,
+  );
   static const calendar = AppNavItem(
     id: 'calendar',
     label: 'ปฏิทินกิจกรรม',
@@ -71,6 +76,8 @@ List<AppNavItem> navItemsForRole(String? role) => switch (role) {
           AppNavItem.activities,
           // วางต่อจาก "จัดการกิจกรรม" เพราะเป็นมุมมองอีกแบบของข้อมูลชุดเดียวกัน
           AppNavItem.calendar,
+          // คิวตรวจหลักฐาน + OCR ของทั้งระบบ (เดิมต้องเข้าผ่านรายชื่อผู้เข้าร่วมทีละกิจกรรม)
+          AppNavItem.evidenceReview,
           AppNavItem.users,
           AppNavItem.students,
           AppNavItem.hourCategories,
@@ -78,6 +85,7 @@ List<AppNavItem> navItemsForRole(String? role) => switch (role) {
       'staff' => const [
           AppNavItem.activities,
           AppNavItem.participations,
+          AppNavItem.evidenceReview,
           AppNavItem.calendar,
         ],
       _ => const [AppNavItem.home],

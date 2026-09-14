@@ -5,6 +5,7 @@ import 'package:activity_tracking_frontend/screens/activity_calendar_screen.dart
 import 'package:activity_tracking_frontend/screens/chatbot_screen.dart';
 import 'package:activity_tracking_frontend/screens/checkin_scan_screen.dart';
 import 'package:activity_tracking_frontend/screens/dashboard_screen.dart';
+import 'package:activity_tracking_frontend/screens/evidence_review_screen.dart';
 import 'package:activity_tracking_frontend/screens/home_screen.dart';
 import 'package:activity_tracking_frontend/screens/hour_categories_screen.dart';
 import 'package:activity_tracking_frontend/screens/login_screen.dart';
@@ -51,6 +52,7 @@ final _screens = <String, (String, Widget Function())>{
   'หมวดชั่วโมง': ('admin', HourCategoriesScreen.new),
   'แดชบอร์ดคอนโซล': ('admin', DashboardScreen.new),
   'การเข้าร่วมกิจกรรม': ('admin', ParticipationsScreen.new),
+  'ตรวจหลักฐาน': ('admin', EvidenceReviewScreen.new),
   'ปฏิทินกิจกรรม': ('admin', ActivityCalendarScreen.new),
 };
 

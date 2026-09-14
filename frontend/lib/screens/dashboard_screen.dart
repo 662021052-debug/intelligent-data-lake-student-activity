@@ -24,6 +24,7 @@ import '../widgets/status_chip.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'app_shell.dart';
+import 'evidence_review_screen.dart';
 import 'hour_categories_screen.dart';
 import 'participations_screen.dart';
 import 'student_hours_screen.dart';
@@ -161,7 +162,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ApiService.fetchPage(
           '/participations',
           Participation.fromJson,
-          query: {'evidence_status': 'pending', 'limit': '1'},
+          // นับเฉพาะที่ส่งไฟล์แล้ว — ตรงกับคิวในหน้าตรวจหลักฐานที่ todo นี้พาไป
+          query: {'evidence_status': 'pending', 'has_evidence': 'true', 'limit': '1'},
         ),
       ]);
       final activities = results[0] as List<Activity>;
@@ -351,7 +353,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         TodoItem(
           label: 'ตรวจหลักฐาน ${_counts.pendingEvidence} รายการ',
           count: _counts.pendingEvidence,
-          onTap: () => _open(const ParticipationsScreen()),
+          onTap: () => _open(const EvidenceReviewScreen()),
         ),
         TodoItem(
           label: 'ติดตามนิสิตกลุ่มเสี่ยง ${_atRisk.length} คน',

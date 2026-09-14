@@ -21,6 +21,8 @@ COPY app ./app
 COPY seed.py .
 COPY seed_criteria.py .
 COPY seed_evidence.py .
+# หลักฐานเดโมของหน้าตรวจหลักฐาน — ต้องรันในคอนเทนเนอร์ที่มีฟอนต์ไทย + easyocr + MinIO
+COPY seed_evidence_demo.py .
 COPY wipe_data.py .
 # สคริปต์ตรวจความครบเกณฑ์เทียบสถานะจากไฟล์นำเข้า (เฟส 6) — รันในคอนเทนเนอร์ที่ต่อ DB จริง
 COPY check_completion.py .

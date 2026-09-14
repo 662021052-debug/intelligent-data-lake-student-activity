@@ -416,6 +416,8 @@ class ParticipationUpdate(SQLModel):
 class ParticipationRead(ParticipationBase):
     id: int
     activity_name: Optional[str] = None
+    student_name: Optional[str] = None
+    student_code: Optional[str] = None  # รหัสนิสิต (Student.student_id) ไม่ใช่ id ในฐาน
     has_evidence: bool = False
     evidence_uploaded_at: Optional[datetime] = None
     # Latest Silver-layer OCR summary, folded in so the participants list does not

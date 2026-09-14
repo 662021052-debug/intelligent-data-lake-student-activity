@@ -8,6 +8,7 @@ import '../widgets/app_sidebar.dart';
 import 'activities_screen.dart';
 import 'activity_calendar_screen.dart';
 import 'chatbot_screen.dart';
+import 'evidence_review_screen.dart';
 import 'hour_categories_screen.dart';
 import 'my_hours_screen.dart';
 import 'participations_screen.dart';
@@ -24,6 +25,7 @@ Widget? screenForNavItem(AppNavItem item) => switch (item.id) {
       'chatbot' => const ChatbotScreen(),
       'activities' => const ActivitiesScreen(),
       'participations' => const ParticipationsScreen(),
+      'evidence_review' => const EvidenceReviewScreen(),
       'calendar' => const ActivityCalendarScreen(),
       'users' => const UsersScreen(),
       'hour_categories' => const HourCategoriesScreen(),

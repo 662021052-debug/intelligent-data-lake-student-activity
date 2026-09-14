@@ -18,6 +18,7 @@ from app.models import (
     Activity,
     ApprovalStatus,
     EvidenceStatus,
+    OcrDecision,
     Participation,
     ParticipationCreate,
     ParticipationRead,
@@ -67,6 +68,18 @@ def _activity_names(session: Session, activity_ids: list[int]) -> dict[int, str]
     return {aid: name for aid, name in rows}
 
 
+def _student_labels(session: Session, student_ids: list[int]) -> dict[int, tuple[str, str]]:
+    """Map student.id -> (full_name, รหัสนิสิต) — คิวตรวจหลักฐานต้องบอกว่าเป็นของใคร
+    โดยไม่ต้องโหลดนิสิตทั้งระบบ (2,000+ คน) มาทำตารางแปลง id เอง"""
+    ids = {sid for sid in student_ids if sid is not None}
+    if not ids:
+        return {}
+    rows = session.exec(
+        select(Student.id, Student.full_name, Student.student_id).where(Student.id.in_(ids))
+    ).all()
+    return {sid: (name, code) for sid, name, code in rows}
+
+
 def _latest_ocr_map(
     session: Session, participation_ids: list[int]
 ) -> dict[int, SilverEvidenceOcr]:
@@ -90,10 +103,13 @@ def _to_read(
     uploaded_at: Optional[datetime],
     activity_name: Optional[str],
     ocr: Optional[SilverEvidenceOcr] = None,
+    student: Optional[tuple[str, str]] = None,
 ) -> ParticipationRead:
     return ParticipationRead(
         **participation.model_dump(),
         activity_name=activity_name,
+        student_name=student[0] if student else None,
+        student_code=student[1] if student else None,
         has_evidence=uploaded_at is not None,
         evidence_uploaded_at=uploaded_at,
         has_ocr=ocr is not None,
@@ -109,7 +125,8 @@ def _read_with_evidence(session: Session, participation: Participation) -> Parti
         participation.activity_id
     )
     ocr = _latest_ocr_map(session, [participation.id]).get(participation.id)
-    return _to_read(participation, uploaded_at, activity_name, ocr)
+    student = _student_labels(session, [participation.student_id]).get(participation.student_id)
+    return _to_read(participation, uploaded_at, activity_name, ocr, student)
 
 
 def _get_activity_or_404(session: Session, activity_id: int) -> Activity:
@@ -131,6 +148,8 @@ def list_participations(
     student_id: Optional[int] = None,
     activity_id: Optional[int] = None,
     evidence_status: Optional[EvidenceStatus] = None,
+    has_evidence: Optional[bool] = Query(None, description="true = เฉพาะรายการที่ส่งไฟล์หลักฐานแล้ว"),
+    ocr_decision: Optional[OcrDecision] = Query(None, description="ผล OCR ล่าสุดของรายการ"),
     search: Optional[str] = Query(None, description="ค้นหาจากชื่อ/รหัสนิสิต หรือชื่อกิจกรรม"),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
@@ -160,6 +179,22 @@ def list_participations(
     if evidence_status:
         query = query.where(Participation.evidence_status == evidence_status)
         count_query = count_query.where(Participation.evidence_status == evidence_status)
+    if has_evidence is not None:
+        # คิวตรวจหลักฐาน: การเข้าร่วมที่ยังไม่ส่งไฟล์ไม่มีอะไรให้ตรวจ จึงกรองออกที่ backend
+        with_file = Participation.id.in_(
+            select(RawFile.participation_id).where(RawFile.participation_id.is_not(None))
+        )
+        condition = with_file if has_evidence else ~with_file
+        query = query.where(condition)
+        count_query = count_query.where(condition)
+    if ocr_decision:
+        # เทียบกับผล OCR "ล่าสุด" ของแต่ละรายการเท่านั้น — สั่งอ่านใหม่แล้วผลเดิมต้องไม่ติดมา
+        latest_ids = select(func.max(SilverEvidenceOcr.id)).group_by(SilverEvidenceOcr.participation_id)
+        matched = select(SilverEvidenceOcr.participation_id).where(
+            SilverEvidenceOcr.id.in_(latest_ids), SilverEvidenceOcr.decision == ocr_decision
+        )
+        query = query.where(Participation.id.in_(matched))
+        count_query = count_query.where(Participation.id.in_(matched))
     if search:
         # ตารางนี้แสดงชื่อนิสิตกับชื่อกิจกรรม จึงต้องค้นได้ทั้งสองอย่าง
         # ใช้ subquery แทน join เพื่อไม่ให้แถวซ้ำและไม่กระทบ count
@@ -181,8 +216,12 @@ def list_participations(
     evidence = _latest_evidence_map(session, [p.id for p in items])
     names = _activity_names(session, [p.activity_id for p in items])
     ocr = _latest_ocr_map(session, [p.id for p in items])
+    students = _student_labels(session, [p.student_id for p in items])
     reads = [
-        _to_read(p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id)) for p in items
+        _to_read(
+            p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id), students.get(p.student_id)
+        )
+        for p in items
     ]
     return Page(items=reads, total=total, skip=skip, limit=limit)
 
