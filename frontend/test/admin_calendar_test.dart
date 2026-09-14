@@ -1,4 +1,5 @@
 import 'package:activity_tracking_frontend/models/activity.dart';
+import 'package:activity_tracking_frontend/models/participation.dart';
 import 'package:activity_tracking_frontend/screens/activity_calendar_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
@@ -7,22 +8,24 @@ import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
 import 'package:activity_tracking_frontend/widgets/status_chip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:table_calendar/table_calendar.dart';
 
-/// ปฏิทินเปิดที่ "เดือนปัจจุบัน" เสมอ เทสต์จึงต้องวางกิจกรรมไว้ในเดือนนั้น
-/// ไม่งั้นต้องกดเลื่อนเดือนก่อน ซึ่งทำให้เทสต์เปราะโดยไม่ได้เพิ่มความมั่นใจอะไร
-///
-/// เลือกวันที่ 15 เพราะเป็นกลางเดือน — ตัวเลขนี้ปรากฏครั้งเดียวในตารางเดือน
-/// (วันต้น/ท้ายเดือนอาจซ้ำกับวันของเดือนข้างเคียงที่ปฏิทินวาดจาง ๆ ไว้)
+/// ปฏิทินเปิดที่ "เดือนปัจจุบัน" เสมอ เทสต์จึงวางกิจกรรมไว้กลางเดือนนั้น (วันที่ 15)
 DateTime get _day {
   final now = DateTime.now();
   return DateTime(now.year, now.month, 15);
 }
 
-DateTime _at(int hour, int minute) =>
-    DateTime(_day.year, _day.month, _day.day, hour, minute);
+DateTime _at(int hour, int minute, {DateTime? on}) {
+  final d = on ?? _day;
+  return DateTime(d.year, d.month, d.day, hour, minute);
+}
 
-/// ปีพุทธศักราชของเดือนที่กำลังทดสอบ
+/// วันที่ 15 ของเดือนถัดไป — อยู่ในอนาคตเสมอ ใช้กับเคส "ยังเปิดรับสมัคร"
+DateTime get _nextMonthDay {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month + 1, 15);
+}
+
 int get _thaiYear => _day.year + 543;
 
 Activity _activity({
@@ -31,16 +34,22 @@ Activity _activity({
   required DateTime startAt,
   String location = 'ห้องประชุม ชั้น 3',
   String approvalStatus = 'pending',
+  double hours = 6,
+  int maxParticipants = 120,
+  int participantCount = 0,
+  bool isHidden = false,
 }) =>
     Activity(
       id: id,
       name: name,
       activityType: 'อบรม/สัมมนา',
-      hours: 6,
-      maxParticipants: 120,
+      hours: hours,
+      maxParticipants: maxParticipants,
+      participantCount: participantCount,
       startAt: startAt,
       location: location,
       approvalStatus: approvalStatus,
+      isHidden: isHidden,
     );
 
 void _loginAs(String role) {
@@ -49,16 +58,38 @@ void _loginAs(String role) {
   authService.role = role;
 }
 
-void _wideScreen(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1400, 1000);
+void _screen(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 }
 
-Widget _calendar(List<Activity> activities) => MaterialApp(
-      theme: AppTheme.light,
-      home: ActivityCalendarScreen(initialActivities: activities),
-    );
+Future<void> _pump(
+  WidgetTester tester,
+  List<Activity> activities, {
+  List<Participation> participations = const [],
+  Size size = const Size(1400, 1000),
+}) async {
+  _screen(tester, size);
+  await tester.pumpWidget(MaterialApp(
+    theme: AppTheme.light,
+    home: ActivityCalendarScreen(
+      initialActivities: activities,
+      initialParticipations: participations,
+    ),
+  ));
+  await tester.pumpAndSettle();
+}
+
+Finder _cell(DateTime day) => find.byKey(ValueKey('calendar-day-${calendarDayId(day)}'));
+final Finder _panel = find.byKey(const ValueKey('calendar-day-panel'));
+Finder _inPanel(Finder f) => find.descendant(of: _panel, matching: f);
+Finder _inCell(DateTime day, Finder f) => find.descendant(of: _cell(day), matching: f);
+
+Future<void> _tapDay(WidgetTester tester, DateTime day) async {
+  await tester.tap(_cell(day));
+  await tester.pumpAndSettle();
+}
 
 void main() {
   tearDown(() => authService.logout());
@@ -87,7 +118,7 @@ void main() {
     });
 
     testWidgets('sidebar ของแอดมินขึ้นเมนู "ปฏิทินกิจกรรม" จริง', (tester) async {
-      _wideScreen(tester);
+      _screen(tester, const Size(1400, 1000));
       _loginAs('admin');
 
       await tester.pumpWidget(MaterialApp(
@@ -138,14 +169,103 @@ void main() {
     });
   });
 
-  group('กดวันที่มีกิจกรรม แล้วเห็นรายการของวันนั้น', () {
-    testWidgets('แอดมินเห็นชื่อ/เวลา/สถานที่/สถานะ ของกิจกรรมในวันที่กด',
-        (tester) async {
-      _wideScreen(tester);
-      _loginAs('admin');
+  group('ตารางเดือน — เริ่มวันจันทร์ เต็มสัปดาห์เสมอ', () {
+    test('ก.ย. 2569 เริ่ม 1 ก.ย. วันอังคาร → วาดจาก 31 ส.ค. ถึง 4 ต.ค. (5 สัปดาห์)', () {
+      final days = calendarMonthDays(DateTime(2026, 9));
+      expect(days.length, 35);
+      expect(days.first, DateTime.utc(2026, 8, 31));
+      expect(days.last, DateTime.utc(2026, 10, 4));
+      expect(days.first.weekday, DateTime.monday);
+      expect(days.last.weekday, DateTime.sunday);
+    });
 
-      await tester.pumpWidget(_calendar([
-        _activity(id: 1, name: 'อบรมปฐมพยาบาล', startAt: _at(9, 30)),
+    test('ก.พ. 2570 พอดี 4 สัปดาห์ ไม่มีวันของเดือนข้างเคียง', () {
+      final days = calendarMonthDays(DateTime(2027, 2));
+      expect(days.length, 28);
+      expect(days.first, DateTime.utc(2027, 2, 1));
+      expect(days.last, DateTime.utc(2027, 2, 28));
+    });
+
+    test('ส.ค. 2569 ต้องใช้ 6 สัปดาห์', () {
+      final days = calendarMonthDays(DateTime(2026, 8));
+      expect(days.length, 42);
+      expect(days.first, DateTime.utc(2026, 7, 27));
+      expect(days.last, DateTime.utc(2026, 9, 6));
+    });
+  });
+
+  group('ข้อความในแผงวัน', () {
+    test('หัวแผงเป็นชื่อวันเต็ม + ปี พ.ศ.', () {
+      expect(thaiFullDateLabel(DateTime(2026, 9, 14)), 'วันจันทร์ที่ 14 กันยายน 2569');
+      expect(thaiFullDateLabel(DateTime(2027, 2, 28)), 'วันอาทิตย์ที่ 28 กุมภาพันธ์ 2570');
+    });
+
+    test('ช่วงเวลาคิดเวลาจบจากชั่วโมงของกิจกรรม', () {
+      expect(activityTimeRange(_activity(startAt: DateTime(2026, 9, 14, 9), hours: 3)),
+          '09:00–12:00 น.');
+      expect(activityTimeRange(_activity(startAt: DateTime(2026, 9, 14, 13), hours: 1.5)),
+          '13:00–14:30 น.');
+      expect(activityTimeRange(_activity(startAt: DateTime(2026, 9, 14, 9), hours: 0)), '09:00 น.');
+    });
+
+    test('ที่นั่ง: เหลือกี่ที่ / เต็มแล้ว', () {
+      expect(activitySeatsLabel(_activity(startAt: _day, maxParticipants: 10, participantCount: 1)),
+          'เหลือ 9 / 10');
+      expect(activitySeatsLabel(_activity(startAt: _day, maxParticipants: 15, participantCount: 15)),
+          'เต็มแล้ว 15 / 15');
+      expect(activitySeatsLeft(_activity(startAt: _day, maxParticipants: 15, participantCount: 16)), 0,
+          reason: 'ข้อมูลเก่าที่รับเกินความจุต้องไม่ขึ้นที่นั่งติดลบ');
+    });
+  });
+
+  group('สีชิปตาม role', () {
+    final approved = _activity(startAt: _day, approvalStatus: 'approved');
+    final pending = _activity(startAt: _day, approvalStatus: 'pending');
+
+    test('นิสิต: ฟ้า = ยังไม่สมัคร · เขียว = สมัครแล้ว', () {
+      expect(calendarChipPalette(approved, isStudent: true), StatusPalette.info);
+      expect(calendarChipPalette(approved, isStudent: true, registered: true), StatusPalette.approved);
+    });
+
+    test('staff/admin: เขียว = อนุมัติ · เหลือง = รออนุมัติ · เทา = ซ่อนอยู่', () {
+      expect(calendarChipPalette(approved, isStudent: false), StatusPalette.approved);
+      expect(calendarChipPalette(pending, isStudent: false), StatusPalette.pending);
+      expect(
+        calendarChipPalette(_activity(startAt: _day, approvalStatus: 'approved', isHidden: true),
+            isStudent: false),
+        StatusPalette.neutral,
+      );
+    });
+  });
+
+  group('ช่องวันแสดงชื่อกิจกรรมจริง', () {
+    testWidgets('ชิปชื่อกิจกรรมอยู่ในช่องวัน · เกิน 2 อันรวมเป็น "+N เพิ่ม"', (tester) async {
+      _loginAs('admin');
+      await _pump(tester, [
+        _activity(id: 1, name: 'อบรมปฐมพยาบาล', startAt: _at(9, 0)),
+        _activity(id: 2, name: 'ค่ายอาสา', startAt: _at(13, 0)),
+        _activity(id: 3, name: 'สัมมนาวิชาการ', startAt: _at(15, 0)),
+      ]);
+
+      expect(_inCell(_day, find.text('อบรมปฐมพยาบาล')), findsOneWidget);
+      expect(_inCell(_day, find.text('ค่ายอาสา')), findsOneWidget);
+      expect(_inCell(_day, find.text('สัมมนาวิชาการ')), findsNothing,
+          reason: 'อันที่ 3 ต้องรวมอยู่ใน "+1 เพิ่ม"');
+      expect(_inCell(_day, find.text('+1 เพิ่ม')), findsOneWidget);
+    });
+
+    testWidgets('ช่องวันจอกว้างสูงอย่างน้อย 96px', (tester) async {
+      _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 0))]);
+      expect(tester.getSize(_cell(_day)).height, greaterThanOrEqualTo(kCalendarCellMinHeight));
+    });
+  });
+
+  group('กดวัน → แผงขวาแสดงรายการของวันนั้น', () {
+    testWidgets('แอดมินเห็นชื่อ/เวลา/สถานที่/สถานะ/ที่นั่ง ของกิจกรรมในวันที่กด', (tester) async {
+      _loginAs('admin');
+      await _pump(tester, [
+        _activity(id: 1, name: 'อบรมปฐมพยาบาล', startAt: _at(9, 30), participantCount: 2),
         _activity(
           id: 2,
           name: 'ค่ายอาสาพัฒนาชนบท',
@@ -153,112 +273,160 @@ void main() {
           location: 'หอประชุมใหญ่',
           approvalStatus: 'approved',
         ),
-        _activity(
-          id: 3,
-          name: 'กิจกรรมวันอื่น',
-          startAt: DateTime(_day.year, _day.month, 20, 9, 0),
-        ),
-      ]));
-      await tester.pumpAndSettle();
+        _activity(id: 3, name: 'กิจกรรมวันอื่น', startAt: _at(9, 0, on: DateTime(_day.year, _day.month, 20))),
+      ]);
 
-      final calendar = tester.widget<TableCalendar<Activity>>(
-        find.byType(TableCalendar<Activity>),
-      );
-      expect(calendar.eventLoader!(_day).length, 2,
-          reason: 'ตัวโหลดเหตุการณ์ของปฏิทินต้องเห็นกิจกรรมของวันนั้น');
+      await _tapDay(tester, _day);
 
-      // กดวันจริงในปฏิทิน
-      await tester.tap(find.text('${_day.day}'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('อบรมปฐมพยาบาล'), findsOneWidget);
-      expect(find.text('ค่ายอาสาพัฒนาชนบท'), findsOneWidget);
-      expect(find.textContaining('09:30 น.'), findsOneWidget);
-      expect(find.textContaining('ห้องประชุม ชั้น 3'), findsOneWidget);
-      expect(find.textContaining('หอประชุมใหญ่'), findsOneWidget);
-      // สถานะอนุมัติของทั้งสองรายการ
-      expect(find.widgetWithText(StatusChip, 'รออนุมัติ'), findsOneWidget);
-      expect(find.widgetWithText(StatusChip, 'อนุมัติแล้ว'), findsOneWidget);
-      // กิจกรรมของวันอื่นต้องไม่หลุดมาปน
-      expect(find.text('กิจกรรมวันอื่น'), findsNothing);
+      expect(_inPanel(find.text(thaiFullDateLabel(_day))), findsOneWidget);
+      expect(_inPanel(find.text('มี 2 กิจกรรม')), findsOneWidget);
+      expect(_inPanel(find.text('อบรมปฐมพยาบาล')), findsOneWidget);
+      expect(_inPanel(find.text('ค่ายอาสาพัฒนาชนบท')), findsOneWidget);
+      expect(_inPanel(find.textContaining('09:30–15:30 น.')), findsOneWidget);
+      expect(_inPanel(find.textContaining('ห้องประชุม ชั้น 3')), findsOneWidget);
+      expect(_inPanel(find.textContaining('หอประชุมใหญ่')), findsOneWidget);
+      expect(_inPanel(find.widgetWithText(StatusChip, 'รออนุมัติ')), findsOneWidget);
+      expect(_inPanel(find.widgetWithText(StatusChip, 'อนุมัติแล้ว')), findsOneWidget);
+      expect(_inPanel(find.textContaining('เหลือ 118 / 120')), findsOneWidget);
+      expect(_inPanel(find.text('กิจกรรมวันอื่น')), findsNothing,
+          reason: 'กิจกรรมของวันอื่นต้องไม่หลุดมาปนในแผง');
     });
 
-    testWidgets('วันที่มีกิจกรรมขึ้นจำนวน ไม่ใช่จุดเปล่า ๆ', (tester) async {
-      _wideScreen(tester);
+    testWidgets('แอดมินมีปุ่ม "ผู้เข้าร่วม" และ "แก้ไข" ในการ์ด', (tester) async {
       _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 30))]);
+      await _tapDay(tester, _day);
 
-      await tester.pumpWidget(_calendar([
-        _activity(id: 1, startAt: _at(9, 0)),
-        _activity(id: 2, startAt: _at(13, 0)),
-        _activity(id: 3, startAt: _at(15, 0)),
-      ]));
-      await tester.pumpAndSettle();
-
-      final calendar = tester.widget<TableCalendar<Activity>>(
-        find.byType(TableCalendar<Activity>),
-      );
-      expect(calendar.calendarBuilders.markerBuilder, isNotNull,
-          reason: 'ต้องมีตัววาดเครื่องหมายของตัวเอง ไม่ใช่จุดเริ่มต้นของไลบรารี');
-      expect(calendar.eventLoader!(_day).length, 3);
+      expect(_inPanel(find.widgetWithText(OutlinedButton, 'ผู้เข้าร่วม')), findsOneWidget);
+      expect(_inPanel(find.widgetWithText(OutlinedButton, 'แก้ไข')), findsOneWidget);
+      expect(_inPanel(find.text('สมัครเข้าร่วม')), findsNothing);
     });
 
-    testWidgets('แอดมินมีทางเข้าไปดู/แก้กิจกรรมจากปฏิทิน', (tester) async {
-      _wideScreen(tester);
-      _loginAs('admin');
-
-      await tester.pumpWidget(_calendar([_activity(id: 1, startAt: _at(9, 30))]));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('${_day.day}'));
-      await tester.pumpAndSettle();
-
-      expect(find.byTooltip('ดูผู้เข้าร่วม'), findsOneWidget);
-      expect(find.byTooltip('แก้ไขกิจกรรม'), findsOneWidget);
-    });
-
-    testWidgets('นิสิตไม่มีปุ่มแก้ไขในปฏิทิน', (tester) async {
-      _wideScreen(tester);
+    testWidgets('นิสิตไม่มีปุ่มจัดการ · กิจกรรมที่ยังเปิดรับมีปุ่ม "สมัครเข้าร่วม"', (tester) async {
       _loginAs('student');
+      await _pump(tester, [
+        _activity(id: 1, name: 'เปิดรับอยู่', startAt: _at(9, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+      ]);
 
-      await tester.pumpWidget(_calendar([_activity(id: 1, startAt: _at(9, 30))]));
+      await tester.tap(find.byTooltip('เดือนถัดไป'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('${_day.day}'));
-      await tester.pumpAndSettle();
+      await _tapDay(tester, _nextMonthDay);
 
-      expect(find.byTooltip('แก้ไขกิจกรรม'), findsNothing);
-      expect(find.byTooltip('ดูผู้เข้าร่วม'), findsNothing);
+      expect(_inPanel(find.text('เปิดรับอยู่')), findsOneWidget);
+      expect(_inPanel(find.text('สมัครเข้าร่วม')), findsOneWidget);
+      expect(_inPanel(find.text('ผู้เข้าร่วม')), findsNothing);
+      expect(_inPanel(find.text('แก้ไข')), findsNothing);
     });
 
-    testWidgets('วันที่ไม่มีกิจกรรมขึ้นข้อความว่างพร้อมวันที่ พ.ศ.', (tester) async {
-      _wideScreen(tester);
+    testWidgets('นิสิต: กิจกรรมเต็มปุ่มถูกปิด · ที่สมัครแล้วขึ้น "สมัครแล้ว" ไม่มีปุ่มสมัครซ้ำ',
+        (tester) async {
+      _loginAs('student');
+      await _pump(
+        tester,
+        [
+          _activity(
+            id: 1,
+            name: 'เต็มแล้วนะ',
+            startAt: _at(9, 0, on: _nextMonthDay),
+            approvalStatus: 'approved',
+            maxParticipants: 15,
+            participantCount: 15,
+          ),
+          _activity(id: 2, name: 'สมัครไว้แล้ว', startAt: _at(13, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+        ],
+        participations: [Participation(id: 9, studentId: 1, activityId: 2)],
+      );
+      await tester.tap(find.byTooltip('เดือนถัดไป'));
+      await tester.pumpAndSettle();
+      await _tapDay(tester, _nextMonthDay);
+
+      final fullButton = tester.widget<ButtonStyleButton>(
+        find.ancestor(of: _inPanel(find.text('เต็มแล้ว')), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)),
+      );
+      expect(fullButton.onPressed, isNull, reason: 'กิจกรรมเต็มต้องกดสมัครไม่ได้');
+      expect(_inPanel(find.textContaining('เต็มแล้ว 15 / 15')), findsOneWidget);
+
+      final registeredCard = find.byKey(const ValueKey('calendar-activity-2'));
+      expect(find.descendant(of: registeredCard, matching: find.widgetWithText(StatusChip, 'สมัครแล้ว')),
+          findsOneWidget);
+      expect(find.descendant(of: registeredCard, matching: find.text('สมัครเข้าร่วม')), findsNothing);
+    });
+
+    testWidgets('วันที่ไม่มีกิจกรรมขึ้น "ไม่มีกิจกรรมในวันนี้" พร้อมวันที่ พ.ศ.', (tester) async {
       _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 30))]);
 
-      await tester.pumpWidget(_calendar([_activity(id: 1, startAt: _at(9, 30))]));
-      await tester.pumpAndSettle();
+      await _tapDay(tester, DateTime(_day.year, _day.month, 16));
 
-      // วันที่ 16 อยู่กลางเดือนเหมือนกัน แต่ไม่มีกิจกรรม
-      await tester.tap(find.text('16'));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('ไม่มีกิจกรรมวันที่ 16'), findsOneWidget);
-      expect(find.textContaining('$_thaiYear'), findsWidgets, reason: 'ปีต้องเป็น พ.ศ.');
+      expect(_inPanel(find.text('ไม่มีกิจกรรมในวันนี้')), findsOneWidget);
+      expect(_inPanel(find.textContaining('$_thaiYear')), findsWidgets, reason: 'ปีต้องเป็น พ.ศ.');
+      expect(_inPanel(find.textContaining('${_day.year}')), findsNothing,
+          reason: 'ไม่ควรมีปี ค.ศ. หลงเหลือ');
     });
   });
 
-  group('วันเวลาในรายการเป็น พ.ศ.', () {
-    testWidgets('การ์ดบอกวันที่แบบไทย ไม่ใช่ ISO', (tester) async {
-      _wideScreen(tester);
+  group('หัวปฏิทิน', () {
+    testWidgets('เลื่อนเดือนด้วย ‹ › แล้วกด "วันนี้" กลับมาเดือนปัจจุบัน', (tester) async {
       _loginAs('admin');
+      await _pump(tester, const []);
+      final now = DateTime.now();
+      final title = find.byKey(const ValueKey('calendar-month-title'));
 
-      await tester.pumpWidget(_calendar([_activity(id: 1, startAt: _at(9, 30))]));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('${_day.day}'));
-      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(title).data, thaiMonthTitle(now));
 
-      // ปีในการ์ดต้องเป็น พ.ศ. และต้องไม่มีรูปแบบ ISO หลงเหลือ
-      expect(find.textContaining('${_day.day} '), findsWidgets);
-      expect(find.textContaining('$_thaiYear'), findsWidgets);
-      expect(find.textContaining('${_day.year}-'), findsNothing,
-          reason: 'ไม่ควรมีวันที่แบบ ISO (ค.ศ.) เหลืออยู่');
+      await tester.tap(find.byTooltip('เดือนถัดไป'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(title).data, thaiMonthTitle(DateTime(now.year, now.month + 1)));
+
+      await tester.tap(find.byTooltip('เดือนก่อนหน้า'));
+      await tester.tap(find.byTooltip('เดือนก่อนหน้า'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(title).data, thaiMonthTitle(DateTime(now.year, now.month - 1)));
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'วันนี้'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(title).data, thaiMonthTitle(now));
+      expect(_inPanel(find.text(thaiFullDateLabel(now))), findsOneWidget);
+    });
+  });
+
+  group('layout', () {
+    testWidgets('จอกว้าง: แผงวันอยู่ขวาของปฏิทิน กว้าง 348px', (tester) async {
+      _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 0))]);
+
+      final calendar = tester.getRect(find.byKey(const ValueKey('calendar-month')));
+      final panel = tester.getRect(_panel);
+      expect(panel.left, greaterThan(calendar.right));
+      expect(panel.width, moreOrLessEquals(kCalendarDayPanelWidth, epsilon: 1));
+    });
+
+    testWidgets('จอ 360px: ซ้อนคอลัมน์เดียว ไม่ล้น แม้ชื่อกิจกรรมยาวหลายอัน', (tester) async {
+      _loginAs('student');
+      await _pump(
+        tester,
+        [
+          for (var i = 0; i < 5; i++)
+            _activity(
+              id: i + 1,
+              name: 'กิจกรรมชื่อยาวมากเพื่อทดสอบการตัดข้อความไม่ให้ล้นช่องวันลำดับที่ $i',
+              startAt: _at(8 + i, 0),
+              approvalStatus: 'approved',
+            ),
+        ],
+        size: const Size(360, 740),
+      );
+      expect(tester.takeException(), isNull);
+
+      await _tapDay(tester, _day);
+      expect(tester.takeException(), isNull);
+
+      final calendar = tester.getRect(find.byKey(const ValueKey('calendar-month')));
+      final panel = tester.getRect(_panel);
+      expect(panel.top, greaterThanOrEqualTo(calendar.bottom), reason: 'แผงวันต้องอยู่ใต้ปฏิทิน');
+      expect(_inCell(_day, find.textContaining('กิจกรรมชื่อยาว')), findsNothing,
+          reason: 'ช่องแคบใช้แถบสีแทนชิปชื่อ');
+      expect(_inCell(_day, find.text('+2')), findsOneWidget);
     });
   });
 }
