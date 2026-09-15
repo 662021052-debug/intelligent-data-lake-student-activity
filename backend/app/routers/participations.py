@@ -32,6 +32,12 @@ from app.models import (
     UserRole,
 )
 from app.checkin import checkin_window, normalize_token
+from app.email import EmailSender, get_email_sender
+from app.notifications import (
+    RegistrationConfirmation,
+    registration_counts_as_reminder,
+    send_registration_confirmation,
+)
 from app.timeutil import now_th_naive
 from app.ocr import OcrEngine, get_ocr
 from app.models import EvidenceKind
@@ -296,8 +302,10 @@ def _ensure_student_and_activity_exist(session: Session, student_id: int, activi
 @router.post("/register", response_model=ParticipationRead, status_code=201)
 def register_self(
     payload: ParticipationRegister,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    sender: EmailSender = Depends(get_email_sender),
 ):
     if current_user.role != UserRole.student:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -333,15 +341,40 @@ def register_self(
     if participant_count >= activity.max_participants:
         raise HTTPException(status_code=400, detail="กิจกรรมนี้เต็มแล้ว")
 
+    # อีเมลยืนยันการสมัคร — เฉพาะนิสิตที่มีอีเมลและเปิดสวิตช์ไว้ (ไม่มีอีเมลก็สมัครได้ตามปกติ ไม่ error)
+    student = session.get(Student, current_user.student_id)
+    email = (student.email or "").strip() if student else ""
+    send_confirmation = settings.notify_registration_email_enabled and bool(email)
+    # กิจกรรมจัดภายในวันพรุ่งนี้ (เวลาไทย) → อีเมลนี้นับเป็นการเตือนแล้ว ตั้ง reminder_sent_at ในธุรกรรมเดียว
+    # กับการสมัคร ตัวเตือน 1 วันจึงข้ามแถวนี้ (ไม่ได้ส่งอีเมลยืนยัน = ไม่มีฉบับไหนเตือนแทน — ไม่ตั้ง)
+    covers_reminder = send_confirmation and registration_counts_as_reminder(activity.start_at)
+    confirmation = (
+        RegistrationConfirmation(
+            to=email,
+            student_name=student.full_name,
+            activity_name=activity.name,
+            start_at=activity.start_at,
+            location=activity.location,
+            hours=activity.hours,
+            counts_as_reminder=covers_reminder,
+        )
+        if send_confirmation
+        else None
+    )
+
     participation = Participation(
         student_id=current_user.student_id,
         activity_id=payload.activity_id,
         evidence_status=EvidenceStatus.pending,
         hours_earned=0,
+        reminder_sent_at=datetime.utcnow() if covers_reminder else None,
     )
     session.add(participation)
     session.commit()
     session.refresh(participation)
+    if confirmation is not None:
+        # ส่งหลังตอบ response — SMTP ช้า/ล่มต้องไม่บล็อกหรือทำให้การสมัครล้ม (ตัวส่งกลืน exception + log)
+        background_tasks.add_task(send_registration_confirmation, sender, confirmation)
     return _read_with_evidence(session, participation)
 
 

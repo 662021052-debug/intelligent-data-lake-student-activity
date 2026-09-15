@@ -66,6 +66,15 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-${SMTP_PASS:-}}
       SMTP_FROM: ${SMTP_FROM:-no-reply@tsu.ac.th}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      # ---- งานแจ้งเตือนตั้งเวลา — ไม่ส่งตรงนี้ ค่าใน .env จะไม่เข้าคอนเทนเนอร์ (เปิด scheduler จาก .env ไม่ได้) ----
+      # scheduler ปิดเป็นค่าเริ่มต้น เปิดแล้วส่งอีเมลจริงถึงทุกนิสิตที่มีอีเมล
+      NOTIFY_SCHEDULER_ENABLED: ${NOTIFY_SCHEDULER_ENABLED:-false}
+      NOTIFY_REMINDER_ENABLED: ${NOTIFY_REMINDER_ENABLED:-true}
+      NOTIFY_AT_RISK_ENABLED: ${NOTIFY_AT_RISK_ENABLED:-false}
+      NOTIFY_AT_RISK_HOUR: ${NOTIFY_AT_RISK_HOUR:-8}
+      NOTIFY_ACTIVITY_REMINDER_HOUR: ${NOTIFY_ACTIVITY_REMINDER_HOUR:-18}
+      NOTIFY_AT_RISK_THRESHOLD: ${NOTIFY_AT_RISK_THRESHOLD:-50}
+      NOTIFY_REGISTRATION_EMAIL_ENABLED: ${NOTIFY_REGISTRATION_EMAIL_ENABLED:-true}
     depends_on:
       db:
         condition: service_healthy

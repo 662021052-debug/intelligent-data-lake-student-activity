@@ -7,6 +7,9 @@
 เครื่อง dev ไม่ควรมี thread ตั้งเวลาโผล่มาเอง และงานนี้ส่งอีเมลถึงนิสิตจริง
 ควรเป็นการตัดสินใจเปิดของผู้ดูแล ไม่ใช่ผลข้างเคียงของการอัปเดตโค้ด
 
+เปิด scheduler แล้ว แต่ละงานยังมีสวิตช์ของตัวเอง — ``NOTIFY_REMINDER_ENABLED`` (ค่าเริ่ม true)
+และ ``NOTIFY_AT_RISK_ENABLED`` (ค่าเริ่ม false) เปิดเพื่อเตือนกิจกรรมจึงไม่พาอีเมลกลุ่มเสี่ยงออกไปด้วย
+
 **ข้อควรรู้ตอน deploy:** scheduler อยู่ในโปรเซสของ uvicorn ถ้ารันหลาย worker
 งานรายวันจะถูกยิงซ้ำตามจำนวน worker — เปิดใช้เมื่อรัน worker เดียว หรือย้ายไป
 เป็น cron ภายนอกที่เรียก ``POST /notifications/at-risk`` และ
@@ -28,6 +31,9 @@ from app.notifications import send_activity_reminders, send_at_risk_notification
 logger = logging.getLogger(__name__)
 
 _scheduler = None  # BackgroundScheduler เมื่อเปิดใช้งานแล้ว
+
+AT_RISK_JOB_ID = "at_risk_daily"
+REMINDER_JOB_ID = "activity_reminder_daily"
 
 
 def run_at_risk_job() -> None:
@@ -70,10 +76,17 @@ def run_activity_reminder_job() -> None:
 
 
 def start_notification_scheduler() -> Optional[object]:
-    """เริ่ม scheduler ถ้าเปิดใช้งานไว้ — คืน None เมื่อปิดอยู่หรือ import ไม่ได้"""
+    """เริ่ม scheduler ถ้าเปิดใช้งานไว้ — คืน None เมื่อปิดอยู่ ไม่มีงานที่เปิด หรือ import ไม่ได้"""
     global _scheduler
     if not settings.notify_scheduler_enabled:
         logger.info("ปิดงานตั้งเวลาแจ้งเตือนอยู่ (NOTIFY_SCHEDULER_ENABLED=false)")
+        return None
+    if not (settings.notify_at_risk_enabled or settings.notify_reminder_enabled):
+        # ไม่มีงานให้รัน ไม่ต้องมี thread ค้างไว้เปล่า ๆ
+        logger.warning(
+            "เปิด NOTIFY_SCHEDULER_ENABLED แต่ปิดทุกงาน (NOTIFY_REMINDER_ENABLED / NOTIFY_AT_RISK_ENABLED) "
+            "— ไม่เริ่ม scheduler"
+        )
         return None
     if _scheduler is not None:
         return _scheduler
@@ -81,36 +94,40 @@ def start_notification_scheduler() -> Optional[object]:
     from apscheduler.schedulers.background import BackgroundScheduler  # lazy
 
     scheduler = BackgroundScheduler(timezone="Asia/Bangkok")
-    scheduler.add_job(
-        run_at_risk_job,
-        trigger="cron",
-        hour=settings.notify_at_risk_hour,
-        minute=0,
-        id="at_risk_daily",
-        # ถ้าเครื่องหลับ/รีสตาร์ตจนพลาดรอบ ให้ข้ามไปรอบถัดไป ดีกว่ายิงอีเมลย้อนหลัง
-        # พร้อมกันหลายรอบตอนเปิดเครื่องมา
-        misfire_grace_time=3600,
-        coalesce=True,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        run_activity_reminder_job,
-        trigger="cron",
-        hour=settings.notify_activity_reminder_hour,
-        minute=0,
-        id="activity_reminder_daily",
-        # พลาดรอบแล้วข้ามไปเลย — ยิงย้อนหลังตอนเปิดเครื่องมาอาจเป็นคนละวันกับที่
-        # ตั้งใจ แล้วนิสิตจะได้อีเมลว่า "พรุ่งนี้มีกิจกรรม" ทั้งที่งานจบไปแล้ว
-        misfire_grace_time=3600,
-        coalesce=True,
-        replace_existing=True,
-    )
+    if settings.notify_at_risk_enabled:
+        scheduler.add_job(
+            run_at_risk_job,
+            trigger="cron",
+            hour=settings.notify_at_risk_hour,
+            minute=0,
+            id=AT_RISK_JOB_ID,
+            # ถ้าเครื่องหลับ/รีสตาร์ตจนพลาดรอบ ให้ข้ามไปรอบถัดไป ดีกว่ายิงอีเมลย้อนหลัง
+            # พร้อมกันหลายรอบตอนเปิดเครื่องมา
+            misfire_grace_time=3600,
+            coalesce=True,
+            replace_existing=True,
+        )
+    if settings.notify_reminder_enabled:
+        scheduler.add_job(
+            run_activity_reminder_job,
+            trigger="cron",
+            hour=settings.notify_activity_reminder_hour,
+            minute=0,
+            id=REMINDER_JOB_ID,
+            # พลาดรอบแล้วข้ามไปเลย — ยิงย้อนหลังตอนเปิดเครื่องมาอาจเป็นคนละวันกับที่
+            # ตั้งใจ แล้วนิสิตจะได้อีเมลว่า "พรุ่งนี้มีกิจกรรม" ทั้งที่งานจบไปแล้ว
+            misfire_grace_time=3600,
+            coalesce=True,
+            replace_existing=True,
+        )
     scheduler.start()
     _scheduler = scheduler
-    logger.info(
-        "เริ่มงานตั้งเวลารายวัน: กลุ่มเสี่ยง %s:00 น. · เตือนกิจกรรมพรุ่งนี้ %s:00 น.",
-        settings.notify_at_risk_hour,
-        settings.notify_activity_reminder_hour,
+    # WARNING ไม่ใช่ INFO: logger ของแอปไม่ขึ้นใน log ของ uvicorn ที่ระดับ INFO — การเปิดส่งอีเมลจริง
+    # ต้องมองเห็นได้จาก docker compose logs
+    logger.warning(
+        "เริ่มงานตั้งเวลารายวัน (ส่งอีเมลจริง): กลุ่มเสี่ยง %s · เตือนกิจกรรมพรุ่งนี้ %s",
+        f"{settings.notify_at_risk_hour}:00 น." if settings.notify_at_risk_enabled else "ปิด",
+        f"{settings.notify_activity_reminder_hour}:00 น." if settings.notify_reminder_enabled else "ปิด",
     )
     return scheduler
 

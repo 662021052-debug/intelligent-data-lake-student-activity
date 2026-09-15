@@ -9,6 +9,8 @@
    ส่งถึงนิสิตที่ยังไม่ได้สมัครกิจกรรมนั้น
 3. **เตือนกิจกรรมพรุ่งนี้** — กิจกรรมที่จะจัด "วันพรุ่งนี้" ตามเวลาไทย ส่งถึงนิสิตที่
    สมัครไว้แล้ว (ตรงข้ามกับข้อ 2 ซึ่งส่งถึงคนที่ *ยัง* ไม่ได้สมัคร)
+4. **ยืนยันการสมัคร** — ส่งทันทีหลังนิสิตสมัครสำเร็จ ถ้ากิจกรรมจัดภายในวันพรุ่งนี้ (เวลาไทย)
+   ฉบับนี้นับเป็นการเตือนแล้ว (``participation.reminder_sent_at``) ข้อ 3 จึงไม่ส่งซ้ำ
 
 ฟังก์ชันเลือกผู้รับกับฟังก์ชันเขียนเนื้อความแยกจากกัน และตัวเขียนเนื้อความเป็น
 pure function ทั้งหมด — เทสต์ข้อความภาษาไทยได้โดยไม่ต้องมีฐานข้อมูล
@@ -24,7 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
-from typing import Iterable, Optional, TypeVar
+from typing import Callable, Iterable, Optional, TypeVar
 
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -242,6 +244,82 @@ def build_activity_reminder_message(
     )
 
 
+@dataclass(frozen=True)
+class RegistrationConfirmation:
+    """ข้อมูลของอีเมลยืนยันการสมัคร — snapshot ค่าล้วนตอนสมัคร
+
+    อีเมลส่งเป็นงานเบื้องหลังหลังตอบ response ไปแล้ว ตอนนั้น session ของ request ปิดไปแล้ว
+    จึงเก็บเป็นค่าธรรมดา ไม่อ้างอ็อบเจกต์ ORM ที่หลุดจาก session
+    """
+
+    to: str
+    student_name: str
+    activity_name: str
+    start_at: datetime  # เวลาไทยแบบไม่มีโซน (เหมือน activity.start_at)
+    location: str
+    hours: float
+    # True = กิจกรรมเริ่มภายในช่วงที่อีเมลนี้นับเป็นการเตือนแล้ว ตัวเตือน 1 วันจะไม่ส่งซ้ำ
+    counts_as_reminder: bool = False
+
+
+def registration_counts_as_reminder(start_at: datetime, registered_at: Optional[datetime] = None) -> bool:
+    """กิจกรรมจัดภายใน "วันพรุ่งนี้" ตามเวลาไทย (นับจากวันที่สมัคร) → อีเมลยืนยันนับเป็นการเตือนแล้ว
+
+    ฐานเดียวกับตัวเตือน (:func:`tomorrow_window`): รอบเย็นของวันนี้เตือนกิจกรรมของพรุ่งนี้ — สมัครกิจกรรม
+    ของวันนี้/พรุ่งนี้แล้วอีเมลเตือนจะตามมาภายในไม่กี่ชั่วโมง (หรือรอบนั้นผ่านไปแล้ว) จึงไม่ต้องส่งอีกฉบับ
+    กิจกรรมตั้งแต่มะรืนขึ้นไปยังได้อีเมลเตือนตามปกติ
+
+    เดิมใช้ "≤ 24 ชม." ซึ่งพลาดกรณีสมัคร 10:00 น. สำหรับกิจกรรมพรุ่งนี้ 15:00 น. (เหลือ 29 ชม.) — ได้อีเมล
+    ยืนยันแล้วอีเมลเตือนตามมาตอน 18:00 น. ห่างกันไม่กี่ชั่วโมง
+
+    ทั้งสองค่าเป็นเวลาไทยแบบไม่มีโซน (``activity.start_at`` / :func:`now_th_naive`) — เทียบกับ
+    ``utcnow()`` จะคลาด 7 ชม. (เคยเป็นบั๊กของการสมัครมาแล้ว)
+    """
+    _, end_of_tomorrow = tomorrow_window(registered_at)
+    return start_at < end_of_tomorrow
+
+
+def build_registration_confirmation_message(confirmation: RegistrationConfirmation) -> EmailMessage:
+    """อีเมลยืนยันการสมัคร — รายละเอียดที่ต้องใช้วันงานครบในฉบับเดียว เหมือนอีเมลเตือน"""
+    lines = [
+        f"เรียน {confirmation.student_name}",
+        "",
+        f"ระบบได้รับการสมัครเข้าร่วมกิจกรรม “{confirmation.activity_name}” ของคุณเรียบร้อยแล้ว",
+        "",
+        f"  วันเวลา       : {format_thai_datetime(confirmation.start_at)}",
+        f"  สถานที่       : {confirmation.location}",
+        f"  ชั่วโมงที่จะได้รับ : {format_hours(confirmation.hours)} ชั่วโมง",
+        "",
+    ]
+    if confirmation.counts_as_reminder:
+        lines += [
+            "กิจกรรมนี้จัดภายในวันพรุ่งนี้ ระบบจะไม่ส่งอีเมลเตือนซ้ำอีก",
+            "",
+        ]
+    lines += [
+        "กรุณาไปถึงก่อนเวลาเริ่มและเช็กอินหน้างาน ชั่วโมงจะนับเมื่อส่งหลักฐานและเจ้าหน้าที่อนุมัติ",
+        "",
+        "ดูรายละเอียดกิจกรรมได้ที่",
+        f"  {app_url()}",
+        _SIGNATURE,
+    ]
+    return EmailMessage(
+        to=confirmation.to,
+        subject=f"[ยืนยันการสมัคร] {confirmation.activity_name}",
+        body="\n".join(lines),
+    )
+
+
+def send_registration_confirmation(sender: EmailSender, confirmation: RegistrationConfirmation) -> bool:
+    """งานเบื้องหลังหลังสมัคร — ส่งล้มแค่ log ไม่โยนต่อ (การสมัครสำเร็จไปแล้ว ต้องไม่กลายเป็น error)"""
+    try:
+        sender.send(build_registration_confirmation_message(confirmation))
+    except Exception:  # noqa: BLE001 — SMTP ล่มต้องไม่ย้อนมาทำให้การสมัครดูเหมือนล้ม
+        logger.warning("ส่งอีเมลยืนยันการสมัครถึง %s ไม่สำเร็จ", confirmation.to, exc_info=True)
+        return False
+    return True
+
+
 def tomorrow_window(now: Optional[datetime] = None) -> tuple[datetime, datetime]:
     """ช่วงเวลา ``[เริ่ม, สิ้นสุด)`` ของ "วันพรุ่งนี้" ตามเวลาไทย
 
@@ -373,6 +451,8 @@ def collect_tomorrow_activities(
 
     ผู้รับคือคนที่ยังมีแถว ``participation`` อยู่ — การยกเลิกสมัครลบแถวทิ้ง ไม่ได้ทำเป็น
     สถานะ จึงไม่ต้องกรองสถานะเพิ่ม แถวที่ยังอยู่ = ยังไม่ยกเลิก
+
+    ข้ามแถวที่ ``reminder_sent_at`` ตั้งแล้ว — เตือนไปแล้ว หรืออีเมลยืนยันการสมัครทำหน้าที่เตือนแทน
     """
     start, end = tomorrow_window(now)
     activities = session.exec(
@@ -391,7 +471,10 @@ def collect_tomorrow_activities(
         students = session.exec(
             select(Student)
             .join(Participation, Participation.student_id == Student.id)
-            .where(Participation.activity_id == activity.id)
+            .where(
+                Participation.activity_id == activity.id,
+                Participation.reminder_sent_at.is_(None),
+            )
             .order_by(Student.student_id)
         ).all()
         if students:
@@ -426,17 +509,20 @@ def _send_all(
     messages: list[EmailMessage],
     subject: str,
     skipped_students: Optional[list[str]] = None,
+    on_sent: Optional[Callable[[int], None]] = None,
 ) -> NotificationReport:
     """ส่งทีละฉบับ ฉบับที่ล้มไม่ทำให้ที่เหลือหยุดส่ง
 
     การแจ้งเตือนเป็นงาน "ยิงแล้วลืม" — ถ้าปล่อย exception ออกไป ผู้ดูแลจะเห็นแค่
     500 โดยไม่รู้ว่าส่งไปแล้วกี่คน จึงเก็บผลรายฉบับแล้วสรุปกลับไปแทน
+
+    ``on_sent(i)`` ถูกเรียกหลังฉบับที่ ``i`` ส่งสำเร็จ — ให้ผู้เรียกบันทึกว่าส่งถึงแล้วเฉพาะฉบับที่ออกจริง
     """
     report = NotificationReport(subject=subject)
     if skipped_students:
         report.skipped = len(skipped_students)
         report.skipped_students = list(skipped_students)
-    for message in messages:
+    for index, message in enumerate(messages):
         try:
             sender.send(message)
         except Exception:  # noqa: BLE001 — ปลายทางล่มหนึ่งราย ไม่ควรล้มทั้งรอบ
@@ -446,7 +532,35 @@ def _send_all(
         else:
             report.sent += 1
             report.recipients.append(message.to)
+            if on_sent is not None:
+                on_sent(index)
     return report
+
+
+def _mark_reminded(session: Session, targets: list[tuple[int, int]]) -> None:
+    """ตั้ง ``reminder_sent_at`` ให้ (activity_id, student_id) ที่ส่งเตือนสำเร็จ — รอบถัดไปจะไม่ส่งซ้ำ
+
+    อีเมลออกไปแล้วเรียกคืนไม่ได้ บันทึกล้มจึงแค่ log (รายงานผลส่งยังต้องกลับถึงผู้ดูแล)
+    """
+    if not targets:
+        return
+    stamp = datetime.utcnow()
+    try:
+        for activity_id, student_id in targets:
+            participation = session.exec(
+                select(Participation).where(
+                    Participation.activity_id == activity_id,
+                    Participation.student_id == student_id,
+                    Participation.reminder_sent_at.is_(None),
+                )
+            ).first()
+            if participation is not None:
+                participation.reminder_sent_at = stamp
+                session.add(participation)
+        session.commit()
+    except Exception:  # noqa: BLE001
+        session.rollback()
+        logger.exception("บันทึก reminder_sent_at ไม่สำเร็จ — รอบถัดไปอาจเตือนซ้ำ %d ราย", len(targets))
 
 
 def send_at_risk_notifications(
@@ -485,25 +599,29 @@ def send_activity_reminders(
 
     ``dry_run=True`` = ไม่ส่งอะไรเลย แต่คืนรายชื่อผู้รับที่จะได้รับ ให้ผู้ดูแลตรวจก่อน
     กดส่งจริง (อีเมลถึงนิสิตเป็นสิ่งที่เรียกคืนไม่ได้)
+
+    ฉบับที่ส่งสำเร็จจะตั้ง ``reminder_sent_at`` — สั่งซ้ำ (รอบอัตโนมัติ + กดส่งเอง) ไม่เตือนคนเดิมซ้ำ
     """
     subject = "เตือนกิจกรรมที่จะจัดพรุ่งนี้"
     pairs = collect_tomorrow_activities(session, now=now)
 
     messages: list[EmailMessage] = []
+    targets: list[tuple[int, int]] = []  # (activity_id, student_id) ตามลำดับ messages
     skipped: list[str] = []
     for activity, students in pairs:
         sendable, without_email = partition_by_email(
             students, email_of=lambda s: s.email, code_of=lambda s: s.student_id
         )
         skipped.extend(without_email)
-        messages.extend(
-            build_activity_reminder_message(
-                student_name=s.full_name,
-                student_email=s.email,
-                activity=activity,
+        for s in sendable:
+            messages.append(
+                build_activity_reminder_message(
+                    student_name=s.full_name,
+                    student_email=s.email,
+                    activity=activity,
+                )
             )
-            for s in sendable
-        )
+            targets.append((activity.id, s.id))
 
     if skipped:
         logger.info("ข้ามผู้รับอีเมลเตือนกิจกรรมที่ยังไม่ระบุอีเมล %d ราย", len(skipped))
@@ -517,7 +635,16 @@ def send_activity_reminders(
             skipped_students=skipped,
             dry_run=True,
         )
-    return _send_all(sender, messages, subject=subject, skipped_students=skipped)
+    sent_targets: list[tuple[int, int]] = []
+    report = _send_all(
+        sender,
+        messages,
+        subject=subject,
+        skipped_students=skipped,
+        on_sent=lambda index: sent_targets.append(targets[index]),
+    )
+    _mark_reminded(session, sent_targets)
+    return report
 
 
 def send_activity_announcement(

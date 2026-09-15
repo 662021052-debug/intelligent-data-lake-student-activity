@@ -420,6 +420,9 @@ class ParticipationBase(SQLModel):
 
 class Participation(ParticipationBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    # เวลาที่ถือว่า "เตือนกิจกรรมแล้ว" (UTC ที่ระบบเขียนเอง) — ตั้งตอนตัวเตือน 1 วันส่งสำเร็จ หรือตอน
+    # อีเมลยืนยันการสมัครทำหน้าที่เตือนแทน (กิจกรรมจัดภายในวันพรุ่งนี้ตามเวลาไทย) · ตัวเตือนส่งเฉพาะแถวที่ยังเป็น NULL
+    reminder_sent_at: Optional[datetime] = None
 
     student: Optional[Student] = Relationship(back_populates="participations")
     activity: Optional[Activity] = Relationship(back_populates="participations")
