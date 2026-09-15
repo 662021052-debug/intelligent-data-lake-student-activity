@@ -21,6 +21,7 @@ from app.config import settings
 from app.models import (
     Activity,
     DuplicateReason,
+    EvidenceKind,
     EvidenceStatus,
     MatchKind,
     OcrDecision,
@@ -354,6 +355,19 @@ def compute_match_score(
     return round(_W_NAME * name + _W_ACTIVITY * act + _W_DATE * date, 4)
 
 
+# ประเภทหลักฐานที่ OCR อนุมัติอัตโนมัติได้ — OCR ยืนยันได้แค่ "งานจัดจริง" จากข้อความบนใบ
+# ยืนยันตัวตนคนในภาพถ่ายหน้าแบนเนอร์ไม่ได้ ภาพถ่าย/อื่น ๆ จึงต้องให้คนตรวจเสมอ
+AUTO_APPROVABLE_KINDS = (EvidenceKind.certificate,)
+
+
+def auto_approval_allowed(raw_file: RawFile) -> bool:
+    """ไฟล์นี้เข้าเส้นทาง auto_approved ได้ไหม (ตามประเภทหลักฐาน)
+
+    null = ไฟล์ก่อนมีฟิลด์ประเภท → ถือเป็น certificate คงพฤติกรรมเดิม
+    """
+    return (raw_file.evidence_kind or EvidenceKind.certificate) in AUTO_APPROVABLE_KINDS
+
+
 def process_participation_evidence(
     session: Session,
     ocr: OcrEngine,
@@ -365,7 +379,9 @@ def process_participation_evidence(
     Decision (human-in-the-loop):
     * duplicate file (same checksum as an earlier, still-active proof — see
       :func:`find_duplicate`) -> ``flagged``, never auto-approved.
-    * OCR confident AND text matches the student/activity well AND the
+    * evidence is a certificate (see :func:`auto_approval_allowed` — photos/other
+      always go to review, even with a perfect score) AND OCR confident AND text
+      matches the student/activity well AND the
       participation is still pending -> ``auto_approved``: the system approves it
       and derives hours from ``activity.hours`` (same rules A2/A3 as a human
       reviewer — approval still requires evidence, hours never come from OCR).
@@ -391,6 +407,8 @@ def process_participation_evidence(
         decision = OcrDecision.flagged
     elif (
         participation is not None
+        # ภาพถ่าย/อื่น ๆ ไม่มีทางถึง auto_approved — OCR/dedup ยังรันครบ แต่คำตัดสินเป็น needs_review
+        and auto_approval_allowed(raw_file)
         and participation.evidence_status == EvidenceStatus.pending
         and confidence >= settings.ocr_auto_confidence
         and match_score >= settings.ocr_auto_match

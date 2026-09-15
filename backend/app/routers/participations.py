@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, func, select
 
@@ -33,6 +33,7 @@ from app.models import (
 from app.checkin import checkin_window, normalize_token
 from app.timeutil import now_th_naive
 from app.ocr import OcrEngine, get_ocr
+from app.models import EvidenceKind
 from app.phash import compute_phash
 from app.schemas import Page, ParticipationCheckin, ParticipationRegister
 from app.storage import ObjectStorage, get_storage
@@ -490,6 +491,12 @@ def upload_evidence(
     participation_id: int,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    # ไม่ส่งมา = certificate (พฤติกรรมเดิมของหน้าอัปโหลดที่ยังไม่มีตัวเลือก) · ค่าอื่นนอก 3 ค่า → 422
+    evidence_kind: EvidenceKind = Form(
+        EvidenceKind.certificate,
+        description="certificate = เกียรติบัตร/ใบรับรอง · photo = ภาพถ่ายกิจกรรม · other = อื่น ๆ "
+        "(photo/other ไม่อนุมัติอัตโนมัติ ต้องให้เจ้าหน้าที่ตรวจ)",
+    ),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
     storage: ObjectStorage = Depends(get_storage),
@@ -553,6 +560,7 @@ def upload_evidence(
         size_bytes=size_bytes,
         checksum=checksum,
         phash=phash,
+        evidence_kind=evidence_kind,
         source_system="student_upload",
         uploaded_by=current_user.id,
         ingested_at=now,
@@ -581,6 +589,8 @@ def _ocr_read(
     role student ไม่ได้บริบทนี้ เพราะเป็นข้อมูลของนิสิตคนอื่น
     """
     read = SilverEvidenceOcrRead(**row.model_dump())
+    raw_file = session.get(RawFile, row.raw_file_id)
+    read.evidence_kind = (raw_file.evidence_kind if raw_file else None) or EvidenceKind.certificate
     original_id = row.duplicate_of_participation_id
     if original_id is None or current_user.role == UserRole.student:
         return read
