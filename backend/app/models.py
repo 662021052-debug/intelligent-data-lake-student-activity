@@ -41,6 +41,14 @@ class OcrDecision(str, Enum):
     flagged = "flagged"               # duplicate file -> never auto-approved
 
 
+class DuplicateReason(str, Enum):
+    """ไฟล์หลักฐานซ้ำแบบไหน (ตัดสินจาก checksum เดียวกันเป๊ะ)"""
+
+    cross_student = "cross_student"            # ซ้ำกับใบของนิสิตคนอื่น — น่าสงสัยสุด
+    same_student_reuse = "same_student_reuse"  # คนเดิมใช้ไฟล์เดิมกับการเข้าร่วมอื่น
+    matches_rejected = "matches_rejected"      # ไม่ซ้ำใบที่ใช้งาน แต่ตรงกับใบที่เคยถูกปฏิเสธ
+
+
 class ProgramType(str, Enum):
     """กลุ่มหลักสูตรของนิสิต — เกณฑ์ชั่วโมงต่างกัน (ปกติ 60 ชม. / ต่อเนื่อง 30 ชม.)."""
 
@@ -475,7 +483,7 @@ class SilverEvidenceOcr(SQLModel, table=True):
     ocr_confidence: float = 0.0          # average OCR confidence (0-1)
     match_score: float = 0.0             # how well the text matches the student/activity (0-1)
     decision: OcrDecision = OcrDecision.needs_review
-    is_duplicate: bool = False           # checksum already used by an approved participation
+    is_duplicate: bool = False           # checksum ซ้ำกับใบที่มาก่อนและยังใช้งาน (silver.find_duplicate)
     processed_at: datetime = Field(default_factory=datetime.utcnow)
 
 

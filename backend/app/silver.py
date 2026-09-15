@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Optional
@@ -19,6 +20,7 @@ from app.approval import apply_approval
 from app.config import settings
 from app.models import (
     Activity,
+    DuplicateReason,
     EvidenceStatus,
     OcrDecision,
     Participation,
@@ -41,22 +43,69 @@ def _latest_raw_file(session: Session, participation_id: int) -> Optional[RawFil
     ).first()
 
 
-def _is_duplicate(session: Session, raw_file: RawFile) -> bool:
-    """True if this exact file (same checksum) already belongs to an APPROVED
-    participation — a sign the student reused someone else's / an earlier proof."""
-    others = session.exec(
-        select(RawFile).where(
+@dataclass(frozen=True)
+class DuplicateMatch:
+    """ไฟล์นี้ซ้ำกับใบไหน และซ้ำแบบไหน"""
+
+    reason: DuplicateReason
+    participation_id: int
+    raw_file_id: int
+
+
+def find_duplicate(session: Session, raw_file: RawFile) -> Optional[DuplicateMatch]:
+    """หาใบที่ "มาก่อน" ซึ่งใช้ไฟล์เดียวกันเป๊ะ (checksum เดียวกัน) กับ [raw_file]
+
+    * เทียบกับทุกใบในระบบ ไม่ใช่แค่ใบที่อนุมัติแล้ว — สองคนส่งไฟล์เดียวกันตอนยัง
+      pending ทั้งคู่ก็ต้องจับได้
+    * นับเฉพาะไฟล์ที่ id น้อยกว่า: ใบหลังโดน flag ใบแรกไม่โดน และสั่งอ่านใหม่กี่รอบ
+      ผลก็เหมือนเดิม (deterministic)
+    * ไฟล์เดิมในการเข้าร่วมเดียวกัน = อัปโหลดซ้ำของตัวเอง ไม่ใช่ทุจริต → ไม่นับ
+
+    ลำดับเหตุผลเมื่อตรงหลายใบ (แต่ละเหตุผลชี้ใบแรกสุดของกลุ่มนั้น):
+
+    1. ``cross_student`` — ใบที่ยังใช้งาน (pending/approved) ของนิสิตคนอื่น
+    2. ``same_student_reuse`` — ใบที่ยังใช้งานของคนเดิมคนละการเข้าร่วม (กิจกรรมอื่น
+       หรือลงกิจกรรมเดิมซ้ำ ซึ่งจะได้ชั่วโมงสองรอบ)
+    3. ``matches_rejected`` — ไม่ซ้ำใบที่ใช้งานเลย แต่ตรงกับใบที่เคยถูกปฏิเสธ
+       (ของใครก็ได้) — ใบที่ใช้งานมาก่อนเพราะเสี่ยงได้ชั่วโมงซ้ำจริง ส่วนใบที่ถูกปฏิเสธ
+       เป็นแค่สัญญาณว่าไฟล์นี้เคยไม่ผ่าน
+
+    ค้นด้วย ``raw_file.checksum`` ที่มี index — query เดียว ไม่ scan ทั้งตาราง
+    """
+    if raw_file.participation_id is None:
+        return None
+    current = session.get(Participation, raw_file.participation_id)
+    if current is None:
+        return None
+
+    earlier = session.exec(
+        select(RawFile.id, Participation.id, Participation.student_id, Participation.evidence_status)
+        .join(Participation, Participation.id == RawFile.participation_id)
+        .where(
             RawFile.checksum == raw_file.checksum,
-            RawFile.id != raw_file.id,
+            RawFile.id < raw_file.id,
+            RawFile.participation_id != current.id,
         )
+        .order_by(RawFile.id)
     ).all()
-    for other in others:
-        if other.participation_id is None:
-            continue
-        participation = session.get(Participation, other.participation_id)
-        if participation and participation.evidence_status == EvidenceStatus.approved:
-            return True
-    return False
+
+    reuse: Optional[DuplicateMatch] = None
+    rejected: Optional[DuplicateMatch] = None
+    for other_raw_file_id, other_participation_id, other_student_id, status in earlier:
+        if status == EvidenceStatus.rejected:
+            if rejected is None:
+                rejected = DuplicateMatch(
+                    DuplicateReason.matches_rejected, other_participation_id, other_raw_file_id
+                )
+        elif other_student_id != current.student_id:
+            return DuplicateMatch(
+                DuplicateReason.cross_student, other_participation_id, other_raw_file_id
+            )
+        elif reuse is None:
+            reuse = DuplicateMatch(
+                DuplicateReason.same_student_reuse, other_participation_id, other_raw_file_id
+            )
+    return reuse or rejected
 
 
 def _extract_text(ocr: OcrEngine, storage: ObjectStorage, raw_file: RawFile) -> tuple[str, float]:
@@ -182,8 +231,8 @@ def process_participation_evidence(
     """Run the Silver OCR step for a participation's latest evidence file.
 
     Decision (human-in-the-loop):
-    * duplicate file (checksum of an already-approved proof) -> ``flagged``,
-      never auto-approved.
+    * duplicate file (same checksum as an earlier, still-active proof — see
+      :func:`find_duplicate`) -> ``flagged``, never auto-approved.
     * OCR confident AND text matches the student/activity well AND the
       participation is still pending -> ``auto_approved``: the system approves it
       and derives hours from ``activity.hours`` (same rules A2/A3 as a human
@@ -202,11 +251,12 @@ def process_participation_evidence(
     activity = session.get(Activity, participation.activity_id) if participation else None
 
     text, confidence = _extract_text(ocr, storage, raw_file)
-    duplicate = _is_duplicate(session, raw_file)
+    # เหตุผล/ใบต้นทางยังไม่ถูกบันทึกลงตาราง — คอลัมน์มาในเฟส 1.2
+    duplicate = find_duplicate(session, raw_file)
     match_score = compute_match_score(text, student, activity)
 
     decision = OcrDecision.needs_review
-    if duplicate:
+    if duplicate is not None:
         decision = OcrDecision.flagged
     elif (
         participation is not None
@@ -231,7 +281,7 @@ def process_participation_evidence(
         ocr_confidence=confidence,
         match_score=match_score,
         decision=decision,
-        is_duplicate=duplicate,
+        is_duplicate=duplicate is not None,
     )
     session.add(row)
     session.commit()
