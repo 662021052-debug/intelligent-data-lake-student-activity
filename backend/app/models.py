@@ -458,8 +458,8 @@ class RawFile(SQLModel, table=True):
     content_type: str
     size_bytes: int
     checksum: str = Field(index=True)  # SHA-256 hex digest (integrity + duplicate detection)
-    # perceptual hash (hex 64 ตัว = 256 บิต, app.phash) — ภาพเท่านั้น
-    # null = PDF / ถอดภาพไม่ได้ / ไฟล์ที่เข้ามาก่อนเฟส 3A (ไม่ backfill)
+    # perceptual hash (hex 64 ตัว = 256 บิต, app.phash) — ภาพ หรือหน้าแรกของ PDF (เฟส 3B)
+    # null = ถอดภาพ/PDF ไม่ได้ / ไฟล์ที่เข้ามาก่อนเฟส 3A (ไม่ backfill)
     phash: Optional[str] = Field(default=None, max_length=64)
     source_system: str  # e.g. "student_upload", "staff_import"
     uploaded_by: Optional[int] = Field(default=None, foreign_key="user.id")

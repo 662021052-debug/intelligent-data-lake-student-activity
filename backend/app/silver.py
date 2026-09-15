@@ -30,6 +30,7 @@ from app.models import (
     Student,
 )
 from app.ocr import OcrEngine
+from app.pdf import extract_text_layer, render_pdf_pages
 from app.phash import phash_distance
 from app.storage import ObjectStorage
 
@@ -203,15 +204,52 @@ def text_vetoes_near_match(mine: Optional[str], theirs: Optional[str]) -> bool:
 
 
 def _extract_text(ocr: OcrEngine, storage: ObjectStorage, raw_file: RawFile) -> tuple[str, float]:
-    """Run OCR on an image Bronze file. Non-images (e.g. PDF) are not OCR'd here
-    and fall through to needs_review."""
-    if not raw_file.content_type.startswith("image/"):
+    """OCR ไฟล์หลักฐานใน Bronze — ภาพส่งเข้า OCR ตรง ๆ · PDF render ทีละหน้าเป็นภาพก่อน (เฟส 3B)
+
+    อ่านไฟล์ / render / OCR ล้มตรงไหนก็คืน ("", 0.0) → needs_review ไม่ให้ pipeline ล้ม
+    """
+    is_image = raw_file.content_type.startswith("image/")
+    is_pdf = raw_file.content_type == "application/pdf"
+    if not (is_image or is_pdf):
         return ("", 0.0)
     try:
-        image_bytes = storage.get_object_bytes(raw_file.bucket, raw_file.object_key)
-        return ocr.run_ocr(image_bytes)
-    except Exception:  # noqa: BLE001 - OCR/storage failure must not crash the pipeline
+        data = storage.get_object_bytes(raw_file.bucket, raw_file.object_key)
+        return ocr.run_ocr(data) if is_image else _ocr_pdf(ocr, data)
+    except Exception:  # noqa: BLE001 - OCR/storage/PDF failure must not crash the pipeline
         return ("", 0.0)
+
+
+def _ocr_pdf(ocr: OcrEngine, data: bytes) -> tuple[str, float]:
+    """ข้อความของ PDF ไม่เกิน ``settings.ocr_pdf_max_pages`` หน้าแรก — text layer ก่อน แล้วค่อย OCR
+
+    1. มี text layer พอ (≥ ``ocr_pdf_text_layer_min_chars``) → ใช้ข้อความนั้นตรง ๆ ไม่เรียก OCR
+       ความมั่นใจ = ``ocr_pdf_text_layer_confidence`` (อ่านจากไฟล์ ไม่ได้เดา)
+    2. ไม่มี/น้อยเกิน (PDF สแกนภาพล้วน หรือมีแค่เลขหน้า) → render ทีละหน้าเป็นภาพแล้ว OCR
+       ข้อความรวมทุกหน้าที่อ่านได้ · ความมั่นใจเฉลี่ยเฉพาะหน้าที่อ่านได้ — หน้าว่าง (เช่นหน้าหลัง
+       ของเกียรติบัตร) ไม่ดึงค่าเฉลี่ยลงเป็น 0
+
+    pHash ของ PDF ยังมาจากภาพ render หน้าแรกเสมอ (app.phash) ไม่ขึ้นกับเส้นทางนี้
+    """
+    layer = extract_text_layer(data, max_pages=settings.ocr_pdf_max_pages)
+    if len(_norm(layer)) >= settings.ocr_pdf_text_layer_min_chars:
+        return (layer, settings.ocr_pdf_text_layer_confidence)
+
+    pages = render_pdf_pages(
+        data,
+        max_pages=settings.ocr_pdf_max_pages,
+        dpi=settings.ocr_pdf_dpi,
+        max_side_px=settings.ocr_pdf_max_side_px,
+    )
+    texts: list[str] = []
+    confidences: list[float] = []
+    for page_png in pages:
+        text, confidence = ocr.run_ocr(page_png)
+        if text.strip():
+            texts.append(text)
+            confidences.append(confidence)
+    if not texts:
+        return ("", 0.0)
+    return ("\n".join(texts), sum(confidences) / len(confidences))
 
 
 # --------------------------- match scoring ---------------------------

@@ -125,7 +125,7 @@ def test_exif_orientation_is_applied_before_hashing():
     assert phash_distance(upright, without_exif) > NEAR_BITS, "ไม่มี EXIF = ภาพเอียงจริง ต้องห่าง"
 
 
-def test_pdf_and_undecodable_files_have_no_phash():
+def test_broken_pdf_and_undecodable_image_have_no_phash():
     assert compute_phash(b"%PDF-1.4 fake", "application/pdf") is None
     assert compute_phash(b"\x89PNG\r\n\x1a\nnot-really-a-png", "image/png") is None
 
@@ -228,12 +228,32 @@ def test_uploaded_image_stores_its_phash(client, session, tokens):
     assert raw.phash == compute_phash(data, "image/jpeg")
 
 
-def test_uploaded_pdf_has_no_phash_yet(client, session, tokens):
+def test_uploaded_broken_pdf_has_no_phash(client, session, tokens):
     p = _participation(session)
 
     assert _upload(client, tokens, p.id, "proof.pdf", b"%PDF-1.4\n%fake", "application/pdf").status_code == 201
 
     assert _latest_raw(session, p.id).phash is None
+
+
+def test_uploaded_pdf_stores_first_page_phash(client, session, tokens):
+    """เฟส 3B: PDF ใช้หน้าแรกคำนวณ pHash — ใบเดียวกันที่ส่งแบบ PDF กับ JPG จะเทียบกันได้"""
+    import pymupdf
+
+    image = _certificate_like()
+    doc = pymupdf.open()
+    page = doc.new_page(width=image.width, height=image.height)
+    page.insert_image(page.rect, stream=_encode(image))
+    pdf = doc.tobytes()
+    doc.close()
+    p = _participation(session)
+
+    assert _upload(client, tokens, p.id, "proof.pdf", pdf, "application/pdf").status_code == 201
+
+    raw = _latest_raw(session, p.id)
+    assert raw.phash is not None and len(raw.phash) == 64
+    jpeg = compute_phash(_encode(image, "JPEG", quality=80), "image/jpeg")
+    assert phash_distance(raw.phash, jpeg) <= NEAR_BITS
 
 
 def test_undecodable_image_still_uploads_without_phash(client, session, tokens):

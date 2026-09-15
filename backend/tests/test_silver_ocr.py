@@ -142,7 +142,11 @@ def test_process_without_evidence_returns_none(session, storage):
     assert ocr.calls == 0
 
 
-def test_non_image_skips_ocr(session, storage):
+def test_broken_pdf_needs_review_without_crashing(session, storage):
+    """PDF ถูก OCR แล้วตั้งแต่เฟส 3B (ดู test_pdf_ocr.py) — แต่ไฟล์ที่ render ไม่ได้ต้องไม่ทำให้ล้ม
+
+    ไฟล์ทดสอบนี้เป็นไบต์ PNG ปลอมที่ติดป้าย application/pdf → render ไม่ได้ → ไม่เรียก OCR
+    """
     student = _student(session)
     activity = _activity(session)
     p = _participation(session, student.id, activity.id)
@@ -151,7 +155,7 @@ def test_non_image_skips_ocr(session, storage):
     ocr = FakeOcr(fail=True)  # would raise if called
     row = process_participation_evidence(session, ocr, storage, p.id)
 
-    assert ocr.calls == 0                    # PDFs are not OCR'd in this phase
+    assert ocr.calls == 0
     assert row.extracted_text == ""
     assert row.ocr_confidence == 0.0
     assert row.decision == OcrDecision.needs_review

@@ -19,6 +19,10 @@ easyocr==1.7.1
 # perceptual hash ของไฟล์หลักฐานภาพ (OCR เฟส 3A) — จับภาพเกือบเหมือนที่ checksum จับไม่ได้
 # ดึง numpy/scipy/PyWavelets มาด้วย (numpy/scipy มีจาก easyocr อยู่แล้ว) · import แบบ lazy
 imagehash==4.3.2
+# render หน้า PDF เป็นภาพก่อน OCR (OCR เฟส 3B) · import แบบ lazy · wheel มีไลบรารี MuPDF ในตัว
+# หมายเหตุ license: PyMuPDF เป็น AGPL-3.0 (หรือ license เชิงพาณิชย์) — ถ้าจะแจกจ่ายระบบแบบปิด
+# ให้พิจารณา pypdfium2 (Apache-2.0/BSD) แทน · 1.26.5 = รุ่นล่าสุดที่ลงได้ทั้ง Python 3.9 และ 3.11
+pymupdf==1.26.5
 # Chatbot LLM (Gemini). Imported lazily so tests/local runs without it still work
 # when LLM_BACKEND=stub. The pgvector Postgres path uses raw SQL (no extra dep).
 google-generativeai==0.7.2
