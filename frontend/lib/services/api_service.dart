@@ -177,24 +177,45 @@ class ApiService {
     return fromJsonT(data);
   }
 
-  /// Uploads an evidence file (image/PDF) for a participation via multipart/form-data.
-  static Future<Participation> uploadEvidence(
-    int participationId,
-    Uint8List bytes,
-    String filename,
-    String contentType,
-  ) async {
-    final request =
-        http.MultipartRequest('POST', _uri('/participations/$participationId/evidence'));
-    if (authService.token != null) {
-      request.headers['Authorization'] = 'Bearer ${authService.token}';
-    }
+  /// คำขออัปโหลดหลักฐาน (multipart/form-data) — แยกออกมาให้ทดสอบได้ว่าส่ง `evidence_kind` ไปเสมอ
+  ///
+  /// `evidence_kind` บังคับ (backend ตอบ 422 ถ้าไม่ส่ง) — นิสิตเลือกเองในฟอร์ม ไม่มีค่าเริ่ม
+  static http.MultipartRequest buildEvidenceUploadRequest(
+    Uri uri, {
+    required Uint8List bytes,
+    required String filename,
+    required String contentType,
+    required String evidenceKind,
+    String? token,
+  }) {
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.fields['evidence_kind'] = evidenceKind;
     request.files.add(http.MultipartFile.fromBytes(
       'file',
       bytes,
       filename: filename,
       contentType: MediaType.parse(contentType),
     ));
+    return request;
+  }
+
+  /// Uploads an evidence file (image/PDF) for a participation via multipart/form-data.
+  static Future<Participation> uploadEvidence(
+    int participationId,
+    Uint8List bytes,
+    String filename,
+    String contentType, {
+    required String evidenceKind,
+  }) async {
+    final request = buildEvidenceUploadRequest(
+      _uri('/participations/$participationId/evidence'),
+      bytes: bytes,
+      filename: filename,
+      contentType: contentType,
+      evidenceKind: evidenceKind,
+      token: authService.token,
+    );
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
     final data = _decode(response) as Map<String, dynamic>;

@@ -206,6 +206,7 @@ def _upload(client, tokens, participation_id, filename, data, content_type):
     return client.post(
         f"/participations/{participation_id}/evidence",
         files={"file": (filename, data, content_type)},
+        data={"evidence_kind": "certificate"},
         headers=_admin_headers(tokens),
     )
 

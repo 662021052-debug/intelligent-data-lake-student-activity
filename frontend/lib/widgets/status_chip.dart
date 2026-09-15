@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../utils/evidence_kind.dart';
 import '../utils/evidence_status.dart';
 import '../utils/ocr_status.dart';
 
@@ -39,6 +40,18 @@ class StatusChip extends StatelessWidget {
         'rejected' => Icons.cancel_outlined,
         _ => Icons.schedule,
       },
+      dense: dense,
+    );
+  }
+
+  /// ประเภทหลักฐาน (certificate / photo / other)
+  ///
+  /// ภาพถ่าย/อื่น ๆ เป็นสีเหลือง = ต้องตรวจด้วยตา (ไม่อนุมัติอัตโนมัติ) · เกียรติบัตรสีกลาง ๆ
+  /// [compact] ใช้ป้ายสั้นสำหรับตาราง/แถวแคบ
+  factory StatusChip.evidenceKind(String? kind, {bool dense = false, bool compact = false}) {
+    return StatusChip(
+      label: compact ? evidenceKindShortLabel(kind) : evidenceKindReviewLabel(kind),
+      palette: evidenceKindNeedsHumanReview(kind) ? StatusPalette.pending : StatusPalette.neutral,
       dense: dense,
     );
   }

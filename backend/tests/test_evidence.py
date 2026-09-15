@@ -102,7 +102,7 @@ def test_student_uploads_own_evidence_lands_in_storage(client, session, storage)
 
     response = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
     assert response.status_code == 201, response.text
@@ -127,7 +127,7 @@ def test_student_cannot_upload_for_other_participation(client, session):
 
     response = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=other_headers,
     )
     assert response.status_code == 403
@@ -140,7 +140,7 @@ def test_upload_unsupported_type_rejected(client, session):
 
     response = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("malware.exe", b"MZ\x90\x00", "application/x-msdownload")},
+        data={"evidence_kind": "certificate"}, files={"file": ("malware.exe", b"MZ\x90\x00", "application/x-msdownload")},
         headers=headers,
     )
     assert response.status_code == 400
@@ -154,7 +154,7 @@ def test_upload_over_10mb_rejected(client, session):
     too_big = b"0" * (10 * 1024 * 1024 + 1)
     response = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("huge.png", too_big, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("huge.png", too_big, "image/png")},
         headers=headers,
     )
     assert response.status_code == 413
@@ -170,7 +170,7 @@ def test_reupload_allowed_after_rejected(client, session):
 
     response = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("fix.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("fix.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
     assert response.status_code == 201
@@ -184,7 +184,7 @@ def test_evidence_content_type_matches_pdf(client, session):
     participation = _make_participation(session, student.id, activity.id)
     client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("doc.pdf", b"%PDF-1.4 hello", "application/pdf")},
+        data={"evidence_kind": "certificate"}, files={"file": ("doc.pdf", b"%PDF-1.4 hello", "application/pdf")},
         headers=headers,
     )
 
@@ -203,7 +203,7 @@ def test_upload_after_approved_rejected(client, session):
 
     response = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
     assert response.status_code == 400
@@ -216,13 +216,13 @@ def test_reupload_allowed_while_pending(client, session):
 
     first = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("first.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("first.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
     assert first.status_code == 201
     second = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("second.pdf", b"%PDF-1.4 second", "application/pdf")},
+        data={"evidence_kind": "certificate"}, files={"file": ("second.pdf", b"%PDF-1.4 second", "application/pdf")},
         headers=headers,
     )
     assert second.status_code == 201
@@ -242,7 +242,7 @@ def test_staff_owner_can_view_evidence(client, session):
     participation = _make_participation(session, student.id, activity.id)
     client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=student_headers,
     )
 
@@ -258,7 +258,7 @@ def test_other_staff_cannot_view_evidence(client, session, tokens):
     participation = _make_participation(session, student.id, activity.id)
     client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=student_headers,
     )
 
@@ -287,7 +287,7 @@ def test_raw_file_metadata_is_complete_and_correct(client, session):
 
     client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("หลักฐาน.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("หลักฐาน.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
 
@@ -312,7 +312,7 @@ def test_raw_file_object_key_follows_bronze_path_layout(client, session):
 
     client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
 

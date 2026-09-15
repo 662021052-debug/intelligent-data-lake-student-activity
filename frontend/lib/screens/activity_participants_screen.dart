@@ -7,6 +7,7 @@ import '../models/student.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../utils/api_error.dart';
+import '../utils/evidence_kind.dart';
 import '../utils/format.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
@@ -243,6 +244,12 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
                                           matchKind: p.ocrMatchKind,
                                           dense: true,
                                         ),
+                                        if (evidenceKindNeedsHumanReview(p.evidenceKind))
+                                          StatusChip.evidenceKind(
+                                            p.evidenceKind,
+                                            dense: true,
+                                            compact: true,
+                                          ),
                                         Text(
                                           'ตรง ${asPercent(p.ocrMatchScore ?? 0)} • มั่นใจ ${asPercent(p.ocrConfidence ?? 0)}',
                                           style: Theme.of(context).textTheme.bodySmall,

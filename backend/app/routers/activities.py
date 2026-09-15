@@ -29,6 +29,7 @@ from app.database import get_session
 from app.timeutil import TZ_TH, today_th
 from app.routers.participations import (
     _activity_names,
+    _latest_evidence_kind_map,
     _latest_evidence_map,
     _latest_ocr_map,
     _to_read as _participation_to_read,
@@ -502,8 +503,11 @@ def list_activity_participations(
     evidence = _latest_evidence_map(session, [p.id for p in parts])
     names = _activity_names(session, [p.activity_id for p in parts])
     ocr = _latest_ocr_map(session, [p.id for p in parts])
+    kinds = _latest_evidence_kind_map(session, [p.id for p in parts])
     return [
-        _participation_to_read(p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id))
+        _participation_to_read(
+            p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id), evidence_kind=kinds.get(p.id)
+        )
         for p in parts
     ]
 

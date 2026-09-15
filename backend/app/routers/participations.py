@@ -62,6 +62,25 @@ def _latest_evidence_map(session: Session, participation_ids: list[int]) -> dict
     return {pid: uploaded_at for pid, uploaded_at in rows if pid is not None}
 
 
+def _latest_evidence_kind_map(session: Session, participation_ids: list[int]) -> dict[int, "EvidenceKind"]:
+    """Map participation_id -> ประเภทของไฟล์หลักฐานล่าสุด (null = ไฟล์ก่อนมีประเภท ถือเป็น certificate)
+
+    คิวตรวจแสดงป้าย "ภาพถ่าย — ต้องตรวจด้วยตา" ได้โดยไม่ต้องยิงทีละแถว
+    """
+    if not participation_ids:
+        return {}
+    rows = session.exec(
+        select(RawFile.participation_id, RawFile.evidence_kind)
+        .where(RawFile.participation_id.in_(participation_ids))
+        .order_by(RawFile.participation_id, RawFile.id.desc())
+    ).all()
+    kinds: dict[int, EvidenceKind] = {}
+    for pid, kind in rows:
+        if pid is not None and pid not in kinds:
+            kinds[pid] = kind or EvidenceKind.certificate
+    return kinds
+
+
 def _activity_names(session: Session, activity_ids: list[int]) -> dict[int, str]:
     """Map activity_id -> name (so ParticipationRead can show a real name, not #id)."""
     ids = {aid for aid in activity_ids if aid is not None}
@@ -107,10 +126,12 @@ def _to_read(
     activity_name: Optional[str],
     ocr: Optional[SilverEvidenceOcr] = None,
     student: Optional[tuple[str, str]] = None,
+    evidence_kind: Optional[EvidenceKind] = None,
 ) -> ParticipationRead:
     return ParticipationRead(
         **participation.model_dump(),
         activity_name=activity_name,
+        evidence_kind=evidence_kind,
         student_name=student[0] if student else None,
         student_code=student[1] if student else None,
         has_evidence=uploaded_at is not None,
@@ -131,7 +152,8 @@ def _read_with_evidence(session: Session, participation: Participation) -> Parti
     )
     ocr = _latest_ocr_map(session, [participation.id]).get(participation.id)
     student = _student_labels(session, [participation.student_id]).get(participation.student_id)
-    return _to_read(participation, uploaded_at, activity_name, ocr, student)
+    kind = _latest_evidence_kind_map(session, [participation.id]).get(participation.id)
+    return _to_read(participation, uploaded_at, activity_name, ocr, student, evidence_kind=kind)
 
 
 def _get_activity_or_404(session: Session, activity_id: int) -> Activity:
@@ -222,9 +244,11 @@ def list_participations(
     names = _activity_names(session, [p.activity_id for p in items])
     ocr = _latest_ocr_map(session, [p.id for p in items])
     students = _student_labels(session, [p.student_id for p in items])
+    kinds = _latest_evidence_kind_map(session, [p.id for p in items])
     reads = [
         _to_read(
-            p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id), students.get(p.student_id)
+            p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id), students.get(p.student_id),
+            evidence_kind=kinds.get(p.id),
         )
         for p in items
     ]
@@ -491,9 +515,10 @@ def upload_evidence(
     participation_id: int,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    # ไม่ส่งมา = certificate (พฤติกรรมเดิมของหน้าอัปโหลดที่ยังไม่มีตัวเลือก) · ค่าอื่นนอก 3 ค่า → 422
+    # บังคับเลือก (หน้าอัปโหลดมีตัวเลือกแล้ว) — ไม่ส่งมา หรือค่านอก 3 ค่า → 422 ไม่มีค่าเริ่มเงียบ ๆ
+    # ถ้าปล่อย default = certificate ภาพถ่ายที่นิสิตไม่ได้เลือกประเภทจะหลุดเข้าเส้นทาง auto ได้
     evidence_kind: EvidenceKind = Form(
-        EvidenceKind.certificate,
+        ...,
         description="certificate = เกียรติบัตร/ใบรับรอง · photo = ภาพถ่ายกิจกรรม · other = อื่น ๆ "
         "(photo/other ไม่อนุมัติอัตโนมัติ ต้องให้เจ้าหน้าที่ตรวจ)",
     ),

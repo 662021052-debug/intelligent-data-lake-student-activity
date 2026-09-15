@@ -83,7 +83,7 @@ def test_upload_schedules_background_ocr(client, session, storage, tokens, monke
 
     resp = client.post(
         f"/participations/{p.id}/evidence",
-        files={"file": ("proof.png", PNG, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG, "image/png")},
         headers=_admin_headers(tokens),
     )
     assert resp.status_code == 201, resp.text

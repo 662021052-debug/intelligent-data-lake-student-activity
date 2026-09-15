@@ -17,6 +17,8 @@ class Participation {
   final double? ocrConfidence;
   final String? ocrDuplicateReason; // cross_student | same_student_reuse | matches_rejected
   final String? ocrMatchKind; // exact | near
+  // ประเภทของไฟล์หลักฐานล่าสุด: certificate | photo | other (null = ยังไม่ส่งไฟล์)
+  final String? evidenceKind;
 
   Participation({
     this.id,
@@ -36,6 +38,7 @@ class Participation {
     this.ocrConfidence,
     this.ocrDuplicateReason,
     this.ocrMatchKind,
+    this.evidenceKind,
   });
 
   factory Participation.fromJson(Map<String, dynamic> json) => Participation(
@@ -60,6 +63,7 @@ class Participation {
         ocrConfidence: (json['ocr_confidence'] as num?)?.toDouble(),
         ocrDuplicateReason: json['ocr_duplicate_reason'] as String?,
         ocrMatchKind: json['ocr_match_kind'] as String?,
+        evidenceKind: json['evidence_kind'] as String?,
       );
 
   Map<String, dynamic> toJson() => {

@@ -189,6 +189,8 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
                   duplicateReason: ocr.duplicateReason,
                   matchKind: ocr.matchKind,
                 ),
+                // ภาพถ่าย/อื่น ๆ บอกเหตุผลที่ไม่ถูกอนุมัติอัตโนมัติ แม้คะแนน OCR สูง
+                StatusChip.evidenceKind(ocr.evidenceKind),
                 _scorePill('ความตรง', ocr.matchScore),
                 _scorePill('ความมั่นใจ OCR', ocr.ocrConfidence),
               ],

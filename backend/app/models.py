@@ -458,6 +458,8 @@ class ParticipationRead(ParticipationBase):
     ocr_duplicate_reason: Optional[DuplicateReason] = None
     # ซ้ำแบบไฟล์เดียวกันเป๊ะ (exact) หรือภาพคล้ายกันมาก (near) — คิวตรวจแสดงป้ายต่างกัน
     ocr_match_kind: Optional[MatchKind] = None
+    # ประเภทของไฟล์หลักฐานล่าสุด (null = ยังไม่ส่งไฟล์) — คิวตรวจบอกได้ว่าทำไมใบนี้ต้องตรวจด้วยตา
+    evidence_kind: Optional[EvidenceKind] = None
 
 
 # ---------- Raw file (Bronze layer metadata / data lineage) ----------

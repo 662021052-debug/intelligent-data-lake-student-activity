@@ -4,6 +4,7 @@ import '../models/participation.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
+import '../utils/evidence_kind.dart';
 import '../utils/evidence_status.dart';
 import '../utils/format.dart';
 import '../utils/ocr_status.dart';
@@ -218,6 +219,18 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
   }
 
   Widget _ocrCell(Participation p) {
+    final ocr = _ocrStatus(p);
+    // ภาพถ่าย/หลักฐานอื่นไม่ถูกอนุมัติอัตโนมัติ — บอกเหตุผลไว้ข้างผล OCR (เกียรติบัตรไม่ต้องมีป้าย)
+    if (!evidenceKindNeedsHumanReview(p.evidenceKind)) return ocr;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [ocr, StatusChip.evidenceKind(p.evidenceKind, dense: true, compact: true)],
+    );
+  }
+
+  Widget _ocrStatus(Participation p) {
     if (!p.hasOcr || p.ocrDecision == null) {
       return Text('ยังไม่ประมวลผล', style: TextStyle(color: AppColors.muted));
     }

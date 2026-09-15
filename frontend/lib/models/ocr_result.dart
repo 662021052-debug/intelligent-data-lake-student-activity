@@ -20,6 +20,9 @@ class OcrResult {
   /// exact = ไฟล์เดียวกันเป๊ะ (checksum) · near = ภาพคล้ายกันมาก (pHash) · null = ไม่ซ้ำ/ผลรุ่นเก่า
   final String? matchKind;
 
+  /// ประเภทของไฟล์ที่ประมวลผล: certificate | photo | other (backend ส่ง certificate แทน null)
+  final String? evidenceKind;
+
   // บริบทของใบต้นทาง (backend คำนวณตอนอ่าน) — null ถ้าไม่ซ้ำ / ผลรุ่นเก่า / ผู้ใช้เป็นนิสิต
   final String? duplicateOfStudentName;
   final String? duplicateOfStudentCode;
@@ -42,6 +45,7 @@ class OcrResult {
     this.duplicateOfParticipationId,
     this.duplicateReason,
     this.matchKind,
+    this.evidenceKind,
     this.duplicateOfStudentName,
     this.duplicateOfStudentCode,
     this.duplicateOfActivityName,
@@ -62,6 +66,7 @@ class OcrResult {
         duplicateOfParticipationId: json['duplicate_of_participation_id'] as int?,
         duplicateReason: json['duplicate_reason'] as String?,
         matchKind: json['match_kind'] as String?,
+        evidenceKind: json['evidence_kind'] as String?,
         duplicateOfStudentName: json['duplicate_of_student_name'] as String?,
         duplicateOfStudentCode: json['duplicate_of_student_code'] as String?,
         duplicateOfActivityName: json['duplicate_of_activity_name'] as String?,

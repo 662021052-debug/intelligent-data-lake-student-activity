@@ -3,14 +3,20 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../utils/api_error.dart';
 import '../utils/evidence_io.dart';
+import '../utils/evidence_kind.dart';
+import 'evidence_kind_dialog.dart';
 import 'evidence_preview.dart';
 
 const _allowedContentTypes = {'image/jpeg', 'image/png', 'application/pdf'};
 const _maxEvidenceBytes = 10 * 1024 * 1024; // 10 MB
 
-/// Lets the user pick an image/PDF and uploads it as evidence for [participationId].
+/// ถามประเภทหลักฐาน (บังคับเลือก) → เลือกไฟล์ภาพ/PDF → อัปโหลดเป็นหลักฐานของ [participationId]
 /// Returns true when a file was successfully uploaded.
 Future<bool> uploadEvidenceFlow(BuildContext context, int participationId) async {
+  // ถามก่อนเลือกไฟล์ — ปิด dialog = ยกเลิกทั้งหมด ไม่มีค่าเริ่ม (ไม่ให้ภาพถ่ายหลุดเป็นเกียรติบัตรเงียบ ๆ)
+  final kind = await showEvidenceKindDialog(context);
+  if (kind == null || !context.mounted) return false;
+
   final picked = await pickEvidenceFile();
   if (picked == null) return false;
   final (bytes, filename, contentType) = picked;
@@ -33,10 +39,20 @@ Future<bool> uploadEvidenceFlow(BuildContext context, int participationId) async
   }
 
   try {
-    await ApiService.uploadEvidence(participationId, bytes, filename, contentType);
+    await ApiService.uploadEvidence(
+      participationId,
+      bytes,
+      filename,
+      contentType,
+      evidenceKind: kind,
+    );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('อัปโหลดหลักฐานสำเร็จ')),
+        SnackBar(
+          content: Text(evidenceKindNeedsHumanReview(kind)
+              ? 'อัปโหลดหลักฐานสำเร็จ — รอเจ้าหน้าที่ตรวจ'
+              : 'อัปโหลดหลักฐานสำเร็จ'),
+        ),
       );
     }
     return true;

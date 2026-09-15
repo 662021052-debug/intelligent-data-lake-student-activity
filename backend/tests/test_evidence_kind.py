@@ -202,13 +202,18 @@ def test_upload_stores_the_chosen_kind(client, session, tokens, kind):
     assert _latest_raw(session, p.id).evidence_kind == EvidenceKind(kind)
 
 
-def test_upload_without_kind_defaults_to_certificate(client, session, tokens):
-    """หน้าอัปโหลดที่ยังไม่มีตัวเลือก (ก่อนเฟส 2) ต้องใช้งานได้เหมือนเดิม"""
+def test_upload_without_kind_is_rejected(client, session, tokens):
+    """เฟส 2: หน้าอัปโหลดมีตัวเลือกแล้ว — นิสิตต้องเลือกเอง ไม่ปล่อยค่าเริ่ม certificate เงียบ ๆ
+
+    (ถ้าปล่อย default ภาพถ่ายที่ไม่ได้เลือกประเภทจะหลุดเข้าเส้นทาง auto ได้)
+    """
     p = _participation(session)
 
-    assert _upload(client, tokens, p.id).status_code == 201
+    response = _upload(client, tokens, p.id)
 
-    assert _latest_raw(session, p.id).evidence_kind == EvidenceKind.certificate
+    assert response.status_code == 422
+    assert "evidence_kind" in response.text
+    assert _latest_raw(session, p.id) is None, "ไม่ระบุประเภทต้องไม่มีไฟล์ถูกบันทึก"
 
 
 def test_upload_rejects_an_unknown_kind(client, session, tokens):
@@ -218,6 +223,28 @@ def test_upload_rejects_an_unknown_kind(client, session, tokens):
 
     assert response.status_code == 422
     assert _latest_raw(session, p.id) is None, "ค่าผิดต้องไม่มีไฟล์ถูกบันทึก"
+
+
+def test_participation_reads_carry_latest_evidence_kind_for_the_queue(client, session, storage, tokens):
+    """คิวตรวจ (GET /participations) และรายละเอียด บอกประเภทของไฟล์ล่าสุด · legacy null → certificate
+    · ยังไม่ส่งไฟล์ → null"""
+    headers = {"Authorization": f"Bearer {tokens['admin']}"}
+    photo_p = _participation(session, code="86401")
+    _add_raw(session, storage, photo_p.id, kind=EvidenceKind.certificate, checksum="k1" + "0" * 62)
+    _add_raw(session, storage, photo_p.id, kind=EvidenceKind.photo, checksum="k2" + "0" * 62)  # ล่าสุด
+    legacy_p = _participation(session, code="86402", activity_name="อบรมดิจิทัล")
+    _add_raw(session, storage, legacy_p.id, kind=None)
+    empty_p = _participation(session, code="86403", activity_name="กีฬาสัมพันธ์")
+
+    listed = {
+        r["id"]: r["evidence_kind"]
+        for r in client.get("/participations", params={"limit": 50}, headers=headers).json()["items"]
+    }
+    detail = client.get(f"/participations/{photo_p.id}", headers=headers).json()
+
+    assert listed[photo_p.id] == "photo" and detail["evidence_kind"] == "photo"
+    assert listed[legacy_p.id] == "certificate"
+    assert listed[empty_p.id] is None
 
 
 def test_ocr_result_exposes_kind_and_legacy_reads_as_certificate(client, session, storage, tokens):

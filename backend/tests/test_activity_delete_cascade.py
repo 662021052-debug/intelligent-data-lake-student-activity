@@ -94,7 +94,7 @@ def _participation_with_evidence(client, session, storage, username, student_cod
 
     upload = client.post(
         f"/participations/{participation.id}/evidence",
-        files={"file": ("proof.png", PNG_BYTES, "image/png")},
+        data={"evidence_kind": "certificate"}, files={"file": ("proof.png", PNG_BYTES, "image/png")},
         headers=headers,
     )
     assert upload.status_code == 201, upload.text
