@@ -2,7 +2,10 @@ import 'package:activity_tracking_frontend/screens/checkin_scan_screen.dart';
 import 'package:activity_tracking_frontend/screens/chatbot_screen.dart';
 import 'package:activity_tracking_frontend/screens/home_screen.dart';
 import 'package:activity_tracking_frontend/screens/my_hours_screen.dart';
+import 'package:activity_tracking_frontend/screens/activity_calendar_screen.dart';
+import 'package:activity_tracking_frontend/screens/participations_screen.dart';
 import 'package:activity_tracking_frontend/screens/register_activities_screen.dart';
+import 'package:activity_tracking_frontend/screens/student_home_view.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/utils/format.dart';
@@ -22,6 +25,14 @@ void _loginAsStudent() {
   authService.username = '662021052';
   authService.role = 'student';
 }
+
+/// ข้อความในเนื้อหาหน้าแรก (ทางลัด) — ชื่อเดียวกันมีบนแถบเมนูด้วยตั้งแต่เพิ่มเมนูนิสิต
+Finder _inHomeBody(String text) =>
+    find.descendant(of: find.byType(StudentHomeView), matching: find.text(text));
+
+/// ข้อความบนแถบเมนูซ้าย
+Finder _inSidebar(String text) =>
+    find.descendant(of: find.byType(AppSidebar), matching: find.text(text));
 
 void _wideScreen(WidgetTester tester) {
   tester.view.physicalSize = const Size(1280, 900);
@@ -57,7 +68,7 @@ void main() {
       expect(find.widgetWithText(OutlinedButton, 'ลองใหม่'), findsOneWidget);
       // ส่วนที่ไม่ต้องใช้ข้อมูลต้องยังอยู่ ไม่ถูกกลืนไปกับ error ทั้งหน้า
       expect(find.text('ทางลัด'), findsOneWidget);
-      expect(find.text('ปฏิทินกิจกรรม'), findsOneWidget);
+      expect(_inHomeBody('ปฏิทินกิจกรรม'), findsOneWidget);
     });
 
     testWidgets('ทางลัดกดได้ตั้งแต่ยังโหลดข้อมูลไม่เสร็จ', (tester) async {
@@ -66,9 +77,9 @@ void main() {
 
       // ยังไม่ได้ pump รอผลโหลด — ทางลัดต้องอยู่แล้ว
       expect(find.text('ทางลัด'), findsOneWidget);
-      expect(find.text('เช็กอินหน้างาน'), findsOneWidget);
+      expect(_inHomeBody('เช็กอินหน้างาน'), findsOneWidget);
 
-      await tester.tap(find.text('เช็กอินหน้างาน'));
+      await tester.tap(_inHomeBody('เช็กอินหน้างาน'));
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(CheckinScanScreen), findsOneWidget);
@@ -76,6 +87,26 @@ void main() {
   });
 
   group('การนำทางจากแถบเมนู', () {
+    for (final (label, screenType) in const [
+      ('ปฏิทินกิจกรรม', ActivityCalendarScreen),
+      ('เช็กอินหน้างาน', CheckinScanScreen),
+      ('การเข้าร่วมกิจกรรม', ParticipationsScreen),
+    ]) {
+      testWidgets('เมนูนิสิต "$label" บนแถบซ้ายเปิดหน้าได้ และเมนูนั้นเป็นตัวที่เปิดอยู่',
+          (tester) async {
+        _wideScreen(tester);
+        await tester.pumpWidget(_app(const HomeScreen()));
+
+        await tester.tap(_inSidebar(label));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(find.byWidgetPredicate((w) => w.runtimeType == screenType), findsOneWidget);
+        // หน้าปลายทางบอก sidebar ว่าอยู่หน้าไหน — เมนูนั้นต้องไฮไลต์ (ตัวน้ำเงิน)
+        expect(tester.widget<Text>(_inSidebar(label)).style?.color, AppColors.blue);
+      });
+    }
+
     testWidgets('กดเมนูแล้วเปิดหน้านั้น และกลับหน้าแรกได้จากโลโก้', (tester) async {
       _wideScreen(tester);
       await tester.pumpWidget(_app(const HomeScreen()));

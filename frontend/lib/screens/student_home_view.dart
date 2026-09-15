@@ -262,7 +262,8 @@ class _StudentHomeViewState extends State<StudentHomeView> {
   }
 }
 
-/// ทางลัดไปหน้าที่ไม่ได้อยู่บนเมนู sidebar ของนิสิต
+/// ทางลัดหน้าแรก — ทุกอันมีเมนูบน sidebar แล้ว (ยกเว้น "กิจกรรม" ที่เมนูใช้ "สมัครกิจกรรม")
+/// คงไว้เป็นทางเข้าที่สองสำหรับนิสิตที่คุ้นกับการกดจากหน้าแรก
 class _ShortcutSection extends StatelessWidget {
   const _ShortcutSection();
 

@@ -242,3 +242,50 @@ def test_student_cannot_create_update_or_delete_participation(client, session, t
 
     delete_response = client.delete(f"/participations/{participation.id}", headers=headers)
     assert delete_response.status_code == 403
+
+
+def test_student_list_puts_participations_needing_evidence_first(client, session):
+    """หน้าการเข้าร่วมของนิสิต: ใบที่ยังต้องส่งหลักฐาน (pending/rejected) ขึ้นก่อนทุกหน้า
+
+    เรียงที่ backend เพราะแบ่งหน้าที่นี่ — ใบที่อนุมัติแล้วซึ่ง id น้อยกว่าต้องไม่ดันใบที่รอส่งไปหน้าหลัง
+    """
+    ctx = _setup_two_students_linked_user(session, client)  # own_participation (approved) id น้อยสุด
+    own_id = ctx["own_student"].id
+    staff_user = session.exec(select(User).where(User.username == "staff")).first()
+    statuses = [
+        EvidenceStatus.approved, EvidenceStatus.approved, EvidenceStatus.pending,
+        EvidenceStatus.approved, EvidenceStatus.rejected, EvidenceStatus.pending,
+    ]
+    for i, status in enumerate(statuses):
+        activity = _make_activity(session, f"กิจกรรมเรียง {i}", created_by=staff_user.id)
+        _make_participation(session, own_id, activity.id, evidence_status=status)
+    # ใบของนิสิตคนอื่นที่รอส่ง ห้ามโผล่มาในรายการของเรา
+    extra = _make_activity(session, "กิจกรรมคนอื่น", created_by=staff_user.id)
+    _make_participation(session, ctx["other_student"].id, extra.id, evidence_status=EvidenceStatus.pending)
+
+    def page(skip, limit, **params):
+        response = client.get(
+            "/participations", params={"skip": skip, "limit": limit, **params}, headers=ctx["headers"]
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    first = page(0, 3, needs_evidence_first="true")
+    second = page(3, 10, needs_evidence_first="true")
+    ordered = first["items"] + second["items"]
+    assert first["total"] == 7
+    assert all(p["student_id"] == own_id for p in ordered)
+    assert [p["evidence_status"] for p in first["items"]] == ["pending", "rejected", "pending"]
+    assert [p["evidence_status"] for p in second["items"]] == ["approved"] * 4
+    # ภายในกลุ่มยังเรียงตาม id (ลำดับคงที่ แบ่งหน้าไม่ซ้ำไม่หาย)
+    ids = [p["id"] for p in ordered]
+    assert ids[:3] == sorted(ids[:3]) and ids[3:] == sorted(ids[3:]) and len(set(ids)) == 7
+
+    # ไม่ส่งพารามิเตอร์ (staff/admin) → ลำดับเดิมตาม id
+    default = page(0, 10)["items"]
+    assert [p["id"] for p in default] == sorted(p["id"] for p in default)
+    assert default[0]["evidence_status"] == "approved"
+
+    # เรียงก่อนใช้ร่วมกับตัวกรองสถานะได้
+    rejected_only = page(0, 10, needs_evidence_first="true", evidence_status="rejected")
+    assert [p["evidence_status"] for p in rejected_only["items"]] == ["rejected"]

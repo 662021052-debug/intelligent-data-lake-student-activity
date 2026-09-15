@@ -24,6 +24,30 @@ import 'app_shell.dart';
 
 const _evidenceStatuses = ['pending', 'approved', 'rejected'];
 
+/// query ของ `GET /participations` สำหรับหน้านี้
+///
+/// นิสิต: ขอให้รายการที่ยังต้องส่งหลักฐาน (pending/rejected — แถวที่มีปุ่มอัปโหลด) ขึ้นก่อน
+/// ต้องให้ backend เรียงเพราะแบ่งหน้าที่นั่น เรียงในแอปจะได้แค่ภายในหน้าเดียว และไม่ใช้
+/// ตัวกรอง "รอตรวจสอบ" เป็นค่าเริ่ม เพราะจะซ่อนใบที่ถูกปฏิเสธซึ่งต้องอัปโหลดใหม่เหมือนกัน
+Map<String, String> participationListQuery({
+  required bool isStudent,
+  required int skip,
+  required int limit,
+  int? studentId,
+  int? activityId,
+  String? status,
+  String search = '',
+}) =>
+    {
+      'skip': '$skip',
+      'limit': '$limit',
+      if (isStudent) 'needs_evidence_first': 'true',
+      if (studentId != null) 'student_id': '$studentId',
+      if (activityId != null) 'activity_id': '$activityId',
+      'evidence_status': ?status,
+      if (search.isNotEmpty) 'search': search,
+    };
+
 class ParticipationsScreen extends StatefulWidget {
   const ParticipationsScreen({super.key});
 
@@ -80,11 +104,15 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
       _error = null;
     });
     try {
-      final query = <String, String>{'skip': '$_skip', 'limit': '$_limit'};
-      if (_studentFilter != null) query['student_id'] = '$_studentFilter';
-      if (_activityFilter != null) query['activity_id'] = '$_activityFilter';
-      if (_statusFilter != null) query['evidence_status'] = _statusFilter!;
-      if (_search.isNotEmpty) query['search'] = _search;
+      final query = participationListQuery(
+        isStudent: authService.role == 'student',
+        skip: _skip,
+        limit: _limit,
+        studentId: _studentFilter,
+        activityId: _activityFilter,
+        status: _statusFilter,
+        search: _search,
+      );
       final page =
           await ApiService.fetchPage('/participations', Participation.fromJson, query: query);
       // ผลลัพธ์เก่าที่มาช้ากว่าคำค้นหาล่าสุด ต้องไม่ทับของใหม่

@@ -113,9 +113,9 @@ void main() {
       }
     });
 
-    test('staff ยังมีปฏิทินเหมือนเดิม · นิสิตยังไม่มีในเมนู', () {
+    test('staff ยังมีปฏิทินเหมือนเดิม · นิสิตมีในเมนูแล้ว', () {
       expect(navItemsForRole('staff').map((i) => i.id), contains('calendar'));
-      expect(navItemsForRole('student').map((i) => i.id), isNot(contains('calendar')));
+      expect(navItemsForRole('student').map((i) => i.id), contains('calendar'));
     });
 
     testWidgets('sidebar ของแอดมินขึ้นเมนู "ปฏิทินกิจกรรม" จริง', (tester) async {

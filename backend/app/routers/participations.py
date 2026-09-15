@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy import case
 from sqlmodel import Session, func, select
 
 from app import silver
@@ -178,6 +179,10 @@ def list_participations(
     has_evidence: Optional[bool] = Query(None, description="true = เฉพาะรายการที่ส่งไฟล์หลักฐานแล้ว"),
     ocr_decision: Optional[OcrDecision] = Query(None, description="ผล OCR ล่าสุดของรายการ"),
     search: Optional[str] = Query(None, description="ค้นหาจากชื่อ/รหัสนิสิต หรือชื่อกิจกรรม"),
+    needs_evidence_first: bool = Query(
+        False,
+        description="true = รายการที่ยังต้องส่งหลักฐาน (pending/rejected) ขึ้นก่อน — หน้าการเข้าร่วมของนิสิต",
+    ),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -238,7 +243,16 @@ def list_participations(
 
     total = session.exec(count_query).one()
     # ลำดับคงที่ ไม่ให้แถวที่เพิ่งแก้ (เช่น อนุมัติหลักฐาน) ย้ายตำแหน่งในรายการ
-    query = query.order_by(Participation.id)
+    # needs_evidence_first: เรียงที่ backend เพราะแบ่งหน้าที่นี่ — เรียงฝั่งแอปได้แค่ในหน้าเดียว
+    # ใบที่รอส่ง/ถูกปฏิเสธ (ปุ่มอัปโหลดขึ้น) มาก่อน แล้วค่อยตาม id ให้ลำดับในกลุ่มคงที่
+    if needs_evidence_first:
+        needs_upload = case(
+            (Participation.evidence_status.in_([EvidenceStatus.pending, EvidenceStatus.rejected]), 0),
+            else_=1,
+        )
+        query = query.order_by(needs_upload, Participation.id)
+    else:
+        query = query.order_by(Participation.id)
     items = session.exec(query.offset(skip).limit(limit)).all()
     evidence = _latest_evidence_map(session, [p.id for p in items])
     names = _activity_names(session, [p.activity_id for p in items])

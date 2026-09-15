@@ -49,6 +49,8 @@ class AppNavItem {
     label: 'ปฏิทินกิจกรรม',
     icon: Icons.calendar_month_outlined,
   );
+  static const checkin =
+      AppNavItem(id: 'checkin', label: 'เช็กอินหน้างาน', icon: Icons.qr_code_scanner);
   static const users =
       AppNavItem(id: 'users', label: 'จัดการผู้ใช้', icon: Icons.manage_accounts_outlined);
   static const hourCategories =
@@ -64,9 +66,15 @@ class AppNavItem {
 /// เจ้าหน้าที่ไม่ได้เห็นเมนูจัดการผู้ใช้/หมวดชั่วโมง/แดชบอร์ด เพราะสามหน้านั้น
 /// เป็นของแอดมินเท่านั้น (หน้าจะปฏิเสธการเข้าถึงอยู่แล้ว เมนูจึงต้องไม่ล่อให้กด)
 List<AppNavItem> navItemsForRole(String? role) => switch (role) {
+      // เรียงตามลำดับที่นิสิตใช้จริง: หากิจกรรม (สมัคร/ปฏิทิน) → ไปร่วมงาน (เช็กอิน)
+      // → ส่งหลักฐาน (การเข้าร่วม) → ดูชั่วโมงที่ได้ · ผู้ช่วยอัจฉริยะไว้ท้าย
+      // ไม่มี "จัดการกิจกรรม" — นิสิตดูกิจกรรมผ่าน "สมัครกิจกรรม"
       'student' => const [
           AppNavItem.home,
           AppNavItem.register,
+          AppNavItem.calendar,
+          AppNavItem.checkin,
+          AppNavItem.participations,
           AppNavItem.myHours,
           AppNavItem.chatbot,
         ],

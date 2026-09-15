@@ -3,7 +3,10 @@ import 'dart:math' as math;
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
 import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
 import 'package:activity_tracking_frontend/widgets/app_card.dart';
+import 'package:activity_tracking_frontend/screens/activity_calendar_screen.dart';
 import 'package:activity_tracking_frontend/screens/app_shell.dart';
+import 'package:activity_tracking_frontend/screens/checkin_scan_screen.dart';
+import 'package:activity_tracking_frontend/screens/participations_screen.dart';
 import 'package:activity_tracking_frontend/services/auth_service.dart';
 import 'package:activity_tracking_frontend/widgets/app_nav.dart';
 import 'package:activity_tracking_frontend/widgets/app_sidebar.dart';
@@ -50,6 +53,25 @@ void main() {
       expect(ids, containsAll(<String>['home', 'register', 'my_hours', 'chatbot']));
       expect(ids, isNot(contains('users')));
       expect(ids, isNot(contains('dashboard')));
+    });
+
+    test('นิสิตมีปฏิทิน / เช็กอิน / การเข้าร่วม (ส่งหลักฐาน) บนแถบซ้าย เรียงตามลำดับใช้งาน', () {
+      final ids = navItemsForRole('student').map((i) => i.id).toList();
+      expect(ids, [
+        'home', 'register', 'calendar', 'checkin', 'participations', 'my_hours', 'chatbot',
+      ]);
+      // นิสิตดู/สมัครกิจกรรมผ่าน "สมัครกิจกรรม" — ไม่เห็นหน้าจัดการ
+      expect(ids, isNot(contains('activities')));
+      expect(ids, isNot(contains('evidence_review')));
+    });
+
+    test('ทุกเมนูของนิสิต (ยกเว้นหน้าแรก) มีหน้าปลายทาง · เช็กอินไปหน้าสแกน QR', () {
+      for (final item in navItemsForRole('student').where((i) => i.id != 'home')) {
+        expect(screenForNavItem(item), isNotNull, reason: 'เมนู ${item.id} กดแล้วไม่ไปไหน');
+      }
+      expect(screenForNavItem(AppNavItem.checkin), isA<CheckinScanScreen>());
+      expect(screenForNavItem(AppNavItem.participations), isA<ParticipationsScreen>());
+      expect(screenForNavItem(AppNavItem.calendar), isA<ActivityCalendarScreen>());
     });
 
     test('แอดมินเห็นเมนูผู้ดูแลครบ', () {
