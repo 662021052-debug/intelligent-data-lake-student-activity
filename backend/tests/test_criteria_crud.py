@@ -766,6 +766,33 @@ def test_requirement_read_exposes_group_id_and_set_lists_its_groups(client, unit
     assert listed["hours_warning"] is None, "สองรายการในกลุ่มนับเป็นก้อน 16 ครั้งเดียว"
 
 
+def test_list_returns_every_field_a_full_row_put_would_overwrite(client, unit, system_set, session):
+    """PUT /requirements แทนที่ทั้งแถว — GET ต้องส่ง rule_note / organizer / min_activities มาด้วย
+
+    ไม่งั้นฟอร์มแก้ไขไม่มีค่าเดิมส่งกลับ แก้ชั่วโมงรายการ Social ในชุด 2567 ครั้งเดียว
+    "กฎพิเศษ ≥ 16" ก็หายไปเงียบ ๆ (ชุดทางการแก้ได้แล้ว จุดนี้จึงเกิดได้จริง)
+    """
+    session.add(
+        Requirement(
+            criteria_set_id=system_set.id,
+            name="ด้านการสร้างนวัตกรรมสังคม",
+            learning_unit_id=unit.id,
+            required_hours=16,
+            rule_note="กฎพิเศษ: สองด้านรวมกัน ≥ 16",
+            organizer="กองกิจการนิสิต",
+            min_activities=2,
+        )
+    )
+    session.commit()
+
+    listed = next(c for c in client.get("/criteria-sets").json() if c["id"] == system_set.id)
+    item = next(r for g in listed["groups"] for r in g["requirements"])
+
+    assert item["rule_note"] == "กฎพิเศษ: สองด้านรวมกัน ≥ 16"
+    assert item["organizer"] == "กองกิจการนิสิต"
+    assert item["min_activities"] == 2
+
+
 def test_requirement_groups_do_not_leak_across_sets(client, unit, system_set, session):
     session.add(
         RequirementGroup(

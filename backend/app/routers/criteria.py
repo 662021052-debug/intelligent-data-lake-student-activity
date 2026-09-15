@@ -234,6 +234,9 @@ def _requirement_read(
         learning_unit_name=unit.name if unit else None,
         group_name=group.name if group else None,
         group_id=group.id if group else None,
+        rule_note=requirement.rule_note,
+        organizer=requirement.organizer,
+        min_activities=requirement.min_activities,
     )
 
 

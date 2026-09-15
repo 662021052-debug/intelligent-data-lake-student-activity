@@ -375,6 +375,45 @@ def test_legacy_set_counts_the_unit_total_and_old_style_activities(session, crit
     assert rows[0]["earned_hours"] == 12 and rows[0]["completed"] == 1
 
 
+def test_legacy_is_edited_through_the_same_crud_and_the_edit_is_what_old_students_are_measured_on(
+    client, session, criteria
+):
+    """เกณฑ์เดิมแก้ผ่าน /requirements ตัวเดียวกับ 2567 (หน้าหมวดชั่วโมงเลิกแก้ /hour-categories แล้ว)
+
+    กดบันทึกโดยไม่เปลี่ยนค่า → ผลตัดสินเหมือนเดิมทุกตัวเลข · แก้ชั่วโมง → รัน seed ซ้ำ (restart)
+    ค่ายังอยู่ และหน่วยนั้นของนิสิตรุ่นเก่าถูกวัดด้วยค่าใหม่ทันที
+    """
+    legacy, subs = _legacy_world(session)
+    student = _student(session, legacy, "6500000002")
+    _join(session, student, _activity(session, [], 12, subcategory_id=subs[0].id))
+    headers = _admin_headers(client)
+
+    def unit_row():
+        rows = _rows(session, student)
+        return [(r["category_name"], r["required_hours"], r["earned_hours"], r["completed"]) for r in rows]
+
+    before = unit_row()
+    assert before == [("พัฒนาทักษะชีวิต", 12, 12, 1)]
+
+    item = _req(session, "กิจกรรมบูรณาการ 1", legacy)
+    unchanged = client.put(f"/requirements/{item.id}", json=_requirement_payload(item), headers=headers)
+    assert unchanged.status_code == 200, unchanged.text
+    session.expire_all()
+    assert unit_row() == before
+
+    edited = client.put(
+        f"/requirements/{item.id}", json=_requirement_payload(item, required_hours=10), headers=headers
+    )
+    assert edited.status_code == 200, edited.text
+    seed_criteria(session)
+    session.commit()
+    session.expire_all()
+
+    assert _req(session, "กิจกรรมบูรณาการ 1", legacy).required_hours == 10, "seed ต้องไม่ดึงกลับเป็น 4"
+    # total_per_unit: เป้าของหน่วย = ผลรวมรายการในหน่วย 8 + 10 = 18 · ได้ 12 → ยังไม่ครบ
+    assert unit_row() == [("พัฒนาทักษะชีวิต", 18, 12, 0)]
+
+
 def test_student_without_a_criteria_set_keeps_the_old_hour_categories(session):
     category = HourCategory(name="หมวดเดียว", required_hours=10)
     session.add(category)

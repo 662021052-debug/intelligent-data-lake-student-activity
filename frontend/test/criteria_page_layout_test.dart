@@ -1,7 +1,6 @@
 import 'package:activity_tracking_frontend/models/criteria_set.dart';
 import 'package:activity_tracking_frontend/screens/hour_categories_screen.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
-import 'package:activity_tracking_frontend/utils/cohort_range.dart';
 import 'package:activity_tracking_frontend/widgets/status_chip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -46,6 +45,17 @@ final _plo3 = CriteriaGroup(key: 'talent:3', name: 'TSU Social Innovation', subt
   _req(9, 'ด้านการสร้างนวัตกรรมสังคม', 16, groupId: 1, groupName: _social.name),
   _req(10, 'ด้านการเป็นผู้ประกอบการ', 16, groupId: 1, groupName: _social.name),
 ]);
+
+Widget _officialHeader(CriteriaSet set, List<CriteriaSet> all, {String badge = 'ชุดที่ 1'}) =>
+    officialCriteriaSectionHeader(
+      set,
+      badge: badge,
+      allSets: all,
+      academicYear: 2569,
+      onAddTalent: () {},
+      onAddGroup: () {},
+      onAddRequirement: () {},
+    );
 
 void main() {
   group('ตัวเลขบนหัวข้อ Talent', () {
@@ -107,7 +117,7 @@ void main() {
   });
 
   group('หัวการ์ดชุด', () {
-    testWidgets('ชุดทางการ: ป้ายชุด → ชื่อ → ช่วงรหัส + ป้ายล็อก + metric', (tester) async {
+    testWidgets('ชุดทางการ: ป้ายชุด → ชื่อ → ช่วงรหัส + ป้าย "ชุดทางการ" ชิดขวา + metric', (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -120,38 +130,42 @@ void main() {
         isSystem: true,
         groups: [_glocal, _plo3],
       );
-      await tester.pumpWidget(_wrap(systemCriteriaSectionHeader(set, allSets: [set], academicYear: 2569)));
+      await tester.pumpWidget(_wrap(_officialHeader(set, [set])));
 
       expect(find.text('ชุดที่ 1'), findsOneWidget);
       expect(find.text('ใช้กับรหัส 67 ขึ้นไป'), findsOneWidget);
-      expect(find.text('เกณฑ์ทางการ · อ่านอย่างเดียว'), findsOneWidget);
+      expect(find.text('ชุดทางการ'), findsOneWidget);
+      expect(find.byIcon(Icons.lock_outline), findsNothing);
       for (final text in ['60 ชม.', 'ชั่วโมงรวม', '2 กลุ่ม', 'ต่อรายการ', 'วิธีนับความครบ']) {
         expect(find.descendant(of: find.byKey(const ValueKey('criteria-metrics')), matching: find.text(text)),
             findsOneWidget, reason: text);
       }
-      // ลำดับซ้าย → ขวา: ป้ายชุด < ชื่อ < ช่วงรหัส < ป้ายล็อก (ชิดขวา)
+      // ลำดับซ้าย → ขวา: ป้ายชุด < ชื่อ < ช่วงรหัส < ป้ายชุดทางการ (ชิดขวา)
       final xs = [
         tester.getTopLeft(find.text('ชุดที่ 1')).dx,
         tester.getTopLeft(find.text('เกณฑ์ 2567 หลักสูตรปกติ')).dx,
         tester.getTopLeft(find.byKey(const ValueKey('cohort-range-pill'))).dx,
-        tester.getTopLeft(find.text('เกณฑ์ทางการ · อ่านอย่างเดียว')).dx,
+        tester.getTopLeft(find.text('ชุดทางการ')).dx,
       ];
       expect(xs, orderedEquals([...xs]..sort()));
-      expect(tester.getTopRight(find.text('เกณฑ์ทางการ · อ่านอย่างเดียว')).dx, greaterThan(1150),
-          reason: 'ป้ายล็อกชิดขวา');
+      expect(tester.getTopRight(find.text('ชุดทางการ')).dx, greaterThan(1150),
+          reason: 'ป้ายชุดทางการชิดขวา');
     });
 
     testWidgets('เกณฑ์เดิม: metric เป็นหน่วย + วิธีนับต่อหน่วย', (tester) async {
-      await tester.pumpWidget(_wrap(legacyCriteriaSectionHeader(
-        range: const CohortRange(from: 0, until: 2566),
-        title: 'เกณฑ์เดิม (โครงสร้าง 2560–2566)',
+      final legacy = CriteriaSet(
+        id: 1,
+        code: 'legacy-2566',
+        name: 'เกณฑ์เดิม (โครงสร้าง 2560–2566)',
+        totalRequiredHours: 60,
+        effectiveFromCohort: 0,
+        isSystem: true,
+        groupedBy: 'learning_unit',
         countingRule: 'total_per_unit',
-        academicYear: 2569,
-        totalHours: 60,
-        categoryCount: 5,
-        subcategoryCount: 13,
-        onAddCategory: () {},
-      )));
+        groups: [for (var i = 1; i <= 5; i++) CriteriaGroup(key: 'unit:$i', name: 'หน่วย $i')],
+      );
+      const s2567 = CriteriaSet(id: 2, code: '2567-regular', name: '2567', effectiveFromCohort: 2567, isSystem: true);
+      await tester.pumpWidget(_wrap(_officialHeader(legacy, [legacy, s2567], badge: 'ชุดที่ 2')));
       expect(find.text('5 หน่วย'), findsOneWidget);
       expect(find.text('ต่อหน่วย'), findsOneWidget);
       expect(find.text('ใช้กับรหัส ≤66'), findsOneWidget);
@@ -229,13 +243,15 @@ void main() {
       await tester.pumpWidget(_wrap(Padding(
         padding: const EdgeInsets.all(16),
         child: CriteriaSetCard(
-          header: systemCriteriaSectionHeader(set, allSets: [set], academicYear: 2569),
+          header: _officialHeader(set, [set]),
           children: [tile(expanded: true)],
         ),
       )));
       expect(tester.takeException(), isNull);
-      // ป้ายล็อกจอแคบต้องอยู่ใต้ชื่อชุด ไม่ใช่เบียดขวา
-      expect(tester.getRect(find.text('เกณฑ์ทางการ · อ่านอย่างเดียว')).right, lessThanOrEqualTo(390));
+      // ป้ายชุดทางการ + ปุ่มเพิ่มของจอแคบต้องตกบรรทัด ไม่ล้นขอบ
+      expect(tester.getRect(find.text('ชุดทางการ')).right, lessThanOrEqualTo(390));
+      expect(tester.getRect(find.widgetWithText(OutlinedButton, 'เพิ่มรายการเกณฑ์')).right,
+          lessThanOrEqualTo(390));
     });
   });
 }

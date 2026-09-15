@@ -20,6 +20,12 @@ class CriteriaRequirement {
   /// id ของกลุ่มแชร์เป้า — ฟอร์มแก้ไขใช้เลือกกลุ่มเดิมไว้ให้ (ชื่อซ้ำกันได้ id ไม่ซ้ำ)
   final int? groupId;
 
+  /// ฟิลด์ที่ไม่ได้แสดงบนหน้า แต่ PUT แทนที่ทั้งแถว — ฟอร์มแก้ไขต้องส่งค่าเดิมกลับ
+  /// ไม่งั้นแก้ชั่วโมงแล้ว "กฎพิเศษ" ของรายการ (เช่นคู่ Social ≥ 16) หายไปด้วย
+  final String? ruleNote;
+  final String? organizer;
+  final int? minActivities;
+
   const CriteriaRequirement({
     required this.id,
     required this.name,
@@ -28,6 +34,9 @@ class CriteriaRequirement {
     this.learningUnitName,
     this.groupName,
     this.groupId,
+    this.ruleNote,
+    this.organizer,
+    this.minActivities,
   });
 
   factory CriteriaRequirement.fromJson(Map<String, dynamic> json) => CriteriaRequirement(
@@ -38,6 +47,9 @@ class CriteriaRequirement {
         learningUnitName: json['learning_unit_name'] as String?,
         groupName: json['group_name'] as String?,
         groupId: json['group_id'] as int?,
+        ruleNote: json['rule_note'] as String?,
+        organizer: json['organizer'] as String?,
+        minActivities: json['min_activities'] as int?,
       );
 }
 

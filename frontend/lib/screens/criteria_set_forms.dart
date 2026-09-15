@@ -590,6 +590,35 @@ class _RequirementGroupFormDialogState extends State<RequirementGroupFormDialog>
 
 // ---------------------------------------------------------------- รายการเกณฑ์
 
+/// payload ของ POST/PUT รายการเกณฑ์
+///
+/// PUT แทนที่ทั้งแถว — ฟิลด์ที่ฟอร์มไม่มีช่องให้แก้ (organizer / min_activities) จึงต้องส่ง
+/// ค่าเดิมจาก [existing] กลับไป ไม่งั้นแก้ชั่วโมงรายการเดียวแล้วค่าพวกนั้นหายเงียบ ๆ
+/// (ชุดทางการแก้ได้แล้ว รายการที่มีค่าเหล่านี้จึงถูกแก้ผ่านฟอร์มนี้ได้จริง)
+Map<String, dynamic> requirementFormPayload({
+  required String name,
+  required int? learningUnitId,
+  required int? talentId,
+  required int? groupId,
+  required bool isMandatory,
+  required String hours,
+  required String ruleNote,
+  Map<String, dynamic>? existing,
+}) {
+  final note = ruleNote.trim();
+  return {
+    'name': name.trim(),
+    'learning_unit_id': learningUnitId,
+    'talent_id': talentId,
+    'group_id': groupId,
+    'is_mandatory': isMandatory,
+    'required_hours': double.parse(hours.trim()),
+    'rule_note': note.isEmpty ? null : note,
+    'organizer': existing?['organizer'],
+    'min_activities': existing?['min_activities'],
+  };
+}
+
 class RequirementFormDialog extends StatefulWidget {
   const RequirementFormDialog({
     super.key,
@@ -665,16 +694,16 @@ class _RequirementFormDialogState extends State<RequirementFormDialog> {
       _saving = true;
       _error = null;
     });
-    final note = _ruleNote.text.trim();
-    final body = {
-      'name': _name.text.trim(),
-      'learning_unit_id': _learningUnitId,
-      'talent_id': _talentId,
-      'group_id': _groupId,
-      'is_mandatory': _isMandatory,
-      'required_hours': double.parse(_hours.text.trim()),
-      'rule_note': note.isEmpty ? null : note,
-    };
+    final body = requirementFormPayload(
+      name: _name.text,
+      learningUnitId: _learningUnitId,
+      talentId: _talentId,
+      groupId: _groupId,
+      isMandatory: _isMandatory,
+      hours: _hours.text,
+      ruleNote: _ruleNote.text,
+      existing: widget.existing,
+    );
     try {
       if (widget.existing == null) {
         await ApiService.create(

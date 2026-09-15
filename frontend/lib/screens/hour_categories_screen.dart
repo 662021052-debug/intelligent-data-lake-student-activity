@@ -20,20 +20,23 @@ import '../widgets/status_chip.dart';
 import 'criteria_set_forms.dart';
 import 'app_shell.dart';
 
-/// หน้า "หมวดชั่วโมงกิจกรรม" (admin เท่านั้น) — แสดงเกณฑ์ **ทั้งสองชุดพร้อมกัน**
+/// หน้า "หมวดชั่วโมงกิจกรรม" (admin เท่านั้น) — แสดงชุดเกณฑ์ **ทุกชุดพร้อมกัน** และแก้ได้ทุกชุด
 ///
-/// นิสิตที่เรียนอยู่ตอนนี้ใช้เกณฑ์คนละชุดกันตามรหัส ผู้ดูแลจึงต้องเห็นทั้งคู่ในหน้าเดียว
+/// นิสิตที่เรียนอยู่ตอนนี้ใช้เกณฑ์คนละชุดกันตามรหัส ผู้ดูแลจึงต้องเห็นทุกชุดในหน้าเดียว
 /// ไม่งั้นจะตอบคำถามนิสิตปี 4 ด้วยโครงสร้างของปี 1 โดยไม่รู้ตัว:
 ///
-/// * **โครงสร้าง 2567** (รหัส 67 ขึ้นไป) — Talent/PLO → รายการเกณฑ์ ดึงจาก
-///   `GET /criteria-sets` เป็น **อ่านอย่างเดียว** เพราะนิยามชุดนี้ seed เข้าฐาน
-///   (`seed_criteria.py`) และยังไม่มี API สำหรับแก้ ปุ่มเพิ่ม/แก้/ลบจึงไม่โผล่ที่ส่วนนี้
-///   แทนที่จะโผล่มาแล้วกดไม่ได้จริง
-/// * **เกณฑ์เดิม** (รหัส 66 ลงไป) — หน่วยการเรียนรู้ → หมวดย่อย ดึงจาก
-///   `GET /hour-categories` ซึ่งแก้ได้ ปุ่มจัดการทั้งหมดอยู่ในส่วนนี้ส่วนเดียว
+/// * **ชุดทางการ** ที่ seed ไว้ (2567 = Talent/PLO → รายการ · เกณฑ์เดิม = หน่วยการเรียนรู้ →
+///   รายการ) — เพิ่ม/แก้/ลบ Talent · กลุ่มแชร์เป้า · รายการเกณฑ์ได้ แต่ไม่มีปุ่มแก้ชื่อ/ปีรุ่น
+///   หรือลบทั้งชุด (backend ตอบ 403 — ปีรุ่นคือขั้นบันไดที่นิสิตทั้งรุ่นแมปอยู่)
+/// * **ชุดของผู้ดูแล** — แก้/ลบได้ทั้งชุด
 ///
-/// ต่างจากหน้า list อื่นตรงที่ **ไม่มีการแบ่งหน้า**: ทั้งสอง endpoint คืนต้นไม้ทั้งก้อน
-/// ในครั้งเดียว และการแบ่งหน้าจะตัดหมวดย่อยขาดจากหมวดแม่ ช่องค้นหาจึงกรองในเครื่องแทน
+/// ทุกชุดอ่านจาก `GET /criteria-sets` และเขียนผ่าน CRUD ชุดเดียวกัน (`/talents`,
+/// `/requirement-groups`, `/requirements`) รวมเกณฑ์เดิมด้วย — เดิมการ์ดเกณฑ์เดิมแก้ตาราง
+/// hourcategory ผ่าน `/hour-categories` ซึ่งไม่ใช่รายการที่ใช้วัดนิสิตจริง (ชุด legacy-2566)
+/// หน้านี้จึงเลิกใช้ทางนั้น · API/ตาราง hourcategory ยังอยู่ (ฟอร์มกิจกรรมใช้เป็นหมวดโครงเดิม)
+///
+/// ไม่มีการแบ่งหน้า: endpoint คืนต้นไม้ทั้งก้อน และการแบ่งหน้าจะตัดรายการขาดจากหัวข้อ
+/// ช่องค้นหาจึงกรองในเครื่องแทน
 class HourCategoriesScreen extends StatefulWidget {
   const HourCategoriesScreen({super.key});
 
@@ -42,31 +45,11 @@ class HourCategoriesScreen extends StatefulWidget {
 }
 
 class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
-  List<HourCategory> _categories = [];
   List<CriteriaSet> _criteriaSets = [];
   List<LearningUnit> _learningUnits = [];
   bool _loading = false;
   String? _error;
   String _search = '';
-
-  /// ชุดเกณฑ์ที่จัดกลุ่มด้วย Talent/PLO = โครงสร้าง 2567 (null ถ้ายังโหลดไม่สำเร็จ)
-  CriteriaSet? get _talentSet {
-    for (final set in _criteriaSets) {
-      if (set.groupedBy == 'talent') return set;
-    }
-    return null;
-  }
-
-  /// ชุดเกณฑ์ที่ส่วน "เกณฑ์เดิม" แทน (จัดกลุ่มด้วยหน่วยการเรียนรู้ รุ่นต่ำสุดของหลักสูตรปกติ)
-  /// — ข้อมูลส่วนนั้นมาจาก `/hour-categories` แต่ช่วงรุ่นต้องคิดจากชุดเกณฑ์จริง
-  CriteriaSet? get _legacySet {
-    CriteriaSet? found;
-    for (final set in _criteriaSets) {
-      if (set.groupedBy != 'learning_unit' || set.programType != 'regular') continue;
-      if (found == null || set.effectiveFromCohort < found.effectiveFromCohort) found = set;
-    }
-    return found;
-  }
 
   @override
   void initState() {
@@ -80,14 +63,10 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       _error = null;
     });
     try {
-      // ยิงพร้อมกัน — สองส่วนของหน้าไม่ได้ขึ้นต่อกัน ไม่ควรรอกันเป็นทอด ๆ
-      final categories =
-          await ApiService.fetchList('/hour-categories', HourCategory.fromJson);
       final criteriaSets = await ApiService.fetchList('/criteria-sets', CriteriaSet.fromJson);
       final units = await ApiService.fetchList('/learning-units', LearningUnit.fromJson);
       if (!mounted) return;
       setState(() {
-        _categories = categories;
         _criteriaSets = criteriaSets;
         _learningUnits = units;
       });
@@ -99,18 +78,11 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     }
   }
 
-  /// หมวดที่ตรงคำค้น — ชื่อหมวดใหญ่ตรง หรือมีหมวดย่อยชื่อตรงอยู่ข้างใน
-  List<HourCategory> get _visible {
-    if (_search.isEmpty) return _categories;
-    final needle = _search.toLowerCase();
-    return _categories
-        .where((c) =>
-            c.name.toLowerCase().contains(needle) ||
-            c.subcategories.any((s) => s.name.toLowerCase().contains(needle)))
-        .toList();
-  }
+  /// ชุดทางการ เรียงรุ่นใหม่ขึ้นก่อน (2567 → เกณฑ์เดิม) — ลำดับเดียวกับป้าย "ชุดที่ N"
+  List<CriteriaSet> get _officialSets => _criteriaSets.where((s) => s.isSystem).toList()
+    ..sort((a, b) => b.effectiveFromCohort.compareTo(a.effectiveFromCohort));
 
-  /// ชุดที่ผู้ดูแลสร้างเอง (แก้ได้) — ชุดของระบบแสดงแยกเป็นส่วนอ่านอย่างเดียว
+  /// ชุดที่ผู้ดูแลสร้างเอง (แก้/ลบได้ทั้งชุด)
   List<CriteriaSet> get _customSets =>
       _criteriaSets.where((s) => !s.isSystem).toList();
 
@@ -155,58 +127,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     await _runDelete(path);
   }
 
-  Future<void> _openCategoryForm({HourCategory? existing}) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => HourCategoryFormDialog(existing: existing),
-    );
-    if (saved == true) _load();
-  }
-
-  Future<void> _openSubcategoryForm({
-    required HourCategory category,
-    HourSubcategory? existing,
-  }) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => HourSubcategoryFormDialog(
-        categories: _categories,
-        categoryId: category.id,
-        existing: existing,
-      ),
-    );
-    if (saved == true) _load();
-  }
-
-  Future<void> _deleteCategory(HourCategory category) async {
-    final confirmed = await confirmAction(
-      context,
-      title: 'ยืนยันการลบหมวด',
-      message: 'ต้องการลบหมวด "${category.name}" ใช่หรือไม่?',
-      detail: 'ลบได้เฉพาะหมวดที่ไม่มีหมวดย่อยเหลืออยู่ และลบแล้วกู้คืนไม่ได้',
-      confirmLabel: 'ลบ',
-      icon: Icons.delete_outline,
-      destructive: true,
-    );
-    if (confirmed != true) return;
-    await _runDelete('/hour-categories/${category.id}');
-  }
-
-  Future<void> _deleteSubcategory(HourSubcategory subcategory) async {
-    final confirmed = await confirmAction(
-      context,
-      title: 'ยืนยันการลบหมวดย่อย',
-      message: 'ต้องการลบหมวดย่อย "${subcategory.name}" ใช่หรือไม่?',
-      detail: 'ลบได้เฉพาะหมวดย่อยที่ยังไม่มีกิจกรรมใช้อยู่ และลบแล้วกู้คืนไม่ได้',
-      confirmLabel: 'ลบ',
-      icon: Icons.delete_outline,
-      destructive: true,
-    );
-    if (confirmed != true) return;
-    await _runDelete('/hour-subcategories/${subcategory.id}');
-  }
-
-  /// ลบแล้วโหลดใหม่ — ข้อความ 400 ของ backend ("มีกิจกรรมใช้อยู่ n รายการ")
+  /// ลบแล้วโหลดใหม่ — ข้อความ 400 ของ backend ("มีกิจกรรมผูกอยู่ n รายการ")
   /// คือคำอธิบายที่ผู้ใช้ต้องเห็น จึงโยนขึ้น snackbar ตรง ๆ
   Future<void> _runDelete(String path) async {
     try {
@@ -226,16 +147,13 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       );
     }
 
-    final visible = _visible;
-    final talentSet = _talentSet;
-
+    final official = _officialSets;
     return AdminPage(
       activeId: 'hour_categories',
       title: 'หมวดชั่วโมงกิจกรรม',
       subtitle: 'เกณฑ์แยกตามรุ่นนิสิต · ปุ่มเพิ่ม/แก้ของแต่ละชุดอยู่ในกรอบของชุดนั้น',
       // ปุ่มระดับหน้ามีปุ่มเดียว = สร้างเกณฑ์ของรุ่นใหม่ · ปุ่มที่แก้ของในชุดใดชุดหนึ่ง
-      // (เช่น "เพิ่มหมวดใหญ่" ของเกณฑ์เดิม) อยู่ในกรอบของชุดนั้นเท่านั้น ไม่งั้นผู้ดูแล
-      // เดาไม่ออกว่ากดแล้วของใหม่จะไปโผล่ในชุดไหน
+      // อยู่ในกรอบของชุดนั้นเท่านั้น ไม่งั้นผู้ดูแลเดาไม่ออกว่ากดแล้วของใหม่ไปโผล่ในชุดไหน
       actions: [
         FilledButton.icon(
           onPressed: () =>
@@ -246,25 +164,28 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
       ],
       filters: [
         DebouncedSearchField(
-          label: 'ค้นหาหมวด/หมวดย่อย/รายการเกณฑ์',
+          label: 'ค้นหาหัวข้อ/รายการเกณฑ์',
           onSearch: (value) => setState(() => _search = value),
         ),
         AppIconButton(icon: Icons.refresh, tooltip: 'โหลดใหม่', onPressed: _load),
       ],
-      busy: _loading && _categories.isNotEmpty,
-      child: _loading && _categories.isEmpty
+      busy: _loading && _criteriaSets.isNotEmpty,
+      child: _loading && _criteriaSets.isEmpty
           ? const LoadingState(message: 'กำลังโหลดโครงสร้างเกณฑ์...')
           : _error != null
               ? ErrorState(message: _error!, onRetry: _load)
               : ListView(
                   padding: const EdgeInsets.only(bottom: AppSpacing.lg),
                   children: [
-                    _talentSection(context, talentSet),
-                    const SizedBox(height: AppSpacing.xl),
-                    _legacySection(context, visible),
+                    if (_criteriaSets.isEmpty)
+                      _sectionMessage('ยังไม่มีชุดเกณฑ์ในระบบ — กดปุ่ม "$kAddCriteriaSetLabel" ด้านบน'),
+                    for (final (index, set) in official.indexed) ...[
+                      if (index > 0) const SizedBox(height: AppSpacing.xl),
+                      _officialSetSection(set, index: index),
+                    ],
                     for (final set in _customSets) ...[
                       const SizedBox(height: AppSpacing.xl),
-                      _customSetSection(context, set),
+                      _customSetSection(set),
                     ],
                     if (_criteriaSets.isNotEmpty) ...[
                       const SizedBox(height: AppSpacing.sm),
@@ -277,152 +198,32 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
     );
   }
 
-  // ---------------- ส่วนที่ 1: โครงสร้าง 2567 (อ่านอย่างเดียว) ----------------
+  // ---------------- ชุดทางการ (2567 / เกณฑ์เดิม) — แก้ของข้างในได้ ----------------
 
-  Widget _talentSection(BuildContext context, CriteriaSet? set) {
-    final groups = set == null ? <CriteriaGroup>[] : filterCriteriaGroups(set.groups, _search);
+  Widget _officialSetSection(CriteriaSet set, {required int index}) {
     return CriteriaSetCard(
-      header: systemCriteriaSectionHeader(set, allSets: _criteriaSets),
-      children: [
-        if (set == null)
-          _sectionMessage('ยังโหลดโครงสร้าง 2567 ไม่ได้ — กดโหลดใหม่อีกครั้ง')
-        else if (groups.isEmpty)
-          _sectionMessage(
-            _search.isEmpty
-                ? 'ยังไม่มีรายการเกณฑ์ในชุดนี้'
-                : 'ไม่พบรายการที่ตรงกับคำค้นในชุดนี้',
-          )
-        else
-          for (final (index, group) in groups.indexed)
-            _criteriaGroupTile(set, group, index: index),
-      ],
-    );
-  }
-
-  /// หัวข้อ Talent/PLO หนึ่งหัวข้อพร้อมรายการเกณฑ์ข้างใน — ชุดทางการกับชุดของผู้ดูแลใช้ร่วมกัน
-  ///
-  /// [editable] = แถวรายการมีปุ่มแก้/ลบ (เฉพาะชุดของผู้ดูแล)
-  Widget _criteriaGroupTile(
-    CriteriaSet set,
-    CriteriaGroup group, {
-    required int index,
-    bool editable = false,
-  }) {
-    return CriteriaGroupTile(
-      key: ValueKey('criteria-group-${set.id}-${group.key}-$_search'),
-      name: group.name,
-      chip: group.subtitle,
-      countLabel: '${group.requirements.length} รายการ',
-      hours: criteriaGroupTargetHours(group, set.requirementGroups),
-      rules: sharedTargetRules(group, set.requirementGroups),
-      // กางหัวข้อแรกไว้ให้เห็นหน้าตารายการ · ตอนค้นหากางทุกหัวข้อให้เห็นสิ่งที่ตรงทันที
-      initiallyExpanded: _search.isNotEmpty || index == 0,
-      children: [
-        for (final (i, requirement) in group.requirements.indexed)
-          CriteriaRequirementRow(
-            index: i,
-            name: requirement.name,
-            subtitle: requirementSubtitle(requirement),
-            mandatory: requirement.isMandatory,
-            hours: requirement.requiredHours,
-            trailing: editable ? _requirementActions(set, group, requirement) : const [],
-          ),
-      ],
-    );
-  }
-
-  // ---------------- ส่วนที่ 2: เกณฑ์เดิม (แก้ไขได้) ----------------
-
-  Widget _legacySection(BuildContext context, List<HourCategory> visible) {
-    final totalHours = _categories.fold<double>(0, (sum, c) => sum + c.requiredHours);
-    final subcategoryCount =
-        _categories.fold<int>(0, (sum, c) => sum + c.subcategories.length);
-    final legacySet = _legacySet;
-    return CriteriaSetCard(
-      header: legacyCriteriaSectionHeader(
-        range: legacySet == null ? null : cohortRangeOf(legacySet, _criteriaSets),
-        title: legacySet?.name ?? 'เกณฑ์เดิม',
-        countingRule: legacySet?.countingRule,
-        totalHours: totalHours,
-        categoryCount: _categories.length,
-        subcategoryCount: subcategoryCount,
-        onAddCategory: () => _openCategoryForm(),
+      key: ValueKey('criteria-set-card-${set.code}'),
+      header: officialCriteriaSectionHeader(
+        set,
+        badge: 'ชุดที่ ${index + 1}',
+        allSets: _criteriaSets,
+        // ชุดที่จัดกลุ่มด้วยหน่วยการเรียนรู้ (เกณฑ์เดิม) ไม่มีปุ่ม Talent — backend จัดกลุ่ม
+        // ด้วย Talent ทันทีที่ชุดมี Talent สักตัว กดเพิ่มทีเดียวโครงเกณฑ์เดิมจะเปลี่ยนทั้งหน้า
+        onAddTalent: set.groupedBy == 'talent'
+            ? () => _openCriteriaForm(TalentFormDialog(criteriaSetId: set.id))
+            : null,
+        onAddGroup: () => _openCriteriaForm(RequirementGroupFormDialog(criteriaSetId: set.id)),
+        onAddRequirement: () => _openCriteriaForm(_newRequirementForm(set)),
       ),
-      children: [
-        if (visible.isEmpty)
-          _sectionMessage(
-            _search.isEmpty
-                ? 'ยังไม่มีหน่วยการเรียนรู้ — กดปุ่ม "$kAddLegacyCategoryLabel" ในกรอบด้านบน'
-                : 'ไม่พบหมวดที่ตรงกับคำค้นในชุดนี้',
-          )
-        else
-          for (final category in visible) _categoryTile(category),
-      ],
+      children: _setContents(set),
     );
   }
 
-  Widget _categoryTile(HourCategory category) {
-    return CriteriaGroupTile(
-      key: ValueKey('hour-category-${category.id}-$_search'),
-      name: category.name,
-      countLabel: 'หมวดย่อย ${category.subcategories.length} รายการ',
-      hours: category.requiredHours,
-      // เปิดค้างไว้ตอนกำลังค้นหา ผู้ใช้จะได้เห็นหมวดย่อยที่ตรงคำค้นทันที
-      initiallyExpanded: _search.isNotEmpty,
-      trailing: [
-        AppIconButton(
-          icon: Icons.add,
-          size: 28,
-          tooltip: 'เพิ่มหมวดย่อย',
-          onPressed: () => _openSubcategoryForm(category: category),
-        ),
-        AppIconButton(
-          icon: Icons.edit,
-          size: 28,
-          tooltip: 'แก้ไขหมวด',
-          onPressed: () => _openCategoryForm(existing: category),
-        ),
-        AppIconButton(
-          icon: Icons.delete,
-          size: 28,
-          danger: true,
-          tooltip: 'ลบหมวด',
-          onPressed: () => _deleteCategory(category),
-        ),
-      ],
-      children: category.subcategories.isEmpty
-          ? [_sectionMessage('ยังไม่มีหมวดย่อย — กดปุ่ม + เพื่อเพิ่ม')]
-          : [
-              for (final (i, sub) in category.subcategories.indexed)
-                CriteriaRequirementRow(
-                  index: i,
-                  name: sub.name,
-                  hours: sub.requiredHours,
-                  trailing: [
-                    AppIconButton(
-                      icon: Icons.edit,
-                      size: 28,
-                      tooltip: 'แก้ไขหมวดย่อย',
-                      onPressed: () => _openSubcategoryForm(category: category, existing: sub),
-                    ),
-                    AppIconButton(
-                      icon: Icons.delete,
-                      size: 28,
-                      danger: true,
-                      tooltip: 'ลบหมวดย่อย',
-                      onPressed: () => _deleteSubcategory(sub),
-                    ),
-                  ],
-                ),
-            ],
-    );
-  }
+  // ---------------- ชุดที่ผู้ดูแลสร้างเอง (แก้/ลบได้ทั้งชุด) ----------------
 
-  // ---------------- ส่วนที่ 3+: ชุดที่ผู้ดูแลสร้างเอง (แก้ไขได้ทั้งชุด) ----------------
-
-  Widget _customSetSection(BuildContext context, CriteriaSet set) {
-    final groups = filterCriteriaGroups(set.groups, _search);
+  Widget _customSetSection(CriteriaSet set) {
     return CriteriaSetCard(
+      key: ValueKey('criteria-set-card-${set.code}'),
       header: customCriteriaSectionHeader(
         set,
         allSets: _criteriaSets,
@@ -437,26 +238,57 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
               'ลบไม่ได้ถ้ามีนิสิตใช้ชุดนี้อยู่หรือมีกิจกรรมผูกกับรายการเกณฑ์',
         ),
         onAddTalent: () => _openCriteriaForm(TalentFormDialog(criteriaSetId: set.id)),
-        onAddGroup: () =>
-            _openCriteriaForm(RequirementGroupFormDialog(criteriaSetId: set.id)),
-        onAddRequirement: () => _openCriteriaForm(RequirementFormDialog(
-          criteriaSetId: set.id,
-          learningUnits: _learningUnits,
-          talents: _talentOptions(set),
-          groups: requirementGroupOptions(set),
-        )),
+        onAddGroup: () => _openCriteriaForm(RequirementGroupFormDialog(criteriaSetId: set.id)),
+        onAddRequirement: () => _openCriteriaForm(_newRequirementForm(set)),
       ),
+      children: _setContents(set),
+    );
+  }
+
+  RequirementFormDialog _newRequirementForm(CriteriaSet set) => RequirementFormDialog(
+        criteriaSetId: set.id,
+        learningUnits: _learningUnits,
+        talents: _talentOptions(set),
+        groups: requirementGroupOptions(set),
+      );
+
+  /// เนื้อหาในการ์ดของชุด — เหมือนกันทุกชุด (ทางการหรือของผู้ดูแล): กลุ่มแชร์เป้า + หัวข้อที่แก้ได้
+  List<Widget> _setContents(CriteriaSet set) {
+    final groups = filterCriteriaGroups(set.groups, _search);
+    return [
+      if (set.requirementGroups.isNotEmpty) _sharedTargetGroups(context, set),
+      if (groups.isEmpty)
+        _sectionMessage(
+          _search.isEmpty
+              ? 'ยังไม่มีรายการเกณฑ์ในชุดนี้ — กดปุ่ม "เพิ่มรายการเกณฑ์" ด้านบน'
+              : 'ไม่พบรายการที่ตรงกับคำค้นในชุดนี้',
+        )
+      else
+        for (final (index, group) in groups.indexed) _criteriaGroupTile(set, group, index: index),
+    ];
+  }
+
+  /// หัวข้อ Talent/PLO หรือหน่วยการเรียนรู้ พร้อมรายการเกณฑ์ที่มีปุ่มแก้/ลบในแต่ละแถว
+  Widget _criteriaGroupTile(CriteriaSet set, CriteriaGroup group, {required int index}) {
+    return CriteriaGroupTile(
+      key: ValueKey('criteria-group-${set.id}-${group.key}-$_search'),
+      name: group.name,
+      chip: group.subtitle,
+      countLabel: '${group.requirements.length} รายการ',
+      hours: criteriaGroupTargetHours(group, set.requirementGroups),
+      rules: sharedTargetRules(group, set.requirementGroups),
+      // ชุด Talent กางหัวข้อแรกไว้ให้เห็นหน้าตารายการ · ตอนค้นหากางทุกหัวข้อให้เห็นสิ่งที่ตรง
+      initiallyExpanded: _search.isNotEmpty || (index == 0 && set.groupedBy == 'talent'),
       children: [
-        if (set.requirementGroups.isNotEmpty) _sharedTargetGroups(context, set),
-        if (groups.isEmpty)
-          _sectionMessage(
-            _search.isEmpty
-                ? 'ยังไม่มีรายการเกณฑ์ในชุดนี้ — กดปุ่ม "เพิ่มรายการเกณฑ์" ด้านบน'
-                : 'ไม่พบรายการที่ตรงกับคำค้นในชุดนี้',
-          )
-        else
-          for (final (index, group) in groups.indexed)
-            _criteriaGroupTile(set, group, index: index, editable: true),
+        for (final (i, requirement) in group.requirements.indexed)
+          CriteriaRequirementRow(
+            index: i,
+            name: requirement.name,
+            subtitle: requirementSubtitle(requirement),
+            mandatory: requirement.isMandatory,
+            hours: requirement.requiredHours,
+            trailing: _requirementActions(set, group, requirement),
+          ),
       ],
     );
   }
@@ -464,7 +296,8 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
   /// Talent ของชุดนี้ในรูปที่ฟอร์มรายการเกณฑ์ใช้เลือกได้
   ///
   /// `GET /criteria-sets` คืนกลุ่มมาแบบจัดหน้าไว้แล้ว (key เป็น "talent:3") จึงถอด id
-  /// กลับออกมาจาก key แทนที่จะยิง API เพิ่มอีกเส้นเพื่อเอาแค่ id กับชื่อ
+  /// กลับออกมาจาก key แทนที่จะยิง API เพิ่มอีกเส้นเพื่อเอาแค่ id กับชื่อ · ชุดที่จัดกลุ่มด้วย
+  /// หน่วยการเรียนรู้ (key "unit:N") ได้รายการว่าง ฟอร์มจึงไม่แสดงช่อง Talent
   List<Map<String, dynamic>> _talentOptions(CriteriaSet set) => [
         for (final g in set.groups)
           if (talentIdOfGroup(g) != null) {'id': talentIdOfGroup(g), 'name': g.name},
@@ -542,7 +375,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
         : 'รายการในกลุ่ม $members รายการ · ตรวจความครบที่ยอดรวมของกลุ่ม';
   }
 
-  /// ปุ่มแก้/ลบท้ายแถวรายการเกณฑ์ของชุดผู้ดูแล
+  /// ปุ่มแก้/ลบท้ายแถวรายการเกณฑ์ — ใช้ฟอร์มและ endpoint เดียวกันทุกชุด
   List<Widget> _requirementActions(
     CriteriaSet set,
     CriteriaGroup group,
@@ -568,6 +401,9 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
               // ก็หลุดออกจากกลุ่ม/Talent โดยไม่รู้ตัว
               'talent_id': talentIdOfGroup(group),
               'group_id': requirement.groupId,
+              'rule_note': requirement.ruleNote,
+              'organizer': requirement.organizer,
+              'min_activities': requirement.minActivities,
             },
           )),
         ),
@@ -580,7 +416,7 @@ class _HourCategoriesScreenState extends State<HourCategoriesScreen> {
             '/requirements/${requirement.id}',
             title: 'ยืนยันการลบรายการเกณฑ์',
             message: 'ต้องการลบ "${requirement.name}" ใช่หรือไม่?',
-            detail: 'ลบไม่ได้ถ้ามีกิจกรรมผูกกับรายการนี้อยู่',
+            detail: 'ลบไม่ได้ถ้ามีกิจกรรมผูกกับรายการนี้อยู่ · มีผลกับการวัดนิสิตของชุดนี้ทันที',
           ),
         ),
       ];
@@ -633,9 +469,6 @@ List<CriteriaGroup> filterCriteriaGroups(List<CriteriaGroup> groups, String sear
 
 /// ปุ่มหลักของหน้า — สร้างเกณฑ์ของรุ่นใหม่ (ปุ่มเดียวบนหัวข้อหน้า)
 const kAddCriteriaSetLabel = 'เพิ่มชุดเกณฑ์ใหม่';
-
-/// ปุ่มเพิ่มหมวดของโครงเก่า — อยู่ในกรอบ "เกณฑ์เดิม" เท่านั้น และบอกรุ่นในชื่อปุ่มเลย
-const kAddLegacyCategoryLabel = 'เพิ่มหมวดใหญ่ (รหัส ≤66)';
 
 /// บรรทัดรองใต้ชื่อชุด — ปีที่เข้าศึกษาแบบเต็ม + (ชั้นปีตอนนี้) · กลุ่มหลักสูตร
 ///
@@ -764,73 +597,68 @@ String? requirementSubtitle(CriteriaRequirement requirement) {
   return parts.isEmpty ? null : parts.join(' · ');
 }
 
-/// หัวข้อส่วนชุดทางการที่ระบบ seed (โครงสร้าง 2567) — ไม่มีปุ่มใดเลย
+/// ปุ่มเพิ่มของในชุด — ชุดทางการกับชุดของผู้ดูแลใช้ชุดปุ่มเดียวกัน
+/// ([onAddTalent] เป็น null = ชุดที่จัดกลุ่มด้วยหน่วยการเรียนรู้ ไม่มีปุ่ม Talent)
+List<Widget> criteriaContentActions({
+  VoidCallback? onAddTalent,
+  required VoidCallback onAddGroup,
+  required VoidCallback onAddRequirement,
+}) =>
+    [
+      if (onAddTalent != null)
+        OutlinedButton.icon(
+          onPressed: onAddTalent,
+          icon: const Icon(Icons.add, size: 16),
+          label: const Text('เพิ่ม Talent'),
+        ),
+      OutlinedButton.icon(
+        onPressed: onAddGroup,
+        icon: const Icon(Icons.add, size: 16),
+        label: const Text('เพิ่มกลุ่มแชร์เป้า'),
+      ),
+      OutlinedButton.icon(
+        onPressed: onAddRequirement,
+        icon: const Icon(Icons.add, size: 16),
+        label: const Text('เพิ่มรายการเกณฑ์'),
+      ),
+    ];
+
+/// หัวของชุดเกณฑ์ทางการ (2567 / เกณฑ์เดิม) — แก้ของข้างในชุดได้เหมือนชุดของผู้ดูแล
 ///
-/// [allSets] = ชุดทั้งหมดจาก `GET /criteria-sets` ใช้หาชุดถัดไปเพื่อตัดปลายช่วงรุ่น
-CriteriaSetHeader systemCriteriaSectionHeader(
-  CriteriaSet? set, {
+/// ไม่มีปุ่มแก้ข้อมูลระดับชุด/ลบชุด เพราะ backend ตอบ 403 (ปีรุ่นของชุดทางการคือขั้นบันได
+/// ที่นิสิตทั้งรุ่นแมปอยู่) · ป้าย "ชุดทางการ" บอกที่มา ไม่ได้สื่อว่าแก้ไม่ได้
+CriteriaSetHeader officialCriteriaSectionHeader(
+  CriteriaSet set, {
+  required String badge,
   List<CriteriaSet> allSets = const [],
   int? academicYear,
+  VoidCallback? onAddTalent,
+  required VoidCallback onAddGroup,
+  required VoidCallback onAddRequirement,
 }) {
-  final range = set == null ? null : cohortRangeOf(set, allSets);
+  final range = cohortRangeOf(set, allSets);
+  final byTalent = set.groupedBy == 'talent';
   return CriteriaSetHeader(
-    badge: 'ชุดที่ 1',
-    title: set?.name ?? 'โครงสร้าง 2567',
-    rangeLabel: range?.pillLabel,
-    audience: range == null
-        ? 'ยังโหลดช่วงรุ่นของชุดนี้ไม่ได้'
-        : criteriaAudience(range, academicYear ?? currentAcademicYear()),
-    totalHours: set?.totalRequiredHours ?? 0,
-    metrics: set == null ? null : criteriaSetMetrics(set),
+    badge: badge,
+    title: set.name,
+    rangeLabel: range.pillLabel,
+    audience: criteriaAudience(range, academicYear ?? currentAcademicYear()),
+    totalHours: set.totalRequiredHours,
+    metrics: criteriaSetMetrics(set),
     palette: StatusPalette.info,
-    note: set == null ? null : 'รหัสชุด ${set.code}',
-    warning: set?.hoursWarning,
-    readOnly: true,
-    capabilities: 'ดูได้อย่างเดียว — เพิ่ม/แก้/ลบ Talent หรือรายการเกณฑ์ในชุดนี้ไม่ได้ · '
-        'ถ้ารุ่นใหม่ใช้เกณฑ์ต่างออกไป ให้กด "$kAddCriteriaSetLabel" ด้านบน',
+    note: 'รหัสชุด ${set.code}',
+    warning: set.hoursWarning,
+    official: true,
+    capabilities: 'แก้ได้: ${byTalent ? 'Talent · ' : ''}กลุ่มแชร์เป้า · รายการเกณฑ์ (ปุ่มด้านล่าง) · '
+        'แก้/ลบรายการจากปุ่มในแต่ละแถว — มีผลกับการวัด${range.studentsLabel} ทันที · '
+        'ชื่อชุดและปีรุ่นที่เริ่มใช้ของชุดทางการแก้ไม่ได้',
+    actions: criteriaContentActions(
+      onAddTalent: byTalent ? onAddTalent : null,
+      onAddGroup: onAddGroup,
+      onAddRequirement: onAddRequirement,
+    ),
   );
 }
-
-/// หัวข้อส่วนเกณฑ์เดิม (หมวดใหญ่ → หมวดย่อย) — ปุ่มเพิ่มหมวดใหญ่อยู่ในกรอบนี้ที่เดียว
-///
-/// [range] = ช่วงรุ่นของชุดเกณฑ์เดิมที่คำนวณแล้ว (null ถ้ายังโหลดชุดเกณฑ์ไม่ได้)
-CriteriaSetHeader legacyCriteriaSectionHeader({
-  required CohortRange? range,
-  String title = 'เกณฑ์เดิม',
-  String? countingRule,
-  required double totalHours,
-  required int categoryCount,
-  required int subcategoryCount,
-  required VoidCallback onAddCategory,
-  int? academicYear,
-}) =>
-    CriteriaSetHeader(
-      badge: 'ชุดที่ 2',
-      title: title,
-      rangeLabel: range?.pillLabel,
-      audience: range == null
-          ? 'ใช้กับนิสิตรุ่นก่อนหน้าที่ยังไม่มีชุดของตัวเอง'
-          : criteriaAudience(range, academicYear ?? currentAcademicYear()),
-      totalHours: totalHours,
-      metrics: [
-        CriteriaMetric('${formatHours(totalHours)} ชม.', 'ชั่วโมงรวม'),
-        CriteriaMetric('$categoryCount หน่วย', 'หน่วยการเรียนรู้'),
-        if (countingRule != null)
-          CriteriaMetric(countingRuleShortLabel(countingRule), 'วิธีนับความครบ'),
-      ],
-      palette: StatusPalette.info,
-      note: '$subcategoryCount หมวดย่อย',
-      capabilities: 'เพิ่มได้: หมวดใหญ่ (ปุ่มด้านล่าง) · หมวดย่อย (ปุ่ม + ท้ายหมวดใหญ่) — '
-          'แก้/ลบได้ทั้งสองระดับจากปุ่มในแต่ละแถว · '
-          'มีผลเฉพาะ${range?.studentsLabel ?? 'นิสิตรุ่นก่อนหน้า'}',
-      actions: [
-        OutlinedButton.icon(
-          onPressed: onAddCategory,
-          icon: const Icon(Icons.add, size: 16),
-          label: const Text(kAddLegacyCategoryLabel),
-        ),
-      ],
-    );
 
 /// หัวข้อส่วนชุดที่ผู้ดูแลสร้างเอง — แก้ข้อมูลชุด + ปุ่มเพิ่มของทุกชนิดอยู่ในกรอบนี้
 CriteriaSetHeader customCriteriaSectionHeader(
@@ -862,23 +690,11 @@ CriteriaSetHeader customCriteriaSectionHeader(
     onDelete: onDelete,
     capabilities: 'แก้ได้ทั้งชุด: ข้อมูลชุด (ปุ่มดินสอ) · เพิ่ม Talent · กลุ่มแชร์เป้า · '
         'รายการเกณฑ์ (ปุ่มด้านล่าง) · แก้/ลบรายการจากปุ่มในแต่ละแถว — มีผลกับ${range.studentsLabel}',
-    actions: [
-      OutlinedButton.icon(
-        onPressed: onAddTalent,
-        icon: const Icon(Icons.add, size: 16),
-        label: const Text('เพิ่ม Talent'),
-      ),
-      OutlinedButton.icon(
-        onPressed: onAddGroup,
-        icon: const Icon(Icons.add, size: 16),
-        label: const Text('เพิ่มกลุ่มแชร์เป้า'),
-      ),
-      OutlinedButton.icon(
-        onPressed: onAddRequirement,
-        icon: const Icon(Icons.add, size: 16),
-        label: const Text('เพิ่มรายการเกณฑ์'),
-      ),
-    ],
+    actions: criteriaContentActions(
+      onAddTalent: onAddTalent,
+      onAddGroup: onAddGroup,
+      onAddRequirement: onAddRequirement,
+    ),
   );
 }
 
@@ -929,7 +745,7 @@ class CriteriaSetCard extends StatelessWidget {
   }
 }
 
-/// หัวของชุดเกณฑ์หนึ่งชุด — ป้าย "ชุดที่ N" → ชื่อ → ป้ายช่วงรหัส (เด่น) → ป้ายล็อกชิดขวา
+/// หัวของชุดเกณฑ์หนึ่งชุด — ป้าย "ชุดที่ N" → ชื่อ → ป้ายช่วงรหัส (เด่น) → ป้าย "ชุดทางการ" ชิดขวา
 /// ตามด้วยปีเข้าศึกษา + metric 3 ใบ + สิ่งที่ทำได้ในชุดนี้
 class CriteriaSetHeader extends StatelessWidget {
   const CriteriaSetHeader({
@@ -943,14 +759,14 @@ class CriteriaSetHeader extends StatelessWidget {
     this.metrics,
     this.note,
     this.warning,
-    this.readOnly = false,
+    this.official = false,
     this.onEdit,
     this.onDelete,
     this.capabilities,
     this.actions = const [],
   });
 
-  /// บอกตรง ๆ ว่าในชุดนี้เพิ่ม/แก้อะไรได้บ้าง (หรืออ่านอย่างเดียว)
+  /// บอกตรง ๆ ว่าในชุดนี้เพิ่ม/แก้อะไรได้บ้าง และส่วนไหนแก้ไม่ได้
   final String? capabilities;
 
   /// ปุ่มเพิ่มของในชุดนี้ — วางไว้ในกรอบเดียวกับหัวข้อ เห็นชัดว่าเป็นของชุดไหน
@@ -974,9 +790,9 @@ class CriteriaSetHeader extends StatelessWidget {
   /// ข้อความเตือนจาก backend (`hours_warning`) — ชั่วโมงของรายการยังไม่ตรงกับเป้าของชุด
   final String? warning;
 
-  /// ชุดเกณฑ์ทางการ — ปิดปุ่มแก้/ลบตั้งแต่แรกพร้อมบอกเหตุผล ดีกว่าปล่อยให้กดแล้ว
-  /// ค่อยเด้ง 403 กลับมา
-  final bool readOnly;
+  /// ชุดเกณฑ์ทางการ (seed ไว้) — แสดงป้าย "ชุดทางการ" บอกที่มา ไม่ได้แปลว่าแก้ไม่ได้
+  /// (ของข้างในชุดแก้ได้ทุกชุด · ปุ่มแก้/ลบระดับชุดควบคุมด้วย [onEdit]/[onDelete])
+  final bool official;
 
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
@@ -986,7 +802,7 @@ class CriteriaSetHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final shownMetrics =
         metrics ?? [CriteriaMetric('${formatHours(totalHours)} ชม.', 'ชั่วโมงรวม')];
-    const lock = _LockPill();
+    const officialChip = _OfficialChip();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(
@@ -1007,7 +823,7 @@ class CriteriaSetHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           LayoutBuilder(builder: (context, constraints) {
-            // จอกว้าง: ป้ายล็อกชิดขวา · จอแคบ: ต่อท้ายในแถวเดียวกันแล้วตกบรรทัดเอง
+            // จอกว้าง: ป้ายชุดทางการชิดขวา · จอแคบ: ต่อท้ายในแถวเดียวกันแล้วตกบรรทัดเอง
             final wide = constraints.maxWidth >= 640;
             final top = Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -1047,7 +863,7 @@ class CriteriaSetHeader extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (readOnly && !wide) lock,
+                if (official && !wide) officialChip,
                 if (onEdit != null)
                   AppIconButton(
                       icon: Icons.edit, size: 28, tooltip: 'แก้ไขชุดเกณฑ์', onPressed: onEdit),
@@ -1061,13 +877,13 @@ class CriteriaSetHeader extends StatelessWidget {
                   ),
               ],
             );
-            if (!readOnly || !wide) return top;
+            if (!official || !wide) return top;
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(child: top),
                 const SizedBox(width: AppSpacing.sm),
-                const Padding(padding: EdgeInsets.only(top: 2), child: lock),
+                const Padding(padding: EdgeInsets.only(top: 2), child: officialChip),
               ],
             );
           }),
@@ -1116,7 +932,7 @@ class CriteriaSetHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
-                    readOnly ? Icons.lock_outline : Icons.edit_note,
+                    Icons.edit_note,
                     size: 16,
                     color: AppColors.muted,
                   ),
@@ -1145,15 +961,17 @@ class CriteriaSetHeader extends StatelessWidget {
   }
 }
 
-/// ป้าย "เกณฑ์ทางการ · อ่านอย่างเดียว" — หน้าตาเดียวกับ StatusChip สีเทา แต่ข้อความตกบรรทัดได้
-/// (StatusChip ใช้ Row ที่หดไม่ได้ พอจอแคบ ป้ายยาวแบบนี้จะล้นขอบการ์ด)
-class _LockPill extends StatelessWidget {
-  const _LockPill();
+/// ป้าย "ชุดทางการ" — บอกว่าเป็นเกณฑ์ที่ระบบตั้งไว้ ไม่มีรูปกุญแจเพราะแก้ของข้างในได้แล้ว
+///
+/// ข้อความตกบรรทัดได้ (StatusChip ใช้ Row ที่หดไม่ได้ ป้ายจะล้นขอบการ์ดบนจอแคบ)
+class _OfficialChip extends StatelessWidget {
+  const _OfficialChip();
 
   @override
   Widget build(BuildContext context) {
     const palette = StatusPalette.neutral;
     return Container(
+      key: const ValueKey('official-set-chip'),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
         color: palette.background,
@@ -1162,11 +980,11 @@ class _LockPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.lock_outline, size: 14, color: palette.foreground),
+          Icon(Icons.verified_outlined, size: 14, color: palette.foreground),
           const SizedBox(width: AppSpacing.xs),
           Flexible(
             child: Text(
-              'เกณฑ์ทางการ · อ่านอย่างเดียว',
+              'ชุดทางการ',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(color: palette.foreground),
             ),
           ),

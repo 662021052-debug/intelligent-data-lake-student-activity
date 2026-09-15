@@ -151,20 +151,26 @@ void main() {
 
     testWidgets('ชุด 2567 ตอนยังไม่มีชุด 2570 → "ใช้กับรหัส 67 ขึ้นไป (ปัจจุบัน = ปี 1–3)"',
         (tester) async {
-      await tester.pumpWidget(_wrap(systemCriteriaSectionHeader(
+      await tester.pumpWidget(_wrap(officialCriteriaSectionHeader(
         _s2567,
+        badge: 'ชุดที่ 1',
         allSets: [_legacy, _s2567],
         academicYear: 2569,
+        onAddGroup: () {},
+        onAddRequirement: () {},
       )));
       expect(pill(tester), 'ใช้กับรหัส 67 ขึ้นไป');
       expect(find.text('เข้าศึกษาปี 2567 ขึ้นไป (ปัจจุบัน = ปี 1–3)'), findsOneWidget);
     });
 
     testWidgets('เพิ่มชุด 2570 แล้วป้ายชุด 2567 เปลี่ยนเป็น "67–69" เอง', (tester) async {
-      await tester.pumpWidget(_wrap(systemCriteriaSectionHeader(
+      await tester.pumpWidget(_wrap(officialCriteriaSectionHeader(
         _s2567,
+        badge: 'ชุดที่ 1',
         allSets: [_legacy, _s2567, _s2570],
         academicYear: 2569,
+        onAddGroup: () {},
+        onAddRequirement: () {},
       )));
       expect(pill(tester), 'ใช้กับรหัส 67–69');
       expect(find.text('เข้าศึกษาปี 2567–2569 (ปัจจุบัน = ปี 1–3)'), findsOneWidget);

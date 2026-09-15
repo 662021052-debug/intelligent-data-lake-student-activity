@@ -151,6 +151,11 @@ class CriteriaRequirementRead(BaseModel):
     # id ของกลุ่มเดียวกัน — ฟอร์มแก้ไขต้องส่งค่าเดิมกลับใน PUT (แทนที่ทั้งแถว)
     # ไม่งั้นกดบันทึกเฉย ๆ รายการก็หลุดออกจากกลุ่ม
     group_id: Optional[int] = None
+    # ฟิลด์ที่ PUT แทนที่ทั้งแถวเหมือนกัน — ฟอร์มแก้ไขต้องได้ค่าเดิมไปส่งกลับ ไม่งั้นแก้ชั่วโมง
+    # รายการเดียวแล้ว "กฎพิเศษ" ของคู่ Social ในชุด 2567 หายไปเงียบ ๆ
+    rule_note: Optional[str] = None
+    organizer: Optional[str] = None
+    min_activities: Optional[int] = None
 
 
 class CriteriaGroupRead(BaseModel):

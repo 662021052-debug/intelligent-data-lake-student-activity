@@ -3,7 +3,6 @@ import 'package:activity_tracking_frontend/models/learning_unit.dart';
 import 'package:activity_tracking_frontend/screens/criteria_set_forms.dart';
 import 'package:activity_tracking_frontend/screens/hour_categories_screen.dart';
 import 'package:activity_tracking_frontend/theme/app_theme.dart';
-import 'package:activity_tracking_frontend/utils/cohort_range.dart';
 import 'package:activity_tracking_frontend/widgets/app_buttons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -99,18 +98,20 @@ void main() {
   });
 
   group('หัวข้อชุดเกณฑ์', () {
-    testWidgets('ชุดของระบบมีป้าย "เกณฑ์ทางการ" และไม่มีปุ่มแก้/ลบ', (tester) async {
+    testWidgets('ชุดทางการมีป้าย "ชุดทางการ" แบบไม่มีกุญแจ และไม่มีปุ่มแก้/ลบระดับชุด', (tester) async {
       await tester.pumpWidget(_wrap(const CriteriaSetHeader(
         badge: 'ชุดที่ 1',
         title: 'เกณฑ์ 2567 หลักสูตรปกติ',
         audience: 'ใช้กับนิสิตรหัส 67 ขึ้นไป (เข้าศึกษา 2567)',
         totalHours: 60,
         palette: StatusPalette.info,
-        readOnly: true,
+        official: true,
       )));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('เกณฑ์ทางการ'), findsOneWidget);
+      expect(find.text('ชุดทางการ'), findsOneWidget);
+      expect(find.textContaining('อ่านอย่างเดียว'), findsNothing);
+      expect(find.byIcon(Icons.lock_outline), findsNothing);
       expect(find.byTooltip('แก้ไขชุดเกณฑ์'), findsNothing);
       expect(find.byTooltip('ลบชุดเกณฑ์'), findsNothing);
     });
@@ -129,7 +130,7 @@ void main() {
       )));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('เกณฑ์ทางการ'), findsNothing);
+      expect(find.text('ชุดทางการ'), findsNothing);
       await tester.tap(find.byTooltip('แก้ไขชุดเกณฑ์'));
       await tester.tap(find.byTooltip('ลบชุดเกณฑ์'));
       expect(edited, isTrue);
@@ -482,45 +483,74 @@ void main() {
     Finder inHeader(Finder matching) =>
         find.descendant(of: find.byType(CriteriaSetHeader), matching: matching);
 
-    testWidgets('เกณฑ์เดิม: ปุ่ม "เพิ่มหมวดใหญ่" อยู่ในกรอบนี้ และบอกว่าเป็นของรุ่น 66 ลงไป',
+    testWidgets('ชุดทางการ 2567: ปุ่มเพิ่ม Talent/กลุ่ม/รายการเหมือนชุดผู้ดูแล · ไม่มีกุญแจ · ไม่มีปุ่มแก้/ลบชุด',
         (tester) async {
-      var added = 0;
-      await tester.pumpWidget(_wrap(legacyCriteriaSectionHeader(
-        range: const CohortRange(from: 0, until: 2566),
-        academicYear: 2569,
-        totalHours: 60,
-        categoryCount: 5,
-        subcategoryCount: 20,
-        onAddCategory: () => added++,
+      final pressed = <String>[];
+      final set = _set(code: '2567-regular', effectiveFromCohort: 2567, isSystem: true);
+      await tester.pumpWidget(_wrap(SingleChildScrollView(
+        child: officialCriteriaSectionHeader(
+          set,
+          badge: 'ชุดที่ 1',
+          allSets: [set],
+          academicYear: 2569,
+          onAddTalent: () => pressed.add('talent'),
+          onAddGroup: () => pressed.add('group'),
+          onAddRequirement: () => pressed.add('requirement'),
+        ),
       )));
       await tester.pumpAndSettle();
 
-      final button = inHeader(find.widgetWithText(OutlinedButton, kAddLegacyCategoryLabel));
-      expect(button, findsOneWidget);
-      expect(kAddLegacyCategoryLabel, contains('≤66'));
-      expect(inHeader(find.text('ใช้กับรหัส ≤66')), findsOneWidget);
-      expect(find.text('เข้าศึกษาปี 2566 ลงไป (ปัจจุบัน = ปี 4 ขึ้นไป)'), findsOneWidget);
-      expect(inHeader(find.textContaining('เพิ่มได้: หมวดใหญ่')), findsOneWidget);
-      expect(inHeader(find.textContaining('หมวดย่อย')), findsWidgets);
-      expect(inHeader(find.textContaining('มีผลเฉพาะนิสิตรหัส ≤66')), findsOneWidget);
-
-      await tester.tap(button);
-      expect(added, 1);
+      for (final label in ['เพิ่ม Talent', 'เพิ่มกลุ่มแชร์เป้า', 'เพิ่มรายการเกณฑ์']) {
+        await tester.tap(inHeader(find.widgetWithText(OutlinedButton, label)));
+      }
+      expect(pressed, ['talent', 'group', 'requirement']);
+      // ระดับชุดของชุดทางการ backend ตอบ 403 — ไม่โชว์ปุ่มที่กดแล้วเด้ง
+      expect(inHeader(find.byTooltip('แก้ไขชุดเกณฑ์')), findsNothing);
+      expect(inHeader(find.byTooltip('ลบชุดเกณฑ์')), findsNothing);
+      expect(inHeader(find.byIcon(Icons.lock_outline)), findsNothing);
+      expect(find.textContaining('อ่านอย่างเดียว'), findsNothing);
+      expect(inHeader(find.text('ชุดทางการ')), findsOneWidget);
+      expect(inHeader(find.textContaining('มีผลกับการวัดนิสิตรหัส 67 ขึ้นไป ทันที')), findsOneWidget);
     });
 
-    testWidgets('ชุดทางการ 2567: ไม่มีปุ่มเลย บอกว่าดูอย่างเดียว และชี้ไปปุ่มสร้างชุดใหม่',
+    testWidgets('เกณฑ์เดิม: ใช้ปุ่มชุดเดียวกัน (กลุ่ม/รายการ) · ไม่มี "เพิ่มหมวดใหญ่" และไม่มีปุ่ม Talent',
         (tester) async {
-      await tester.pumpWidget(_wrap(systemCriteriaSectionHeader(
-        _set(code: '2567-regular', effectiveFromCohort: 2567, isSystem: true),
+      final pressed = <String>[];
+      const legacy = CriteriaSet(
+        id: 1,
+        code: 'legacy-2566',
+        name: 'เกณฑ์เดิม (โครงสร้าง 2560–2566) หลักสูตรปกติ',
+        totalRequiredHours: 60,
+        effectiveFromCohort: 0,
+        isSystem: true,
+        groupedBy: 'learning_unit',
+        countingRule: 'total_per_unit',
+      );
+      final s2567 = _set(id: 2, code: '2567-regular', effectiveFromCohort: 2567, isSystem: true);
+      await tester.pumpWidget(_wrap(SingleChildScrollView(
+        child: officialCriteriaSectionHeader(
+          legacy,
+          badge: 'ชุดที่ 2',
+          allSets: [legacy, s2567],
+          academicYear: 2569,
+          // ส่งมาก็ไม่แสดง — ชุดหน่วยการเรียนรู้เพิ่ม Talent แล้ว backend จะจัดกลุ่มใหม่ทั้งชุด
+          onAddTalent: () => pressed.add('talent'),
+          onAddGroup: () => pressed.add('group'),
+          onAddRequirement: () => pressed.add('requirement'),
+        ),
       )));
       await tester.pumpAndSettle();
 
-      expect(inHeader(find.byType(OutlinedButton)), findsNothing);
-      expect(inHeader(find.byType(FilledButton)), findsNothing);
-      expect(inHeader(find.byType(AppIconButton)), findsNothing);
-      expect(inHeader(find.textContaining('ดูได้อย่างเดียว')), findsOneWidget);
-      expect(inHeader(find.textContaining('"$kAddCriteriaSetLabel"')), findsOneWidget);
-      expect(inHeader(find.byIcon(Icons.lock_outline)), findsWidgets);
+      expect(inHeader(find.widgetWithText(OutlinedButton, 'เพิ่ม Talent')), findsNothing);
+      for (final label in ['เพิ่มกลุ่มแชร์เป้า', 'เพิ่มรายการเกณฑ์']) {
+        await tester.tap(inHeader(find.widgetWithText(OutlinedButton, label)));
+      }
+      expect(pressed, ['group', 'requirement']);
+      expect(find.textContaining('เพิ่มหมวดใหญ่'), findsNothing);
+      expect(inHeader(find.byIcon(Icons.lock_outline)), findsNothing);
+      expect(inHeader(find.text('ใช้กับรหัส ≤66')), findsOneWidget);
+      expect(find.text('เข้าศึกษาปี 2566 ลงไป (ปัจจุบัน = ปี 4 ขึ้นไป)'), findsOneWidget);
+      expect(inHeader(find.textContaining('มีผลกับการวัดนิสิตรหัส ≤66 ทันที')), findsOneWidget);
     });
 
     testWidgets('ชุดของผู้ดูแล: ปุ่มเพิ่ม Talent/กลุ่ม/รายการ + แก้/ลบชุด อยู่ในกรอบของชุด',
