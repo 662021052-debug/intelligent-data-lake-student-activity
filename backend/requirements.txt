@@ -16,6 +16,9 @@ Pillow==10.4.0
 # Silver layer OCR (Thai+English, CPU). Heavy (pulls torch); imported lazily so
 # tests/local runs without it still work when OCR_BACKEND=stub.
 easyocr==1.7.1
+# perceptual hash ของไฟล์หลักฐานภาพ (OCR เฟส 3A) — จับภาพเกือบเหมือนที่ checksum จับไม่ได้
+# ดึง numpy/scipy/PyWavelets มาด้วย (numpy/scipy มีจาก easyocr อยู่แล้ว) · import แบบ lazy
+imagehash==4.3.2
 # Chatbot LLM (Gemini). Imported lazily so tests/local runs without it still work
 # when LLM_BACKEND=stub. The pgvector Postgres path uses raw SQL (no extra dep).
 google-generativeai==0.7.2

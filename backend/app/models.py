@@ -50,6 +50,13 @@ class DuplicateReason(str, Enum):
     matches_rejected = "matches_rejected"      # ไม่ซ้ำใบที่ใช้งาน แต่ตรงกับใบที่เคยถูกปฏิเสธ
 
 
+class MatchKind(str, Enum):
+    """ใบซ้ำ "ตรงกันแบบไหน" — ใช้คู่กับ DuplicateReason (OCR เฟส 3A)"""
+
+    exact = "exact"  # checksum เดียวกันเป๊ะทุกไบต์ (เฟส 1)
+    near = "near"    # pHash ใกล้กันภายใน threshold — ภาพครอป/บีบอัด/ปรับขนาดใหม่
+
+
 class ProgramType(str, Enum):
     """กลุ่มหลักสูตรของนิสิต — เกณฑ์ชั่วโมงต่างกัน (ปกติ 60 ชม. / ต่อเนื่อง 30 ชม.)."""
 
@@ -451,6 +458,9 @@ class RawFile(SQLModel, table=True):
     content_type: str
     size_bytes: int
     checksum: str = Field(index=True)  # SHA-256 hex digest (integrity + duplicate detection)
+    # perceptual hash (hex 64 ตัว = 256 บิต, app.phash) — ภาพเท่านั้น
+    # null = PDF / ถอดภาพไม่ได้ / ไฟล์ที่เข้ามาก่อนเฟส 3A (ไม่ backfill)
+    phash: Optional[str] = Field(default=None, max_length=64)
     source_system: str  # e.g. "student_upload", "staff_import"
     uploaded_by: Optional[int] = Field(default=None, foreign_key="user.id")
     ingested_at: datetime = Field(default_factory=datetime.utcnow)
@@ -467,6 +477,7 @@ class RawFileRead(SQLModel):
     content_type: str
     size_bytes: int
     checksum: str
+    phash: Optional[str] = None
     source_system: str
     uploaded_by: Optional[int] = None
     ingested_at: datetime
@@ -497,6 +508,9 @@ class SilverEvidenceOcr(SQLModel, table=True):
         ),
     )
     duplicate_reason: Optional[DuplicateReason] = None  # null = ไม่ซ้ำ หรือแถวก่อนเฟส 1.2
+    # ซ้ำแบบเป๊ะ (checksum) หรือคล้าย (pHash) — คอลัมน์มาพร้อม migration เฟส 3A.1
+    # แต่ตั้งค่าจริงในเฟส 3A.2 · null = ไม่ซ้ำ หรือแถวก่อนหน้านั้น
+    match_kind: Optional[MatchKind] = None
 
 
 class SilverEvidenceOcrRead(SQLModel):
@@ -511,6 +525,7 @@ class SilverEvidenceOcrRead(SQLModel):
     processed_at: datetime
     duplicate_of_participation_id: Optional[int] = None
     duplicate_reason: Optional[DuplicateReason] = None
+    match_kind: Optional[MatchKind] = None
     # บริบทของใบต้นทาง — คำนวณตอนอ่าน ไม่ได้เก็บในตาราง ให้เจ้าหน้าที่รู้ว่าซ้ำกับใคร
     # นิสิตเรียก GET .../ocr ของใบตัวเองได้ จึงไม่ส่งชื่อ/รหัสของคนอื่นให้ role student
     duplicate_of_student_name: Optional[str] = None

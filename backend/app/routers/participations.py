@@ -33,6 +33,7 @@ from app.models import (
 from app.checkin import checkin_window, normalize_token
 from app.timeutil import now_th_naive
 from app.ocr import OcrEngine, get_ocr
+from app.phash import compute_phash
 from app.schemas import Page, ParticipationCheckin, ParticipationRegister
 from app.storage import ObjectStorage, get_storage
 
@@ -526,6 +527,8 @@ def upload_evidence(
 
     data = file.file.read()
     checksum = hashlib.sha256(data).hexdigest()
+    # ชั้นที่สองของการกันไฟล์ซ้ำ (ภาพเกือบเหมือน) — ภาพเท่านั้น ถอดไม่ได้ก็เป็น None ไม่ล้ม
+    phash = compute_phash(data, file.content_type)
 
     now = datetime.utcnow()
     original_filename = file.filename or "upload"
@@ -548,6 +551,7 @@ def upload_evidence(
         content_type=file.content_type,
         size_bytes=size_bytes,
         checksum=checksum,
+        phash=phash,
         source_system="student_upload",
         uploaded_by=current_user.id,
         ingested_at=now,
