@@ -22,6 +22,7 @@ from app.models import (
     Activity,
     ApprovalStatus,
     DuplicateReason,
+    EvidenceKind,
     EvidenceStatus,
     ImportedCompletion,
     MatchKind,
@@ -41,6 +42,7 @@ from seed_evidence_demo import (
     VARIANT_NEAR_DUPLICATE,
     VARIANT_PDF_SCAN,
     VARIANT_PDF_TEXT,
+    VARIANT_PHOTO,
     VARIANT_TEMPLATE_BASE,
     VARIANT_TEMPLATE_TWIN,
     SeedAborted,
@@ -221,19 +223,22 @@ def _latest_ocr(session, raw_file_id: int) -> SilverEvidenceOcr:
 
 
 def test_plan_has_every_variant():
-    plan = Counter(plan_variants(29))
-    assert sum(plan.values()) == 29
+    plan = Counter(plan_variants(30))
+    assert sum(plan.values()) == 30
     assert set(plan) == {
         "full", "no_name", "low_quality", VARIANT_DUPLICATE, VARIANT_NEAR_DUPLICATE,
-        VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN,
+        VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_PHOTO, VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN,
     }
-    # ค่าเริ่มต้น 29 = ชุดเดิม 24 ใบเท่าเดิม + fixture เฟส 3 อย่างละใบ
+    # ค่าเริ่มต้น 30 = ชุดเดิม 24 ใบเท่าเดิม + fixture อย่างละใบ
     assert (plan["full"], plan["no_name"], plan["low_quality"], plan[VARIANT_DUPLICATE]) == (11, 5, 4, 4)
-    for single in (VARIANT_NEAR_DUPLICATE, VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN):
+    for single in (
+        VARIANT_NEAR_DUPLICATE, VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_PHOTO,
+        VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN,
+    ):
         assert plan[single] == 1, single
-    assert len(plan_variants(9)) == 9
+    assert len(plan_variants(10)) == 10
     with pytest.raises(SeedAborted):
-        plan_variants(8)
+        plan_variants(9)
 
 
 def test_compared_files_are_planned_before_the_files_compared_against_them():
@@ -273,16 +278,16 @@ def test_flagged_is_guaranteed_even_when_ocr_reads_nothing(session, storage, wor
 
     ใบ PDF ที่มี text layer ไม่ผ่าน OCR เลย จึงอาจ auto_approved ได้แม้ OCR ตาบอด
     """
-    report = populate(session, storage, BlindOcr(), now=NOW, count=9, font_path=THAI_FONT, log=lambda _: None)
+    report = populate(session, storage, BlindOcr(), now=NOW, count=10, font_path=THAI_FONT, log=lambda _: None)
     decisions = _decisions(session)
     text_layer_auto = report.decisions[VARIANT_PDF_TEXT]["auto_approved"]
-    _assert_designed_fixtures_flagged(report, 9, twin_flagged=True)
-    assert decisions["flagged"] >= _flagged_when_ocr_cannot_veto(9)
+    _assert_designed_fixtures_flagged(report, 10, twin_flagged=True)
+    assert decisions["flagged"] >= _flagged_when_ocr_cannot_veto(10)
     # ส่วนเกิน (ถ้ามี) ต้องเป็นภาพคล้ายเท่านั้น ไม่มีทางเป็นไฟล์ซ้ำเป๊ะนอกเคส C
     exact = session.exec(select(SilverEvidenceOcr).where(SilverEvidenceOcr.match_kind == MatchKind.exact)).all()
-    assert len(exact) == plan_variants(9).count(VARIANT_DUPLICATE)
+    assert len(exact) == plan_variants(10).count(VARIANT_DUPLICATE)
     assert decisions["auto_approved"] <= text_layer_auto + 0, "OCR ตาบอด ใบที่ auto ได้มีแค่ PDF text layer"
-    assert decisions["needs_review"] == 9 - decisions["flagged"] - decisions["auto_approved"]
+    assert decisions["needs_review"] == 10 - decisions["flagged"] - decisions["auto_approved"]
 
 
 def test_respects_status_capacity_time_and_past_activities(session, storage, world):
@@ -311,9 +316,9 @@ def test_respects_status_capacity_time_and_past_activities(session, storage, wor
 
 
 def test_originals_keep_their_hours_and_copies_are_exact_or_near(session, storage, world):
-    populate(session, storage, BlindOcr(), now=NOW, count=9, font_path=THAI_FONT, log=lambda _: None)
+    populate(session, storage, BlindOcr(), now=NOW, count=10, font_path=THAI_FONT, log=lambda _: None)
     originals = session.exec(select(RawFile).where(RawFile.source_system == SOURCE_DEMO_ORIGINAL)).all()
-    plan = plan_variants(9)
+    plan = plan_variants(10)
     assert len(originals) == plan.count(VARIANT_DUPLICATE) + plan.count(VARIANT_NEAR_DUPLICATE)
     exact = near = 0
     for original in originals:
@@ -341,7 +346,7 @@ def test_originals_keep_their_hours_and_copies_are_exact_or_near(session, storag
 
 def test_case_a_near_copy_of_original_is_flagged_near_cross_student(session, storage, world):
     """เคส A: สำเนาจริง (ชื่อเจ้าของเดิม) ย่อ+บีบอัดใหม่ → flagged near cross_student ชี้ใบต้นฉบับ"""
-    report = populate(session, storage, BlindOcr(), now=NOW, count=9, font_path=THAI_FONT, log=lambda _: None)
+    report = populate(session, storage, BlindOcr(), now=NOW, count=10, font_path=THAI_FONT, log=lambda _: None)
 
     near_rows = session.exec(select(SilverEvidenceOcr).where(SilverEvidenceOcr.match_kind == MatchKind.near)).all()
     against_original = [
@@ -365,11 +370,11 @@ def test_case_a_near_copy_of_original_is_flagged_near_cross_student(session, sto
 
 
 def test_case_c_exact_copy_is_flagged_exact(session, storage, world):
-    report = populate(session, storage, BlindOcr(), now=NOW, count=9, font_path=THAI_FONT, log=lambda _: None)
+    report = populate(session, storage, BlindOcr(), now=NOW, count=10, font_path=THAI_FONT, log=lambda _: None)
 
     exact_rows = session.exec(select(SilverEvidenceOcr).where(SilverEvidenceOcr.match_kind == MatchKind.exact)).all()
 
-    assert len(exact_rows) == plan_variants(9).count(VARIANT_DUPLICATE)
+    assert len(exact_rows) == plan_variants(10).count(VARIANT_DUPLICATE)
     assert report.decisions[VARIANT_DUPLICATE] == Counter(flagged=len(exact_rows))
     assert all(r.duplicate_reason == DuplicateReason.cross_student for r in exact_rows)
 
@@ -426,20 +431,56 @@ def test_pdf_fixtures_take_the_text_layer_and_ocr_paths(session, storage, world)
     text_layer = next(r for r in pdf_rows if r.ocr_confidence == settings.ocr_pdf_text_layer_confidence)
     assert "มหาวิทยาลัยทักษิณ" in text_layer.extracted_text, "ข้อความจาก text layer จริง ไม่ใช่ข้อความ OCR ปลอม"
     assert report.decisions[VARIANT_PDF_TEXT] == Counter(auto_approved=1)
-    assert report.decisions[VARIANT_PDF_SCAN] == Counter(auto_approved=1)
+    # pdf_scan: OCR ปลอมให้ข้อความเหมือนกันทุกใบ text veto จึงทำงานไม่ได้ — ถ้าภาพ render ของมันแตะ
+    # threshold กับใบเทมเพลตเดียวกัน (เช่น low_quality ที่เบลอจนเหลือแต่กรอบ) จะถูก flag แบบ near
+    # ตามกฎ "veto ไม่ได้ → คง flag" (ดู _assert_designed_fixtures_flagged) ส่วนอย่างอื่นต้อง auto
+    scan_row = next(r for r in pdf_rows if r.ocr_confidence != settings.ocr_pdf_text_layer_confidence)
+    if scan_row.decision.value == "flagged":
+        scan_raw = session.get(RawFile, scan_row.raw_file_id)
+        others = session.exec(
+            select(RawFile).where(
+                RawFile.participation_id == scan_row.duplicate_of_participation_id, RawFile.id < scan_raw.id
+            )
+        ).all()
+        assert scan_row.match_kind == MatchKind.near, "pdf_scan ห้ามโดน exact — ไฟล์ไม่ซ้ำใคร"
+        assert min(phash_distance(scan_raw.phash, o.phash) for o in others if o.phash) <= settings.ocr_phash_near_bits
+    else:
+        assert report.decisions[VARIANT_PDF_SCAN] == Counter(auto_approved=1)
+
+
+def test_photo_with_auto_worthy_ocr_score_still_needs_review(session, storage, world):
+    """ภาพถ่ายกิจกรรม (ข้อความแบนเนอร์ + ป้ายชื่อตรงนิสิต/กิจกรรม) คะแนน OCR ผ่านเกณฑ์ auto ครบ
+    → ต้องได้ needs_review เพราะเป็นภาพถ่าย ส่วนใบอื่นทุกใบของ seed เป็น certificate"""
+    report = populate(
+        session, storage, ReadsEverythingOcr(world["text"]), now=NOW, count=12,
+        font_path=THAI_FONT, log=lambda _: None,
+    )
+
+    photos = session.exec(select(RawFile).where(RawFile.evidence_kind == EvidenceKind.photo)).all()
+    assert len(photos) == 1 and photos[0].content_type == "image/jpeg"
+    row = _latest_ocr(session, photos[0].id)
+    # คะแนนผ่านเกณฑ์ auto ทุกข้อ — ไม่ได้ตกไป review เพราะคะแนนต่ำ
+    assert row.ocr_confidence >= settings.ocr_auto_confidence
+    assert row.match_score >= settings.ocr_auto_match
+    assert row.decision.value == "needs_review"
+    assert session.get(Participation, photos[0].participation_id).evidence_status == EvidenceStatus.pending
+    assert report.decisions[VARIANT_PHOTO] == Counter(needs_review=1)
+
+    others = session.exec(select(RawFile).where(RawFile.evidence_kind != EvidenceKind.photo)).all()
+    assert others and all(r.evidence_kind == EvidenceKind.certificate for r in others)
 
 
 def test_rerun_refuses_and_remove_cleans_up_only_demo(session, storage, world):
     before = session.exec(select(func.count()).select_from(Participation)).one()
-    populate(session, storage, BlindOcr(), now=NOW, count=9, font_path=THAI_FONT, log=lambda _: None)
+    populate(session, storage, BlindOcr(), now=NOW, count=10, font_path=THAI_FONT, log=lambda _: None)
     with pytest.raises(SeedAborted):
-        populate(session, storage, BlindOcr(), now=NOW, count=9, font_path=THAI_FONT, log=lambda _: None)
+        populate(session, storage, BlindOcr(), now=NOW, count=10, font_path=THAI_FONT, log=lambda _: None)
 
     keys = [(f.bucket, f.object_key) for f in session.exec(select(RawFile)).all()]
     removed, files = remove_demo(session, storage)
     session.commit()
 
-    assert removed == 9
+    assert removed == 10
     assert files == len(keys)
     assert session.exec(select(func.count()).select_from(Participation)).one() == before
     assert session.exec(select(func.count()).select_from(RawFile)).one() == 0

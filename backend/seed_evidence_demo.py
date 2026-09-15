@@ -9,6 +9,8 @@
 * ``low_quality``    ภาพถ่ายเบลอ                 → คาดว่า needs_review
 * ``pdf_text``       PDF ที่ export จากโปรแกรม (มี text layer) → อ่านข้อความตรง ข้าม OCR (เฟส 3B)
 * ``pdf_scan``       PDF สแกน (ภาพล้วน) → render + OCR จริง ได้ decision ตามคะแนน (เฟส 3B)
+* ``photo``          ภาพถ่ายกิจกรรม (ถือป้ายชื่อหน้าแบนเนอร์) คะแนน OCR ผ่านเกณฑ์ auto → needs_review
+                     เสมอเพราะเป็นภาพถ่าย (Evidence Kind เฟส 3)
 * ``template_base``  เกียรติบัตรเทมเพลต "แบนเนอร์" ของนิสิตคนหนึ่ง → decision ตามคะแนน OCR
 * ``template_twin``  เทมเพลตเดียวกันของอีกคน คนละกิจกรรม — pHash ใกล้ ``template_base`` แต่ข้อความ
                      ต่างกันชัด → text veto ต้องกันไว้ ไม่ flag (เคส B ของเฟส 3C)
@@ -49,6 +51,7 @@ from app.models import (
     Activity,
     ActivityRequirement,
     ApprovalStatus,
+    EvidenceKind,
     EvidenceStatus,
     ImportedCompletion,
     OcrDecision,
@@ -83,12 +86,14 @@ VARIANT_PDF_TEXT = "pdf_text"
 VARIANT_PDF_SCAN = "pdf_scan"
 VARIANT_TEMPLATE_BASE = "template_base"
 VARIANT_TEMPLATE_TWIN = "template_twin"
+VARIANT_PHOTO = "photo"
 VARIANT_ORDER = (
     VARIANT_FULL,
     VARIANT_NO_NAME,
     VARIANT_LOW_QUALITY,
     VARIANT_PDF_TEXT,
     VARIANT_PDF_SCAN,
+    VARIANT_PHOTO,
     VARIANT_TEMPLATE_BASE,
     VARIANT_TEMPLATE_TWIN,
     VARIANT_DUPLICATE,
@@ -100,13 +105,14 @@ COPY_VARIANTS = (VARIANT_DUPLICATE, VARIANT_NEAR_DUPLICATE)
 TEMPLATE_VARIANTS = (VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN)
 # fixture ของเฟส 3 มีอย่างละหนึ่งใบเสมอ ไม่คิดตามสัดส่วน
 SINGLE_VARIANTS = (
-    VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN, VARIANT_NEAR_DUPLICATE,
+    VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_PHOTO,
+    VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN, VARIANT_NEAR_DUPLICATE,
 )
 
-# 29 = 24 ใบแบบเดิม (full 11 / no_name 5 / low_quality 4 / duplicate 4 เท่าเดิม) + fixture เฟส 3 อีก 5
-DEFAULT_COUNT = 29
+# 30 = 24 ใบแบบเดิม (full 11 / no_name 5 / low_quality 4 / duplicate 4 เท่าเดิม) + fixture อย่างละใบ อีก 6
+DEFAULT_COUNT = 30
 DEFAULT_SEED = 20260914
-MIN_COUNT = 9  # น้อยกว่านี้ได้ไม่ครบทุกแบบ
+MIN_COUNT = 10  # น้อยกว่านี้ได้ไม่ครบทุกแบบ
 
 # คู่เคส B ต้องเข้าชั้น near แน่ ๆ (ไม่ใช่เฉียด threshold) — pHash ห่างไม่เกิน threshold ลบค่านี้
 TEMPLATE_TWIN_MARGIN_BITS = 4
@@ -153,7 +159,7 @@ def plan_variants(count: int) -> list[str]:
         [VARIANT_FULL] * full
         + [VARIANT_NO_NAME] * no_name
         + [VARIANT_LOW_QUALITY] * low_quality
-        + [VARIANT_PDF_TEXT, VARIANT_PDF_SCAN]
+        + [VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_PHOTO]
         + [VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN]
         + [VARIANT_DUPLICATE] * duplicate
         + [VARIANT_NEAR_DUPLICATE]
@@ -238,6 +244,7 @@ def _attach_file(
     uploaded_by: Optional[int],
     ingested_at: datetime,
     content_type: str = "image/png",
+    evidence_kind: EvidenceKind = EvidenceKind.certificate,
 ) -> RawFile:
     """เขียนไฟล์ลง Bronze ตามโครง path เดียวกับการอัปโหลดจริง (รวม checksum + pHash แบบเดียวกัน)"""
     extension = _EXTENSIONS[content_type]
@@ -258,6 +265,8 @@ def _attach_file(
         checksum=hashlib.sha256(data).hexdigest(),
         # เหมือนการอัปโหลดจริง — ไม่มี pHash ชั้นภาพเกือบเหมือนจะจับสำเนาไม่ได้
         phash=compute_phash(data, content_type),
+        # ประเภทหลักฐานเหมือนที่นิสิตเลือกในฟอร์มอัปโหลด (บังคับเลือก) — ใบเกียรติบัตรทุกแบบเป็น certificate
+        evidence_kind=evidence_kind,
         source_system=source,
         uploaded_by=uploaded_by,
         ingested_at=ingested_at,
@@ -386,6 +395,43 @@ def render_banner_certificate(
     return buffer.getvalue()
 
 
+def render_event_photo(
+    *,
+    student_name: str,
+    activity_name: str,
+    activity_date: datetime,
+    location: str,
+    font_path: Optional[str],
+) -> bytes:
+    """ภาพถ่ายกิจกรรมจำลอง — นิสิตถือป้ายชื่อยืนหน้าแบนเนอร์งาน (JPEG · Evidence Kind เฟส 3)
+
+    ข้อความบนภาพตรงทั้งชื่อ กิจกรรม และปี จึงได้คะแนน OCR ผ่านเกณฑ์ auto (วัดใน container 3 คน:
+    ความมั่นใจ 0.62–0.71 · ตรง 0.96–0.98) — ถ้าได้ needs_review แปลว่ากฎ "ภาพถ่ายไม่อนุมัติอัตโนมัติ"
+    ทำงานจริง ไม่ใช่เพราะคะแนนต่ำ
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, height = 1000, 750
+    image = Image.new("RGB", (width, height), "#7fa3c4")
+    draw = ImageDraw.Draw(image)
+
+    def font(size: int):
+        return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
+
+    draw.rectangle([0, 540, width, height], fill="#8a7a5c")  # พื้น
+    draw.rectangle([70, 50, 930, 340], fill="#f7f3ea", outline="#1f3d7a", width=12)  # แบนเนอร์งาน
+    draw.text((110, 75), "มหาวิทยาลัยทักษิณ", font=font(40), fill="#1f3d7a")
+    draw.text((110, 150), activity_name, font=font(44), fill="#9b1c1c")
+    draw.text((110, 240), f"{thai_date(activity_date)}  {location}", font=font(30), fill="#333333")
+    draw.ellipse([430, 370, 570, 510], fill="#d9a877")  # ศีรษะ
+    draw.rectangle([370, 510, 630, height], fill="#2f5d8a")  # ลำตัว
+    draw.rectangle([250, 575, 750, 670], fill="white", outline="#222222", width=5)  # ป้ายชื่อที่ถือ
+    draw.text((275, 595), student_name, font=font(40), fill="#111111")
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=88)
+    return buffer.getvalue()
+
+
 def _own_evidence(
     session: Session,
     variant: str,
@@ -393,8 +439,17 @@ def _own_evidence(
     activity: Activity,
     reference: str,
     font_path: Optional[str],
-) -> tuple[bytes, str]:
-    """ไฟล์หลักฐานของนิสิตเอง ตามแบบ — คืน (bytes, content_type)"""
+) -> tuple[bytes, str, EvidenceKind]:
+    """ไฟล์หลักฐานของนิสิตเอง ตามแบบ — คืน (bytes, content_type, ประเภทหลักฐาน)"""
+    if variant == VARIANT_PHOTO:
+        photo = render_event_photo(
+            student_name=student.full_name,
+            activity_name=activity.name,
+            activity_date=activity.start_at,
+            location=activity.location,
+            font_path=font_path or find_thai_font(),
+        )
+        return photo, "image/jpeg", EvidenceKind.photo
     fields = dict(
         student_name=student.full_name,
         activity_name=activity.name,
@@ -403,12 +458,13 @@ def _own_evidence(
         reference=reference,
     )
     if variant == VARIANT_PDF_TEXT:
-        return certificate_text_pdf(**fields, font_path=font_path or find_thai_font()), "application/pdf"
+        pdf = certificate_text_pdf(**fields, font_path=font_path or find_thai_font())
+        return pdf, "application/pdf", EvidenceKind.certificate
     image_variant = VARIANT_FULL if variant == VARIANT_PDF_SCAN else variant
     png = render_certificate(**fields, variant=image_variant, font_path=font_path)
     if variant == VARIANT_PDF_SCAN:
-        return scanned_pdf(png, settings.ocr_pdf_dpi), "application/pdf"
-    return png, "image/png"
+        return scanned_pdf(png, settings.ocr_pdf_dpi), "application/pdf", EvidenceKind.certificate
+    return png, "image/png", EvidenceKind.certificate
 
 
 def populate(
@@ -515,12 +571,12 @@ def populate(
                 break
         participation = book(student, activity)
         reference = _reference(activity, participation)
-        data, content_type = _own_evidence(session, variant, student, activity, reference, font_path)
+        data, content_type, kind = _own_evidence(session, variant, student, activity, reference, font_path)
         _attach_file(
             session, storage, participation, data,
             reference=reference, source=SOURCE_DEMO,
             uploaded_by=user_by_student.get(student.id), ingested_at=upload_time(activity),
-            content_type=content_type,
+            content_type=content_type, evidence_kind=kind,
         )
         demo.append((variant, participation))
 
