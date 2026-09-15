@@ -22,6 +22,10 @@ class Activity {
   /// staff/admin ยังเห็นพร้อม badge และกดเลิกซ่อนได้
   final bool isHidden;
 
+  /// ผู้ใช้ปัจจุบันจัดการ (แก้ไข/ดูผู้เข้าร่วม) ได้ไหม — backend คำนวณ: admin ทุกอัน,
+  /// staff เฉพาะที่ตัวเองสร้าง · null = endpoint นั้นไม่ได้ส่งมา
+  final bool? canManage;
+
   Activity({
     this.id,
     required this.name,
@@ -38,6 +42,7 @@ class Activity {
     this.participantCount = 0,
     this.requirementIds = const [],
     this.isHidden = false,
+    this.canManage,
   });
 
   bool get isFull => participantCount >= maxParticipants;
@@ -60,6 +65,7 @@ class Activity {
         participantCount: participantCount ?? this.participantCount,
         requirementIds: requirementIds,
         isHidden: isHidden,
+        canManage: canManage,
       );
 
   factory Activity.fromJson(Map<String, dynamic> json) => Activity(
@@ -80,6 +86,7 @@ class Activity {
         participantCount: json['participant_count'] as int? ?? 0,
         requirementIds: (json['requirement_ids'] as List?)?.cast<int>() ?? const [],
         isHidden: json['is_hidden'] as bool? ?? false,
+        canManage: json['can_manage'] as bool?,
       );
 
   Map<String, dynamic> toJson() => {

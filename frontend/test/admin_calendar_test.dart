@@ -39,6 +39,7 @@ Activity _activity({
   int maxParticipants = 120,
   int participantCount = 0,
   bool isHidden = false,
+  bool? canManage,
 }) =>
     Activity(
       id: id,
@@ -51,6 +52,7 @@ Activity _activity({
       location: location,
       approvalStatus: approvalStatus,
       isHidden: isHidden,
+      canManage: canManage,
     );
 
 void _loginAs(String role) {
@@ -473,6 +475,49 @@ void main() {
           [CalendarStaffAction.participants, CalendarStaffAction.edit]);
     });
 
+    test('staff เห็นกิจกรรมคนอื่นในปฏิทินได้ แต่ไม่มีปุ่มผู้เข้าร่วม/แก้ไข (canManage=false)', () {
+      final othersActivity = _activity(startAt: _day, approvalStatus: 'approved', canManage: false);
+      final ownActivity = _activity(startAt: _day, approvalStatus: 'approved', canManage: true);
+      expect(calendarStaffActions(othersActivity, isAdmin: false, canWrite: true), isEmpty);
+      expect(calendarStaffActions(ownActivity, isAdmin: false, canWrite: true),
+          [CalendarStaffAction.participants, CalendarStaffAction.edit]);
+      // ของคนอื่นที่ยังรออนุมัติ: staff ก็ยังไม่มีปุ่มอนุมัติ
+      expect(
+          calendarStaffActions(_activity(startAt: _day, canManage: false), isAdmin: false, canWrite: true),
+          isEmpty);
+    });
+
+    test('admin จัดการได้ทุกกิจกรรมเสมอ · นิสิตไม่มีปุ่มจัดการ', () {
+      final othersPending = _activity(startAt: _day, approvalStatus: 'pending', canManage: false);
+      expect(calendarStaffActions(othersPending, isAdmin: true, canWrite: true),
+          [CalendarStaffAction.approve, CalendarStaffAction.participants, CalendarStaffAction.edit]);
+      expect(calendarStaffActions(approved, isAdmin: false, canWrite: false), isEmpty);
+    });
+  });
+
+  group('ปฏิทินขอกิจกรรมชุดเดียวกันทุก role', () {
+    test('staff ขอ all_owners ให้เห็นเท่า admin · admin/นิสิตไม่ต้องส่ง', () {
+      expect(calendarActivitiesQuery('staff'), {'all_owners': 'true'});
+      expect(calendarActivitiesQuery('admin'), isNull);
+      expect(calendarActivitiesQuery('student'), isNull);
+    });
+
+    test('Activity.fromJson อ่าน can_manage (ไม่ส่งมา = null)', () {
+      Map<String, dynamic> json(Object? canManage) => {
+            'id': 9,
+            'name': 'x',
+            'activity_type': 'วิชาการ',
+            'max_participants': 10,
+            'start_at': '2026-09-15T09:00:00',
+            'location': 'ห้อง',
+            'can_manage': ?canManage,
+          };
+      expect(Activity.fromJson(json(false)).canManage, isFalse);
+      expect(Activity.fromJson(json(true)).canManage, isTrue);
+      expect(Activity.fromJson(json(null)).canManage, isNull);
+      expect(Activity.fromJson(json(false)).copyWith(participantCount: 3).canManage, isFalse);
+    });
+
     testWidgets('admin เห็นปุ่ม "อนุมัติ" ของกิจกรรมที่รออยู่ · staff ไม่เห็น', (tester) async {
       _loginAs('admin');
       await _pump(tester, [_activity(id: 1, startAt: _at(9, 0), approvalStatus: 'pending')]);
@@ -484,6 +529,24 @@ void main() {
       await _tapDay(tester, _day);
       expect(_inPanel(find.text('อนุมัติ')), findsNothing);
       expect(_inPanel(find.text('ผู้เข้าร่วม')), findsOneWidget);
+    });
+
+    testWidgets('staff: กิจกรรมคนอื่นขึ้นในปฏิทินแต่ไม่มีปุ่มจัดการ · ของตัวเองยังจัดการได้', (tester) async {
+      _loginAs('staff');
+      await _pump(tester, [
+        _activity(id: 1, name: 'ของ admin', startAt: _at(9, 0), approvalStatus: 'approved', canManage: false),
+        _activity(id: 2, name: 'ของฉันเอง', startAt: _at(13, 0), approvalStatus: 'approved', canManage: true),
+      ]);
+      await _tapDay(tester, _day);
+
+      final others = find.byKey(const ValueKey('calendar-activity-1'));
+      final own = find.byKey(const ValueKey('calendar-activity-2'));
+      expect(others, findsOneWidget, reason: 'staff ต้องเห็นกิจกรรมของคนอื่นในปฏิทิน');
+      expect(find.descendant(of: others, matching: find.text('ของ admin')), findsOneWidget);
+      expect(find.descendant(of: others, matching: find.text('ผู้เข้าร่วม')), findsNothing);
+      expect(find.descendant(of: others, matching: find.text('แก้ไข')), findsNothing);
+      expect(find.descendant(of: own, matching: find.text('ผู้เข้าร่วม')), findsOneWidget);
+      expect(find.descendant(of: own, matching: find.text('แก้ไข')), findsOneWidget);
     });
   });
 

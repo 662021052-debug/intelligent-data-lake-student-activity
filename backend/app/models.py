@@ -390,6 +390,10 @@ class ActivityUpdate(SQLModel):
 class ActivityRead(ActivityBase):
     id: int
     created_by: Optional[int] = None
+    # ผู้เรียกจัดการ (แก้ไข/ดูผู้เข้าร่วม) กิจกรรมนี้ได้ไหม — admin ทุกอัน · staff เฉพาะที่ตัวเองสร้าง
+    # ปฏิทินใช้ซ่อนปุ่มของกิจกรรมคนอื่นที่ staff มองเห็นได้ (สิทธิ์จริงยังบังคับที่ endpoint)
+    # None = endpoint นั้นไม่ได้คำนวณให้
+    can_manage: Optional[bool] = None
     approval_status: ApprovalStatus
     approved_by: Optional[int] = None
     approved_at: Optional[datetime] = None

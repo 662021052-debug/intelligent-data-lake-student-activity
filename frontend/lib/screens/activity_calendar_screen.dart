@@ -152,10 +152,22 @@ List<Activity> calendarTimeConflicts(Activity target, Iterable<Activity> registe
   return conflicts;
 }
 
+/// query ของ `GET /activities` สำหรับปฏิทิน — ทุก role เห็นกิจกรรมชุดเดียวกัน
+///
+/// staff: ค่าเริ่มของ backend คือเฉพาะกิจกรรมที่ตัวเองสร้าง (หน้าจัดการกิจกรรมใช้แบบนั้น)
+/// ปฏิทินจึงขอ `all_owners` ให้เห็นเท่า admin · admin เห็นทุกอันอยู่แล้ว · นิสิตยังเห็นเฉพาะ
+/// ที่อนุมัติ/ไม่ซ่อน (backend กรองเอง พารามิเตอร์นี้ไม่มีผล) จึงไม่ต้องส่ง
+Map<String, String>? calendarActivitiesQuery(String? role) =>
+    role == 'staff' ? const {'all_owners': 'true'} : null;
+
 /// ปุ่มจัดการของ staff/admin บนการ์ดกิจกรรม
 enum CalendarStaffAction { approve, participants, edit }
 
 /// ปุ่มจัดการตามสิทธิ์ — อนุมัติได้เฉพาะ admin และเฉพาะที่ยังไม่อนุมัติ (กติกาเดียวกับหน้าจัดการกิจกรรม)
+///
+/// staff เห็นกิจกรรมของทุกคนในปฏิทิน แต่ผู้เข้าร่วม/แก้ไขขึ้นเฉพาะอันที่จัดการได้
+/// ([Activity.canManage] จาก backend — กติกาเดียวกับที่ endpoint ตอบ 403) ·
+/// canManage = null (endpoint ไม่ได้ส่งมา) ถือว่าได้ เพราะรายการเดิมของ staff มีแต่ของตัวเอง
 List<CalendarStaffAction> calendarStaffActions(
   Activity a, {
   required bool isAdmin,
@@ -163,7 +175,8 @@ List<CalendarStaffAction> calendarStaffActions(
 }) =>
     [
       if (canApproveActivity(a.approvalStatus, isAdmin: isAdmin)) CalendarStaffAction.approve,
-      if (canWrite) ...[CalendarStaffAction.participants, CalendarStaffAction.edit],
+      if (canWrite && (isAdmin || a.canManage != false))
+        ...[CalendarStaffAction.participants, CalendarStaffAction.edit],
     ];
 
 /// ตัดเวลาออกเพื่อใช้เป็นคีย์ของวัน (ไม่งั้นกิจกรรมคนละเวลาจะอยู่คนละกลุ่ม)
@@ -277,7 +290,11 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
       });
     }
     try {
-      final activities = await ApiService.fetchAll('/activities', Activity.fromJson);
+      final activities = await ApiService.fetchAll(
+        '/activities',
+        Activity.fromJson,
+        query: calendarActivitiesQuery(authService.role),
+      );
       final categories = await ApiService.fetchList('/hour-categories', HourCategory.fromJson);
       // นิสิตต้องเห็นว่าอันไหนสมัครไปแล้ว จะได้ไม่กดซ้ำ
       final participations = _isStudent

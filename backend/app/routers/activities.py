@@ -136,15 +136,24 @@ def _set_requirement_links(session: Session, activity_id: int, requirement_ids: 
         )
 
 
+def _can_manage(activity: Activity, current_user: User) -> bool:
+    """กติกาเดียวกับ guard ของ PUT / participants / checkin-qr: admin ทุกอัน · staff เฉพาะของตัวเอง"""
+    if current_user.role == UserRole.admin:
+        return True
+    return current_user.role == UserRole.staff and activity.created_by == current_user.id
+
+
 def _to_read(
     activity: Activity,
     participant_count: int = 0,
     requirement_ids: Optional[list[int]] = None,
+    can_manage: Optional[bool] = None,
 ) -> ActivityRead:
     return ActivityRead(
         **activity.model_dump(),
         participant_count=participant_count,
         requirement_ids=requirement_ids or [],
+        can_manage=can_manage,
     )
 
 
@@ -166,6 +175,11 @@ def list_activities(
         False,
         description="เอาเฉพาะกิจกรรมที่ยังไม่ผ่านวันจัด และเรียงจากวันที่ใกล้ที่สุดก่อน",
     ),
+    all_owners: bool = Query(
+        False,
+        description="staff: เห็นกิจกรรมของทุกคนเหมือน admin (ปฏิทินกิจกรรม) — "
+        "เปลี่ยนแค่การมองเห็น จัดการได้ยังเฉพาะของตัวเอง ดู can_manage · นิสิตไม่มีผล",
+    ),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -178,7 +192,8 @@ def list_activities(
         # กิจกรรมที่ซ่อนไว้ต้องหายไปจากฝั่งนิสิตทั้งหมด (staff/admin ยังเห็นพร้อม badge)
         query = query.where(Activity.is_hidden == False)  # noqa: E712
         count_query = count_query.where(Activity.is_hidden == False)  # noqa: E712
-    elif current_user.role == UserRole.staff:
+    elif current_user.role == UserRole.staff and not all_owners:
+        # หน้าจัดการกิจกรรมของ staff = เฉพาะที่ตัวเองสร้าง (ค่าเริ่ม)
         query = query.where(Activity.created_by == current_user.id)
         count_query = count_query.where(Activity.created_by == current_user.id)
 
@@ -215,7 +230,8 @@ def list_activities(
     counts = _participant_counts(session, activity_ids)
     requirements = _requirement_ids(session, activity_ids)
     items = [
-        _to_read(a, counts.get(a.id, 0), requirements.get(a.id, [])) for a in activities
+        _to_read(a, counts.get(a.id, 0), requirements.get(a.id, []), _can_manage(a, current_user))
+        for a in activities
     ]
     return Page(items=items, total=total, skip=skip, limit=limit)
 
@@ -230,7 +246,9 @@ def get_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     _ensure_visible(activity, current_user)
-    return _to_read_single(session, activity)
+    read = _to_read_single(session, activity)
+    read.can_manage = _can_manage(activity, current_user)
+    return read
 
 
 def _apply_initial_approval(activity: Activity, current_user: User) -> None:
