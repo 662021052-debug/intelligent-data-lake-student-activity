@@ -39,9 +39,11 @@ void main() {
         final result = OcrResult.fromJson(_payload({
           'duplicate_of_participation_id': 62162,
           'duplicate_reason': reason,
+          'match_kind': 'near',
         }));
         expect(result.duplicateOfParticipationId, 62162);
         expect(result.duplicateReason, reason);
+        expect(result.matchKind, 'near');
       });
     }
   });

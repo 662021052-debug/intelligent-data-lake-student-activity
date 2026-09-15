@@ -72,9 +72,14 @@ class StatusChip extends StatelessWidget {
   ///
   /// ใบ flagged ใช้ [duplicateReason] เลือกป้ายและสี: ซ้ำกับนิสิตคนอื่น / ตรงกับใบที่
   /// ถูกปฏิเสธ = แดง, ใช้ไฟล์เดิมซ้ำ = เหลือง (ดู [isSevereDuplicate])
-  factory StatusChip.ocr(String decision, {String? duplicateReason, bool dense = false}) {
+  factory StatusChip.ocr(
+    String decision, {
+    String? duplicateReason,
+    String? matchKind,
+    bool dense = false,
+  }) {
     return StatusChip(
-      label: ocrDecisionLabel(decision, duplicateReason: duplicateReason),
+      label: ocrDecisionLabel(decision, duplicateReason: duplicateReason, matchKind: matchKind),
       palette: switch (decision) {
         'auto_approved' => StatusPalette.approved,
         'flagged' =>

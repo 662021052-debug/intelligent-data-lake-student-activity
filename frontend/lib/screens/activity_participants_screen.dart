@@ -240,6 +240,7 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
                                         StatusChip.ocr(
                                           p.ocrDecision!,
                                           duplicateReason: p.ocrDuplicateReason,
+                                          matchKind: p.ocrMatchKind,
                                           dense: true,
                                         ),
                                         Text(

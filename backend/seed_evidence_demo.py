@@ -4,10 +4,16 @@
 คิวตรวจหลักฐานจึงว่าง สคริปต์นี้เติมการเข้าร่วมใหม่ของนิสิตจริงจำนวนหนึ่ง (ค่าเริ่ม 24 ราย)
 ในกิจกรรมที่จัดไปแล้ว พร้อมใบประกาศที่วาดจริง (Bronze) แล้วส่งผ่าน Silver pipeline ตัวจริง:
 
-* ``full``         ใบสมบูรณ์                    → คาดว่า auto_approved (ระบบให้ชั่วโมงเอง)
-* ``no_name``      ใบที่ไม่มีชื่อผู้เข้าร่วม        → คาดว่า needs_review
-* ``low_quality``  ภาพถ่ายเบลอ                 → คาดว่า needs_review
-* ``duplicate``    ไฟล์เดียวกับใบของเพื่อนที่อนุมัติแล้ว → flagged
+* ``full``           ใบสมบูรณ์                    → คาดว่า auto_approved (ระบบให้ชั่วโมงเอง)
+* ``no_name``        ใบที่ไม่มีชื่อผู้เข้าร่วม        → คาดว่า needs_review
+* ``low_quality``    ภาพถ่ายเบลอ                 → คาดว่า needs_review
+* ``pdf_text``       PDF ที่ export จากโปรแกรม (มี text layer) → อ่านข้อความตรง ข้าม OCR (เฟส 3B)
+* ``pdf_scan``       PDF สแกน (ภาพล้วน) → render + OCR จริง ได้ decision ตามคะแนน (เฟส 3B)
+* ``template_base``  เกียรติบัตรเทมเพลต "แบนเนอร์" ของนิสิตคนหนึ่ง → decision ตามคะแนน OCR
+* ``template_twin``  เทมเพลตเดียวกันของอีกคน คนละกิจกรรม — pHash ใกล้ ``template_base`` แต่ข้อความ
+                     ต่างกันชัด → text veto ต้องกันไว้ ไม่ flag (เคส B ของเฟส 3C)
+* ``duplicate``      ไฟล์เดียวกับใบของเพื่อนที่อนุมัติแล้ว → flagged exact (เคส C)
+* ``near_duplicate`` ใบของเพื่อนที่ย่อ+บีบอัด JPEG ใหม่ ชื่อเจ้าของเดิม → flagged near (เคส A, pHash — เฟส 3A)
 
 decision ของสามแบบแรกมาจาก OCR จริง จึงอาจไม่ตรงที่คาดทุกใบ (สรุปยอดจริงให้ตอนจบ)
 ส่วน flagged การันตีได้ เพราะตัดสินจาก checksum ไม่ใช่จาก OCR — ใบ "ต้นฉบับ" ถูกแนบให้
@@ -25,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import random
 import sys
 import uuid
@@ -54,6 +61,7 @@ from app.models import (
     User,
 )
 from app.ocr import OcrEngine, get_ocr
+from app.phash import compute_phash, phash_distance
 from app.storage import ObjectStorage, get_storage
 from seed_evidence import (
     VARIANT_FULL,
@@ -61,6 +69,7 @@ from seed_evidence import (
     VARIANT_NO_NAME,
     find_thai_font,
     render_certificate,
+    thai_date,
 )
 
 # ป้าย source_system ของไฟล์เดโม — ใช้หาไฟล์ของสคริปต์นี้ตอน --reset/--remove
@@ -69,11 +78,42 @@ SOURCE_DEMO_ORIGINAL = "seed_demo_original"  # ใบต้นฉบับที
 DEMO_SOURCES = (SOURCE_DEMO, SOURCE_DEMO_ORIGINAL)
 
 VARIANT_DUPLICATE = "duplicate"
-VARIANT_ORDER = (VARIANT_FULL, VARIANT_NO_NAME, VARIANT_LOW_QUALITY, VARIANT_DUPLICATE)
+VARIANT_NEAR_DUPLICATE = "near_duplicate"
+VARIANT_PDF_TEXT = "pdf_text"
+VARIANT_PDF_SCAN = "pdf_scan"
+VARIANT_TEMPLATE_BASE = "template_base"
+VARIANT_TEMPLATE_TWIN = "template_twin"
+VARIANT_ORDER = (
+    VARIANT_FULL,
+    VARIANT_NO_NAME,
+    VARIANT_LOW_QUALITY,
+    VARIANT_PDF_TEXT,
+    VARIANT_PDF_SCAN,
+    VARIANT_TEMPLATE_BASE,
+    VARIANT_TEMPLATE_TWIN,
+    VARIANT_DUPLICATE,
+    VARIANT_NEAR_DUPLICATE,
+)
+# แบบที่ใช้ใบของ "เพื่อน" (ต้องมีใบต้นฉบับที่อนุมัติแล้ว)
+COPY_VARIANTS = (VARIANT_DUPLICATE, VARIANT_NEAR_DUPLICATE)
+# คู่เทมเพลตเดียวกันคนละคน (เคส B) — สร้างเป็นคู่ในบล็อกของตัวเอง
+TEMPLATE_VARIANTS = (VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN)
+# fixture ของเฟส 3 มีอย่างละหนึ่งใบเสมอ ไม่คิดตามสัดส่วน
+SINGLE_VARIANTS = (
+    VARIANT_PDF_TEXT, VARIANT_PDF_SCAN, VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN, VARIANT_NEAR_DUPLICATE,
+)
 
-DEFAULT_COUNT = 24
+# 29 = 24 ใบแบบเดิม (full 11 / no_name 5 / low_quality 4 / duplicate 4 เท่าเดิม) + fixture เฟส 3 อีก 5
+DEFAULT_COUNT = 29
 DEFAULT_SEED = 20260914
-MIN_COUNT = 4  # น้อยกว่านี้ได้ไม่ครบทุกแบบ
+MIN_COUNT = 9  # น้อยกว่านี้ได้ไม่ครบทุกแบบ
+
+# คู่เคส B ต้องเข้าชั้น near แน่ ๆ (ไม่ใช่เฉียด threshold) — pHash ห่างไม่เกิน threshold ลบค่านี้
+TEMPLATE_TWIN_MARGIN_BITS = 4
+
+# สำเนา near_duplicate: ย่อเหลือ 75% แล้วบันทึก JPEG คุณภาพ 70 — checksum ต่าง แต่ pHash ห่างไม่กี่บิต
+NEAR_COPY_SCALE = 0.75
+NEAR_COPY_JPEG_QUALITY = 70
 
 
 class SeedAborted(Exception):
@@ -99,15 +139,24 @@ def plan_variants(count: int) -> list[str]:
     """แบ่ง [count] ใบเป็นแต่ละแบบ — ใบสมบูรณ์ราวครึ่งหนึ่ง ที่เหลือเป็นเคสให้คนตรวจ"""
     if count < MIN_COUNT:
         raise SeedAborted(f"ต้องมีอย่างน้อย {MIN_COUNT} รายการ ถึงจะมีครบทุกแบบ")
-    duplicate = max(1, round(count * 0.15))
-    low_quality = max(1, round(count * 0.15))
-    no_name = max(1, round(count * 0.2))
-    full = count - duplicate - low_quality - no_name
+    # สัดส่วนคิดจากส่วนที่เหลือหลังหัก fixture เฟส 3 — ชุดเดิมจึงได้จำนวนเท่าเดิมทุกแบบ
+    base = count - len(SINGLE_VARIANTS)
+    duplicate = max(1, round(base * 0.15))
+    low_quality = max(1, round(base * 0.15))
+    no_name = max(1, round(base * 0.2))
+    full = base - duplicate - low_quality - no_name
+    if full < 1:
+        raise SeedAborted(f"ต้องมีอย่างน้อย {MIN_COUNT} รายการ ถึงจะมีครบทุกแบบ")
+    # ใบของตัวเองก่อน ใบของเพื่อนไว้ท้าย — pipeline ประมวลผลตามลำดับนี้ ใบที่ถูกเทียบจึงมาก่อนเสมอ
+    # (template_base มาก่อน template_twin · ใบต้นฉบับมาก่อนสำเนา)
     return (
         [VARIANT_FULL] * full
         + [VARIANT_NO_NAME] * no_name
         + [VARIANT_LOW_QUALITY] * low_quality
+        + [VARIANT_PDF_TEXT, VARIANT_PDF_SCAN]
+        + [VARIANT_TEMPLATE_BASE, VARIANT_TEMPLATE_TWIN]
         + [VARIANT_DUPLICATE] * duplicate
+        + [VARIANT_NEAR_DUPLICATE]
     )
 
 
@@ -175,33 +224,40 @@ def _reference(activity: Activity, participation: Participation) -> str:
     return f"TSU-{activity.id:03d}-{participation.id:05d}-{uuid.uuid4().hex[:6].upper()}"
 
 
+_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg", "application/pdf": "pdf"}
+
+
 def _attach_file(
     session: Session,
     storage: ObjectStorage,
     participation: Participation,
-    image_bytes: bytes,
+    data: bytes,
     *,
     reference: str,
     source: str,
     uploaded_by: Optional[int],
     ingested_at: datetime,
+    content_type: str = "image/png",
 ) -> RawFile:
-    """เขียนไฟล์ลง Bronze ตามโครง path เดียวกับการอัปโหลดจริง"""
+    """เขียนไฟล์ลง Bronze ตามโครง path เดียวกับการอัปโหลดจริง (รวม checksum + pHash แบบเดียวกัน)"""
+    extension = _EXTENSIONS[content_type]
     bucket = settings.minio_bucket_bronze
     object_key = (
         f"evidence/year={ingested_at:%Y}/month={ingested_at:%m}"
         f"/activity_id={participation.activity_id}"
         f"/participation_id={participation.id}"
-        f"/{uuid.uuid4().hex}_certificate.png"
+        f"/{uuid.uuid4().hex}_certificate.{extension}"
     )
-    storage.upload_object(bucket, object_key, image_bytes, "image/png")
+    storage.upload_object(bucket, object_key, data, content_type)
     raw_file = RawFile(
         bucket=bucket,
         object_key=object_key,
-        original_filename=f"certificate_{reference}.png",
-        content_type="image/png",
-        size_bytes=len(image_bytes),
-        checksum=hashlib.sha256(image_bytes).hexdigest(),
+        original_filename=f"certificate_{reference}.{extension}",
+        content_type=content_type,
+        size_bytes=len(data),
+        checksum=hashlib.sha256(data).hexdigest(),
+        # เหมือนการอัปโหลดจริง — ไม่มี pHash ชั้นภาพเกือบเหมือนจะจับสำเนาไม่ได้
+        phash=compute_phash(data, content_type),
         source_system=source,
         uploaded_by=uploaded_by,
         ingested_at=ingested_at,
@@ -209,6 +265,150 @@ def _attach_file(
     )
     session.add(raw_file)
     return raw_file
+
+
+def certificate_text_pdf(
+    *,
+    student_name: str,
+    activity_name: str,
+    activity_date: datetime,
+    category_path: str,
+    reference: str,
+    font_path: Optional[str],
+) -> bytes:
+    """เกียรติบัตรแบบ PDF ที่ export จากโปรแกรม — ข้อความเป็น vector จึงมี text layer
+
+    ต้องมีฟอนต์ไทยถึงจะฝังข้อความไทยได้ ไม่มีก็ใช้ฟอนต์ในตัว (ข้อความจะอ่านไม่ออก → OCR แทน)
+    """
+    import pymupdf
+
+    width, height = 842, 595  # A4 แนวนอน
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.draw_rect(pymupdf.Rect(20, 20, width - 20, height - 20), color=(0.12, 0.24, 0.48), width=4)
+    page.draw_rect(pymupdf.Rect(32, 32, width - 32, height - 32), color=(0.79, 0.64, 0.15), width=1.5)
+    font = pymupdf.Font(fontfile=font_path) if font_path else pymupdf.Font("helv")
+    font_kwargs = {"fontname": "thai", "fontfile": font_path} if font_path else {}
+    lines = [
+        ("มหาวิทยาลัยทักษิณ", 26),
+        ("เกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า", 20),
+        (student_name, 32),
+        ("ได้เข้าร่วมกิจกรรม", 20),
+        (activity_name, 26),
+        (f"หมวด {category_path}", 16),
+        (f"จัดขึ้นเมื่อวันที่ {thai_date(activity_date)}", 18),
+        (f"เลขที่อ้างอิง {reference}", 14),
+    ]
+    y = 95.0
+    for text, size in lines:
+        x = max(40.0, (width - font.text_length(text, fontsize=size)) / 2)
+        page.insert_text((x, y), text, fontsize=size, **font_kwargs)
+        y += size * 2.1
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def scanned_pdf(image_png: bytes, dpi: int) -> bytes:
+    """PDF สแกน — ภาพเต็มหน้า ไม่มี text layer
+
+    ขนาดหน้าตั้งให้ render ที่ [dpi] ได้ความละเอียดเท่าภาพเดิม (ไม่ถูกขยายจนเบลอ) เหมือนเครื่อง
+    สแกนที่บันทึกไฟล์ที่ DPI นั้นจริง
+    """
+    import pymupdf
+    from PIL import Image
+
+    with Image.open(io.BytesIO(image_png)) as image:
+        width_px, height_px = image.size
+    doc = pymupdf.open()
+    page = doc.new_page(width=width_px * 72 / dpi, height=height_px * 72 / dpi)
+    page.insert_image(page.rect, stream=image_png)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def near_copy(image_png: bytes) -> bytes:
+    """สำเนาที่ย่อแล้วบันทึก JPEG ใหม่ — ไฟล์คนละไบต์ (checksum ต่าง) แต่ภาพคล้ายกันมาก (pHash ใกล้)"""
+    from PIL import Image
+
+    with Image.open(io.BytesIO(image_png)) as image:
+        rgb = image.convert("RGB")
+        smaller = rgb.resize((int(rgb.width * NEAR_COPY_SCALE), int(rgb.height * NEAR_COPY_SCALE)))
+    buffer = io.BytesIO()
+    smaller.save(buffer, format="JPEG", quality=NEAR_COPY_JPEG_QUALITY)
+    return buffer.getvalue()
+
+
+def render_banner_certificate(
+    *,
+    student_name: str,
+    activity_name: str,
+    location: str,
+    category_path: str,
+    activity_date: datetime,
+    reference: str,
+    font_path: Optional[str],
+) -> bytes:
+    """เกียรติบัตรเทมเพลต "แบนเนอร์" — กราฟิกใหญ่ครองภาพ ตัวอักษรเล็ก (เคส B ของเฟส 3C)
+
+    pHash ดูโครงภาพความถี่ต่ำเป็นหลัก เทมเพลตแบบนี้ของคนละคนจึงได้ pHash ใกล้กัน (วัดใน container
+    15 คู่ ห่าง 6–16 บิต จาก 256) ขณะที่ข้อความแทบไม่ซ้ำกันเลย (ชื่อ/กิจกรรม/สถานที่/หมวด/วันที่
+    ความคล้ายของ OCR 0.36) — เคสที่ text veto ต้องกันไม่ให้ flag ผิด
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, height = 1000, 700
+    image = Image.new("RGB", (width, height), "#e9dcc0")
+    draw = ImageDraw.Draw(image)
+
+    def font(size: int):
+        return ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default()
+
+    draw.rectangle([0, 0, width, 250], fill="#0f2f58")
+    draw.ellipse([40, 30, 240, 230], fill="#d4a017")
+    draw.ellipse([85, 75, 195, 185], fill="#0f2f58")
+    draw.polygon([(width, 250), (width - 330, height), (width, height)], fill="#0f2f58")
+    draw.polygon([(width, 330), (width - 180, height), (width, height)], fill="#d4a017")
+    draw.rectangle([0, 620, width, height], fill="#d4a017")
+    draw.text((290, 85), "เกียรติบัตร", font=font(76), fill="white")
+    for text, size, y in (
+        (student_name, 32, 280),
+        (activity_name, 24, 335),
+        (location, 20, 380),
+        (category_path, 20, 415),
+        (thai_date(activity_date), 20, 450),
+        (reference, 18, 560),
+    ):
+        draw.text((70, y), text, font=font(size), fill="#2b2b2b")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _own_evidence(
+    session: Session,
+    variant: str,
+    student: Student,
+    activity: Activity,
+    reference: str,
+    font_path: Optional[str],
+) -> tuple[bytes, str]:
+    """ไฟล์หลักฐานของนิสิตเอง ตามแบบ — คืน (bytes, content_type)"""
+    fields = dict(
+        student_name=student.full_name,
+        activity_name=activity.name,
+        activity_date=activity.start_at,
+        category_path=_category_label(session, activity),
+        reference=reference,
+    )
+    if variant == VARIANT_PDF_TEXT:
+        return certificate_text_pdf(**fields, font_path=font_path or find_thai_font()), "application/pdf"
+    image_variant = VARIANT_FULL if variant == VARIANT_PDF_SCAN else variant
+    png = render_certificate(**fields, variant=image_variant, font_path=font_path)
+    if variant == VARIANT_PDF_SCAN:
+        return scanned_pdf(png, settings.ocr_pdf_dpi), "application/pdf"
+    return png, "image/png"
 
 
 def populate(
@@ -303,7 +503,7 @@ def populate(
 
     # --- ใบของตัวเอง: สมบูรณ์ / ไม่มีชื่อ / เบลอ ---
     candidates = iter(students)
-    for variant in (v for v in variants if v != VARIANT_DUPLICATE):
+    for variant in (v for v in variants if v not in COPY_VARIANTS + TEMPLATE_VARIANTS):
         while True:
             student = next(candidates, None)
             if student is None:
@@ -315,24 +515,67 @@ def populate(
                 break
         participation = book(student, activity)
         reference = _reference(activity, participation)
-        image = render_certificate(
-            student_name=student.full_name,
-            activity_name=activity.name,
-            activity_date=activity.start_at,
-            category_path=_category_label(session, activity),
-            reference=reference,
-            variant=variant,
-            font_path=font_path,
-        )
+        data, content_type = _own_evidence(session, variant, student, activity, reference, font_path)
         _attach_file(
-            session, storage, participation, image,
+            session, storage, participation, data,
             reference=reference, source=SOURCE_DEMO,
             uploaded_by=user_by_student.get(student.id), ingested_at=upload_time(activity),
+            content_type=content_type,
         )
         demo.append((variant, participation))
 
-    # --- ไฟล์ซ้ำ: เพื่อนเอาใบของเจ้าของที่อนุมัติไปแล้วมาส่งเป็นของตัวเอง ---
-    needed = variants.count(VARIANT_DUPLICATE)
+    # --- เคส B: เทมเพลตแบนเนอร์เดียวกัน คนละคน คนละกิจกรรม ---
+    # pHash ใกล้กัน (เข้าชั้น near) แต่ข้อความ OCR ต่างกันชัด → text veto ต้องกันไว้ ไม่ flag
+    # เลือกคู่ที่ pHash ห่างไม่เกิน threshold − margin เพื่อให้แน่ใจว่าถึงขั้น veto จริง ไม่ใช่หลุด threshold เอง
+    template_font = font_path or find_thai_font()
+    template_hash: Optional[str] = None
+    template_activities: set[int] = set()
+    for variant in (v for v in variants if v in TEMPLATE_VARIANTS):
+        placed = False
+        while not placed:
+            student = next(candidates, None)
+            if student is None:
+                raise SeedAborted("สร้างคู่เกียรติบัตรเทมเพลตเดียวกัน (เคส B) ที่ pHash ใกล้พอไม่ได้")
+            options = [
+                a for a in activities
+                if has_room(a) and a.id not in template_activities and bookings.can_join(student.id, a)
+            ]
+            rng.shuffle(options)
+            for activity in options:
+                marker = "TB" if variant == VARIANT_TEMPLATE_BASE else "TT"
+                reference = f"TSU-{activity.id:03d}-{marker}{uuid.uuid4().hex[:6].upper()}"
+                png = render_banner_certificate(
+                    student_name=student.full_name,
+                    activity_name=activity.name,
+                    location=activity.location,
+                    category_path=_category_label(session, activity),
+                    activity_date=activity.start_at,
+                    reference=reference,
+                    font_path=template_font,
+                )
+                phash = compute_phash(png, "image/png")
+                if template_hash is not None and (
+                    phash is None
+                    or phash_distance(template_hash, phash)
+                    > settings.ocr_phash_near_bits - TEMPLATE_TWIN_MARGIN_BITS
+                ):
+                    continue
+                participation = book(student, activity)
+                _attach_file(
+                    session, storage, participation, png,
+                    reference=reference, source=SOURCE_DEMO,
+                    uploaded_by=user_by_student.get(student.id), ingested_at=upload_time(activity),
+                )
+                demo.append((variant, participation))
+                template_activities.add(activity.id)
+                template_hash = template_hash or phash
+                placed = True
+                break
+
+    # --- ใบของเพื่อน: เอาใบของเจ้าของที่อนุมัติไปแล้วมาส่งเป็นของตัวเอง ---
+    # duplicate = ไฟล์เดียวกันเป๊ะ (checksum) · near_duplicate = ย่อ+บีบอัดใหม่ (pHash)
+    copies = [v for v in variants if v in COPY_VARIANTS]
+    needed = len(copies)
     with_file = select(RawFile.participation_id).where(RawFile.participation_id.is_not(None))
     originals = list(
         session.exec(
@@ -384,13 +627,19 @@ def populate(
             uploaded_by=user_by_student.get(owner.id), ingested_at=upload_time(activity),
         )
         participation = book(borrower, activity)
+        variant = copies[made]
+        if variant == VARIANT_NEAR_DUPLICATE:
+            copy, content_type = near_copy(image), "image/jpeg"  # checksum ต่าง pHash ใกล้
+        else:
+            copy, content_type = image, "image/png"  # bytes เดียวกันเป๊ะ → checksum ตรง
         _attach_file(
-            session, storage, participation, image,  # bytes เดียวกันเป๊ะ → checksum ตรง
+            session, storage, participation, copy,
             reference=reference, source=SOURCE_DEMO,
             uploaded_by=user_by_student.get(borrower.id),
             ingested_at=upload_time(activity, extra_hours=12),
+            content_type=content_type,
         )
-        demo.append((VARIANT_DUPLICATE, participation))
+        demo.append((variant, participation))
         made += 1
     if made < needed:
         raise SeedAborted(f"หาใบที่อนุมัติแล้วมาทำเคสไฟล์ซ้ำได้แค่ {made}/{needed}")

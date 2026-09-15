@@ -53,6 +53,15 @@ class DuplicateNotice extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                // exact = ไฟล์เดียวกันเป๊ะ · near = ภาพคล้าย (ควรเปิดเทียบก่อนตัดสิน)
+                if (duplicateMatchKindHint(ocr.matchKind) case final hint?)
+                  Padding(
+                    padding: const EdgeInsets.only(top: AppSpacing.xs),
+                    child: Text(
+                      hint,
+                      style: textTheme.bodySmall?.copyWith(color: palette.foreground),
+                    ),
+                  ),
                 if (originalStatus != null)
                   Padding(
                     padding: const EdgeInsets.only(top: AppSpacing.xs),

@@ -16,6 +16,7 @@ class Participation {
   final double? ocrMatchScore;
   final double? ocrConfidence;
   final String? ocrDuplicateReason; // cross_student | same_student_reuse | matches_rejected
+  final String? ocrMatchKind; // exact | near
 
   Participation({
     this.id,
@@ -34,6 +35,7 @@ class Participation {
     this.ocrMatchScore,
     this.ocrConfidence,
     this.ocrDuplicateReason,
+    this.ocrMatchKind,
   });
 
   factory Participation.fromJson(Map<String, dynamic> json) => Participation(
@@ -57,6 +59,7 @@ class Participation {
         ocrMatchScore: (json['ocr_match_score'] as num?)?.toDouble(),
         ocrConfidence: (json['ocr_confidence'] as num?)?.toDouble(),
         ocrDuplicateReason: json['ocr_duplicate_reason'] as String?,
+        ocrMatchKind: json['ocr_match_kind'] as String?,
       );
 
   Map<String, dynamic> toJson() => {

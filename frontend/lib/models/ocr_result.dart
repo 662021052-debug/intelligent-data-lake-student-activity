@@ -17,6 +17,9 @@ class OcrResult {
   /// cross_student | same_student_reuse | matches_rejected (null เหมือนข้างบน)
   final String? duplicateReason;
 
+  /// exact = ไฟล์เดียวกันเป๊ะ (checksum) · near = ภาพคล้ายกันมาก (pHash) · null = ไม่ซ้ำ/ผลรุ่นเก่า
+  final String? matchKind;
+
   // บริบทของใบต้นทาง (backend คำนวณตอนอ่าน) — null ถ้าไม่ซ้ำ / ผลรุ่นเก่า / ผู้ใช้เป็นนิสิต
   final String? duplicateOfStudentName;
   final String? duplicateOfStudentCode;
@@ -38,6 +41,7 @@ class OcrResult {
     required this.processedAt,
     this.duplicateOfParticipationId,
     this.duplicateReason,
+    this.matchKind,
     this.duplicateOfStudentName,
     this.duplicateOfStudentCode,
     this.duplicateOfActivityName,
@@ -57,6 +61,7 @@ class OcrResult {
         processedAt: DateTime.parse(json['processed_at'] as String),
         duplicateOfParticipationId: json['duplicate_of_participation_id'] as int?,
         duplicateReason: json['duplicate_reason'] as String?,
+        matchKind: json['match_kind'] as String?,
         duplicateOfStudentName: json['duplicate_of_student_name'] as String?,
         duplicateOfStudentCode: json['duplicate_of_student_code'] as String?,
         duplicateOfActivityName: json['duplicate_of_activity_name'] as String?,

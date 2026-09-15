@@ -395,4 +395,5 @@ def test_participation_reads_carry_duplicate_reason_for_the_queue(client, sessio
 
     assert detail["ocr_decision"] == "flagged"
     assert detail["ocr_duplicate_reason"] == "cross_student"
+    assert detail["ocr_match_kind"] == "exact"  # OCR เฟส 3C: คิวแยกไฟล์ซ้ำเป๊ะกับภาพคล้าย
     assert [r["ocr_duplicate_reason"] for r in queue if r["id"] == target.id] == ["cross_student"]

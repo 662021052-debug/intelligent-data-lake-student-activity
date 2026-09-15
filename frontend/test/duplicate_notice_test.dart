@@ -18,6 +18,7 @@ OcrResult _ocr({
   String? activity = 'ตลาดนัดผู้ประกอบการรุ่นเยาว์',
   String? originalStatus = 'approved',
   bool viewable = true,
+  String? matchKind,
 }) =>
     OcrResult(
       id: 1,
@@ -36,6 +37,7 @@ OcrResult _ocr({
       duplicateOfActivityName: activity,
       duplicateOfEvidenceStatus: originalStatus,
       duplicateOfViewable: viewable,
+      matchKind: matchKind,
     );
 
 /// ปุ่มที่เรียก confirmApproveIfDuplicate แล้วเก็บผลไว้ให้เทสอ่าน
@@ -126,6 +128,63 @@ void main() {
       )));
       expect(find.textContaining('ประมวลผล OCR'), findsOneWidget);
       expect(find.text('ดูใบต้นทาง'), findsNothing);
+    });
+  });
+
+  group('แยก "ไฟล์ซ้ำ" (exact) กับ "ภาพคล้ายกันมาก" (near) — OCR เฟส 3C', () {
+    test('ป้ายสั้น: exact/ไม่รู้ ใช้ "ซ้ำ" · near ใช้ "ภาพคล้ายกันมาก" · สีตามเหตุผลเดิม', () {
+      expect(ocrDecisionLabel('flagged', duplicateReason: 'cross_student', matchKind: 'exact'), '⚠️ ซ้ำกับนิสิตคนอื่น');
+      expect(ocrDecisionLabel('flagged', duplicateReason: 'cross_student', matchKind: 'near'),
+          '⚠️ ภาพคล้ายกันมาก · นิสิตคนอื่น');
+      expect(ocrDecisionLabel('flagged', duplicateReason: 'same_student_reuse', matchKind: 'near'), contains('ภาพคล้ายกันมาก'));
+      expect(ocrDecisionLabel('flagged', duplicateReason: 'matches_rejected', matchKind: 'near'), contains('เคยถูกปฏิเสธ'));
+      expect(ocrDecisionLabel('flagged', duplicateReason: 'cross_student'), '⚠️ ซ้ำกับนิสิตคนอื่น', reason: 'ไม่มี matchKind = ป้ายเดิม');
+
+      StatusPalette paletteOf(String reason, String kind) =>
+          StatusChip.ocr('flagged', duplicateReason: reason, matchKind: kind).palette;
+      expect(paletteOf('cross_student', 'near'), StatusPalette.rejected);
+      expect(paletteOf('matches_rejected', 'near'), StatusPalette.rejected);
+      expect(paletteOf('same_student_reuse', 'near'), StatusPalette.pending);
+    });
+
+    testWidgets('near: แถบบอก "ภาพคล้ายกันมาก" + คำแนะนำให้เปิดเทียบ', (tester) async {
+      await tester.pumpWidget(_wrap(DuplicateNotice(ocr: _ocr(matchKind: 'near'), onOpenOriginal: () {})));
+
+      expect(
+        find.text('⚠ ภาพคล้ายกันมากกับใบของนิสิตคนอื่น: นางสาวนงนภัส ขนุนนิล (6710000001) · กิจกรรม ตลาดนัดผู้ประกอบการรุ่นเยาว์'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('ไม่ใช่ไฟล์เดียวกัน แต่ภาพคล้ายกันมาก'), findsOneWidget);
+      expect(find.text('ดูใบต้นทาง'), findsOneWidget);
+    });
+
+    testWidgets('exact: แถบบอก "ซ้ำกับใบ" + คำอธิบายว่าไฟล์เดียวกันทุกไบต์', (tester) async {
+      await tester.pumpWidget(_wrap(DuplicateNotice(ocr: _ocr(matchKind: 'exact'))));
+
+      expect(find.textContaining('⚠ ซ้ำกับใบของนิสิตคนอื่น'), findsOneWidget);
+      expect(find.textContaining('ไฟล์เดียวกันทุกไบต์'), findsOneWidget);
+      expect(find.textContaining('ภาพคล้ายกันมาก'), findsNothing);
+    });
+
+    testWidgets('near same_student_reuse / matches_rejected: ข้อความตามเหตุผล', (tester) async {
+      await tester.pumpWidget(_wrap(Column(children: [
+        DuplicateNotice(ocr: _ocr(matchKind: 'near', reason: 'same_student_reuse', activity: 'อบรมดิจิทัล')),
+        DuplicateNotice(ocr: _ocr(matchKind: 'near', reason: 'matches_rejected', originalStatus: 'rejected')),
+      ])));
+
+      expect(find.text('ภาพคล้ายกันมากกับใบที่ใช้กับกิจกรรม อบรมดิจิทัล'), findsOneWidget);
+      expect(find.textContaining('ภาพคล้ายกันมากกับใบที่เคยถูกปฏิเสธ: นางสาวนงนภัส ขนุนนิล'), findsOneWidget);
+    });
+
+    testWidgets('dialog ยืนยันอนุมัติใบ near ใช้ข้อความ "ภาพคล้ายกันมาก"', (tester) async {
+      await tester.pumpWidget(_wrap(_ApproveProbe(_ocr(matchKind: 'near'))));
+      await tester.tap(find.text('อนุมัติ'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: find.byType(AlertDialog), matching: find.textContaining('ภาพคล้ายกันมากกับใบของนิสิตคนอื่น')),
+        findsOneWidget,
+      );
     });
   });
 

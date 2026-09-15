@@ -184,7 +184,11 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                StatusChip.ocr(ocr.decision, duplicateReason: ocr.duplicateReason),
+                StatusChip.ocr(
+                  ocr.decision,
+                  duplicateReason: ocr.duplicateReason,
+                  matchKind: ocr.matchKind,
+                ),
                 _scorePill('ความตรง', ocr.matchScore),
                 _scorePill('ความมั่นใจ OCR', ocr.ocrConfidence),
               ],

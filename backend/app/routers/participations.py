@@ -119,6 +119,7 @@ def _to_read(
         ocr_match_score=ocr.match_score if ocr else None,
         ocr_confidence=ocr.ocr_confidence if ocr else None,
         ocr_duplicate_reason=ocr.duplicate_reason if ocr else None,
+        ocr_match_kind=ocr.match_kind if ocr else None,
     )
 
 

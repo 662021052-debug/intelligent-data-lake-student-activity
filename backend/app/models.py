@@ -445,6 +445,8 @@ class ParticipationRead(ParticipationBase):
     ocr_confidence: Optional[float] = None
     # เหตุผลที่ไฟล์ซ้ำ (เฉพาะใบ flagged) — คิวตรวจแสดงป้าย/สีตามเหตุผลได้โดยไม่ต้องยิงทีละแถว
     ocr_duplicate_reason: Optional[DuplicateReason] = None
+    # ซ้ำแบบไฟล์เดียวกันเป๊ะ (exact) หรือภาพคล้ายกันมาก (near) — คิวตรวจแสดงป้ายต่างกัน
+    ocr_match_kind: Optional[MatchKind] = None
 
 
 # ---------- Raw file (Bronze layer metadata / data lineage) ----------
