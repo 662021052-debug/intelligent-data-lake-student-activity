@@ -11,6 +11,12 @@ class OcrResult {
   final bool isDuplicate;
   final DateTime processedAt;
 
+  /// การเข้าร่วมที่ไฟล์นี้ซ้ำด้วย — null ถ้าไม่ซ้ำ หรือเป็นผล OCR ก่อนเฟส 1.2
+  final int? duplicateOfParticipationId;
+
+  /// cross_student | same_student_reuse | matches_rejected (null เหมือนข้างบน)
+  final String? duplicateReason;
+
   OcrResult({
     required this.id,
     required this.rawFileId,
@@ -21,6 +27,8 @@ class OcrResult {
     required this.decision,
     required this.isDuplicate,
     required this.processedAt,
+    this.duplicateOfParticipationId,
+    this.duplicateReason,
   });
 
   factory OcrResult.fromJson(Map<String, dynamic> json) => OcrResult(
@@ -33,5 +41,7 @@ class OcrResult {
         decision: json['decision'] as String,
         isDuplicate: json['is_duplicate'] as bool? ?? false,
         processedAt: DateTime.parse(json['processed_at'] as String),
+        duplicateOfParticipationId: json['duplicate_of_participation_id'] as int?,
+        duplicateReason: json['duplicate_reason'] as String?,
       );
 }

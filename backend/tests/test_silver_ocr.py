@@ -292,6 +292,50 @@ def test_cross_student_wins_over_same_student_reuse(session, storage):
     assert match == DuplicateMatch(DuplicateReason.cross_student, friend.id, friend_raw.id)
 
 
+# ---------------- เฟส 1.2: บันทึกใบต้นทาง + เหตุผลลงแถว OCR ----------------
+
+
+def test_flagged_row_records_duplicate_of_and_reason(session, storage):
+    activity = _activity(session)
+    first = _participation(session, _student(session, "88601").id, activity.id)
+    _add_raw(session, storage, first.id, checksum=SAME)
+    later = _participation(session, _student(session, "88602").id, activity.id)
+    _add_raw(session, storage, later.id, checksum=SAME)
+
+    row = process_participation_evidence(session, FakeOcr(text="x", confidence=0.9), storage, later.id)
+    session.expire_all()
+    stored = session.get(type(row), row.id)
+
+    assert stored.decision == OcrDecision.flagged
+    assert stored.duplicate_of_participation_id == first.id
+    assert stored.duplicate_reason == DuplicateReason.cross_student
+
+
+def test_rejected_match_is_recorded_on_the_row(session, storage):
+    activity = _activity(session)
+    rejected = _participation(session, _student(session, "88611").id, activity.id,
+                              status=EvidenceStatus.rejected)
+    _add_raw(session, storage, rejected.id, checksum=SAME)
+    p = _participation(session, _student(session, "88612").id, activity.id)
+    _add_raw(session, storage, p.id, checksum=SAME)
+
+    row = process_participation_evidence(session, FakeOcr(text="x", confidence=0.9), storage, p.id)
+
+    assert row.duplicate_of_participation_id == rejected.id
+    assert row.duplicate_reason == DuplicateReason.matches_rejected
+
+
+def test_non_duplicate_row_leaves_duplicate_fields_empty(session, storage):
+    p = _participation(session, _student(session).id, _activity(session).id)
+    _add_raw(session, storage, p.id, checksum="solo" + "0" * 60)
+
+    row = process_participation_evidence(session, FakeOcr(text="x", confidence=0.9), storage, p.id)
+
+    assert row.is_duplicate is False
+    assert row.duplicate_of_participation_id is None
+    assert row.duplicate_reason is None
+
+
 def test_demo_shape_approved_original_then_friend_pending_is_cross_student(session, storage):
     """รูปแบบของ seed demo 4 กลุ่มเดิม: ใบเจ้าของอนุมัติแล้ว (id น้อยกว่า) → เพื่อนส่งไฟล์เดียวกัน"""
     activity = _activity(session)

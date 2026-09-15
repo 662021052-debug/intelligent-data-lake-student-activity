@@ -16,6 +16,7 @@ from app.models import (
     OcrDecision,
     Participation,
     RawFile,
+    SilverEvidenceOcr,
     Student,
     StudentStatus,
     User,
@@ -175,8 +176,36 @@ def test_duplicate_file_is_flagged_not_approved(client, session, storage, tokens
     body = resp.json()
     assert body["decision"] == "flagged"
     assert body["is_duplicate"] is True
+    # คนเดิมคนละการเข้าร่วม (ลงกิจกรรมเดิมซ้ำ) → same_student_reuse ชี้ใบที่อนุมัติแล้ว
+    assert body["duplicate_reason"] == "same_student_reuse"
+    assert body["duplicate_of_participation_id"] == approved.id
     updated = session.get(Participation, target.id)
     assert updated.evidence_status == EvidenceStatus.pending  # never auto-approved
+
+    fetched = client.get(f"/participations/{target.id}/ocr", headers=_admin_headers(tokens)).json()
+    assert fetched["duplicate_reason"] == "same_student_reuse"
+    assert fetched["duplicate_of_participation_id"] == approved.id
+
+
+def test_ocr_row_from_before_duplicate_columns_reads_as_null(client, session, storage, tokens):
+    """แถว OCR เดิม (ก่อนเฟส 1.2) ไม่มีใบต้นทาง/เหตุผล — API ต้องคืน null ไม่ล้ม"""
+    student = _student(session)
+    activity = _activity(session, _staff_id(session))
+    p = _participation(session, student.id, activity.id)
+    raw = _add_raw(session, storage, p.id, checksum="old" + "0" * 61)
+    session.add(SilverEvidenceOcr(
+        raw_file_id=raw.id, participation_id=p.id, extracted_text="ใบเก่า",
+        ocr_confidence=0.7, match_score=0.6, decision=OcrDecision.flagged, is_duplicate=True,
+    ))
+    session.commit()
+
+    resp = client.get(f"/participations/{p.id}/ocr", headers=_admin_headers(tokens))
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["is_duplicate"] is True
+    assert body["duplicate_of_participation_id"] is None
+    assert body["duplicate_reason"] is None
 
 
 # --------------------------- access control ---------------------------

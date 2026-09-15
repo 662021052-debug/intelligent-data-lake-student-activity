@@ -251,7 +251,6 @@ def process_participation_evidence(
     activity = session.get(Activity, participation.activity_id) if participation else None
 
     text, confidence = _extract_text(ocr, storage, raw_file)
-    # เหตุผล/ใบต้นทางยังไม่ถูกบันทึกลงตาราง — คอลัมน์มาในเฟส 1.2
     duplicate = find_duplicate(session, raw_file)
     match_score = compute_match_score(text, student, activity)
 
@@ -282,6 +281,8 @@ def process_participation_evidence(
         match_score=match_score,
         decision=decision,
         is_duplicate=duplicate is not None,
+        duplicate_of_participation_id=duplicate.participation_id if duplicate else None,
+        duplicate_reason=duplicate.reason if duplicate else None,
     )
     session.add(row)
     session.commit()

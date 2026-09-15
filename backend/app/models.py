@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import ConfigDict, field_validator, model_validator
+from sqlalchemy import Column, ForeignKey, Integer
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -483,8 +484,17 @@ class SilverEvidenceOcr(SQLModel, table=True):
     ocr_confidence: float = 0.0          # average OCR confidence (0-1)
     match_score: float = 0.0             # how well the text matches the student/activity (0-1)
     decision: OcrDecision = OcrDecision.needs_review
-    is_duplicate: bool = False           # checksum ซ้ำกับใบที่มาก่อนและยังใช้งาน (silver.find_duplicate)
+    is_duplicate: bool = False           # checksum ซ้ำกับใบที่มาก่อน (silver.find_duplicate)
     processed_at: datetime = Field(default_factory=datetime.utcnow)
+    # ซ้ำกับการเข้าร่วมไหน — SET NULL เพราะเป็นแค่ตัวชี้: ลบใบต้นทางแล้วต้องไม่ขวาง
+    # (sqlmodel รุ่นนี้ยังไม่มี Field(ondelete=...) จึงประกาศผ่าน sa_column)
+    duplicate_of_participation_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("participation.id", ondelete="SET NULL"), nullable=True, index=True
+        ),
+    )
+    duplicate_reason: Optional[DuplicateReason] = None  # null = ไม่ซ้ำ หรือแถวก่อนเฟส 1.2
 
 
 class SilverEvidenceOcrRead(SQLModel):
@@ -497,6 +507,8 @@ class SilverEvidenceOcrRead(SQLModel):
     decision: OcrDecision
     is_duplicate: bool
     processed_at: datetime
+    duplicate_of_participation_id: Optional[int] = None
+    duplicate_reason: Optional[DuplicateReason] = None
 
 
 # ---------- User ----------
