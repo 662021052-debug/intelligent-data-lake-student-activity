@@ -123,31 +123,12 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
       MaterialPageRoute(
         builder: (_) => OcrReviewScreen(
           participationId: p.id!,
-          studentName: _studentLabel(p),
+          studentName: evidenceStudentLabel(p),
         ),
       ),
     );
     // อนุมัติ/ไม่อนุมัติ/อ่านใหม่ในหน้านั้นเปลี่ยนสถานะของแถว → โหลดคิวใหม่เสมอ
     if (mounted) _load();
-  }
-
-  String _studentLabel(Participation p) {
-    final name = p.studentName ?? '#${p.studentId}';
-    return p.studentCode == null ? name : '$name (${p.studentCode})';
-  }
-
-  String _activityLabel(Participation p) => p.activityName ?? '#${p.activityId}';
-
-  /// วันที่ + เวลาแบบสั้น — ตารางนี้มีหลายคอลัมน์ รูปแบบเต็ม "… เวลา 18:00 น." กินที่จน
-  /// ปุ่ม "ตรวจ" ถูกดันล้นขอบการ์ดที่จอ 1440
-  String _uploadedLabel(Participation p) {
-    final uploaded = p.evidenceUploadedAt;
-    if (uploaded == null) return '-';
-    // backend เก็บ utcnow แบบไม่มีโซนเวลา — .toLocal() เฉย ๆ ไม่แปลงให้ จะเพี้ยน 7 ชม.
-    final local = serverTimeToLocal(uploaded);
-    final time = '${local.hour.toString().padLeft(2, '0')}:'
-        '${local.minute.toString().padLeft(2, '0')}';
-    return '${formatThaiDate(local)} $time';
   }
 
   @override
@@ -202,8 +183,10 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
                   ? _emptyState()
                   : LayoutBuilder(
                       builder: (context, constraints) => constraints.maxWidth > 800
-                          ? TableCard(child: _buildTable())
-                          : _buildList(),
+                          ? TableCard(
+                              child: EvidenceReviewTable(items: _items, onReview: _openReview),
+                            )
+                          : EvidenceReviewCards(items: _items, onReview: _openReview),
                     ),
     );
   }
@@ -217,72 +200,131 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
       message: 'หลักฐานที่นิสิตส่งเข้ามาจะแสดงที่นี่',
     );
   }
+}
 
-  Widget _ocrCell(Participation p) {
-    final ocr = _ocrStatus(p);
-    // ภาพถ่าย/หลักฐานอื่นไม่ถูกอนุมัติอัตโนมัติ — บอกเหตุผลไว้ข้างผล OCR (เกียรติบัตรไม่ต้องมีป้าย)
-    if (!evidenceKindNeedsHumanReview(p.evidenceKind)) return ocr;
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [ocr, StatusChip.evidenceKind(p.evidenceKind, dense: true, compact: true)],
+// ------------------------------------------------------------------ ตาราง/การ์ดของคิว
+
+/// "ชื่อ (รหัสนิสิต)" — ไม่มีชื่อจาก API ก็ยังบอกได้ว่าเป็นนิสิต id ไหน
+String evidenceStudentLabel(Participation p) {
+  final name = p.studentName ?? '#${p.studentId}';
+  return p.studentCode == null ? name : '$name (${p.studentCode})';
+}
+
+String evidenceActivityLabel(Participation p) => p.activityName ?? '#${p.activityId}';
+
+/// ช่องไฟระหว่างคอลัมน์ / ขอบซ้าย-ขวาของตาราง — ค่าเดียวกับตารางกิจกรรม
+const kEvidenceColumnSpacing = AppSpacing.lg;
+const kEvidenceTableMargin = AppSpacing.lg;
+
+/// ความสูงแถว — พอสำหรับป้าย OCR สองป้ายซ้อนกัน (ผล OCR + ภาพถ่าย/อื่น ๆ) และวันที่สองบรรทัด
+const kEvidenceRowHeight = 64.0;
+
+/// ความกว้างเนื้อหาของคอลัมน์สถานะหลักฐาน — ชิป "ไม่อนุมัติ"/"รอตรวจสอบ" พร้อมไอคอน
+const kEvidenceStatusCellWidth = 104.0;
+
+/// ความกว้างคอลัมน์ใน Table = เนื้อหา + padding ที่ DataTable ใส่รอบเซลล์เอง (ครึ่งช่องไฟ
+/// แต่ละข้าง คอลัมน์สุดท้ายด้านหลังเป็นขอบตาราง) — ใส่แค่ความกว้างเนื้อหา เนื้อหาจะโดนบีบ
+TableColumnWidth _evidenceFixedColumn(double content, {bool last = false}) => FixedColumnWidth(
+      content + kEvidenceColumnSpacing / 2 + (last ? kEvidenceTableMargin : kEvidenceColumnSpacing / 2),
     );
-  }
 
-  Widget _ocrStatus(Participation p) {
-    if (!p.hasOcr || p.ocrDecision == null) {
-      return Text('ยังไม่ประมวลผล', style: TextStyle(color: AppColors.muted));
-    }
-    return Tooltip(
-      message: 'ความตรง ${asPercent(p.ocrMatchScore ?? 0)} · '
-          'ความมั่นใจ OCR ${asPercent(p.ocrConfidence ?? 0)}'
-          '${p.ocrDecision == 'flagged' ? ' · กด "ตรวจ" เพื่อดูว่าซ้ำกับใบไหน' : ''}',
-      child: StatusChip.ocr(
-        p.ocrDecision!,
-        duplicateReason: p.ocrDuplicateReason,
-        matchKind: p.ocrMatchKind,
-        dense: true,
+/// คอลัมน์ของคิวตรวจหลักฐาน ซ้าย→ขวา — พอดีความกว้างการ์ด ไม่เลื่อนแนวนอน
+///
+/// * นิสิต · กิจกรรม · ผล OCR แชร์พื้นที่ที่เหลือแบบ flex — ข้อความ/ป้ายยาวตัด … (ชี้ดูเต็มได้)
+/// * ส่งเมื่อ · สถานะ · ปุ่ม "ตรวจ" กว้างคงที่ — ปุ่มอยู่ขวาสุดและไม่ถูกดันออกนอกการ์ด
+///   (เดิมทุกคอลัมน์กว้างตามเนื้อหาในตารางเลื่อนแนวนอน ปุ่ม "ตรวจ" จึงถูกตัดที่จอ 1440)
+///
+/// ลำดับต้องตรงกับ [evidenceReviewCells]
+List<DataColumn> evidenceReviewColumns() => [
+      DataColumn(label: TableColumnLabel('นิสิต'), columnWidth: const FlexColumnWidth(2.2)),
+      DataColumn(label: TableColumnLabel('กิจกรรม'), columnWidth: const FlexColumnWidth(2.6)),
+      DataColumn(
+        label: TableColumnLabel('ส่งเมื่อ'),
+        columnWidth: _evidenceFixedColumn(kThaiDateCellWidth),
+      ),
+      DataColumn(label: TableColumnLabel('ผล OCR'), columnWidth: const FlexColumnWidth(2.4)),
+      DataColumn(
+        label: TableColumnLabel('สถานะ'),
+        columnWidth: _evidenceFixedColumn(kEvidenceStatusCellWidth),
+      ),
+      DataColumn(
+        label: TableColumnLabel('จัดการ'),
+        columnWidth: _evidenceFixedColumn(EvidenceReviewButton.width, last: true),
+      ),
+    ];
+
+/// เซลล์ของแถวคิวตรวจหลักฐาน เรียงตาม [evidenceReviewColumns]
+List<DataCell> evidenceReviewCells(
+  Participation p, {
+  required VoidCallback onReview,
+  TextStyle? mutedStyle,
+}) =>
+    [
+      // คอลัมน์ flex — ตารางกำหนดขอบให้แล้ว TruncatedCell จึงไม่จำกัดความกว้างเอง
+      DataCell(TruncatedCell(evidenceStudentLabel(p), maxWidth: double.infinity)),
+      DataCell(TruncatedCell(evidenceActivityLabel(p), maxWidth: double.infinity, style: mutedStyle)),
+      DataCell(EvidenceUploadedCell(p, style: mutedStyle)),
+      DataCell(EvidenceOcrCell(p)),
+      DataCell(SizedBox(
+        width: kEvidenceStatusCellWidth,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: StatusChip.evidence(p.evidenceStatus, dense: true, shrink: true),
+        ),
+      )),
+      DataCell(EvidenceReviewButton(onPressed: onReview)),
+    ];
+
+/// ตารางคิวตรวจหลักฐาน (จอกว้าง) — กว้างเท่าที่ได้รับพอดี ไม่มีการเลื่อนแนวนอน
+class EvidenceReviewTable extends StatelessWidget {
+  const EvidenceReviewTable({super.key, required this.items, required this.onReview});
+
+  final List<Participation> items;
+  final ValueChanged<Participation> onReview;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.copyWith(color: AppColors.sub);
+    return LayoutBuilder(
+      builder: (context, constraints) => SizedBox(
+        width: constraints.maxWidth,
+        child: DataTable(
+          columnSpacing: kEvidenceColumnSpacing,
+          horizontalMargin: kEvidenceTableMargin,
+          dataRowMinHeight: kEvidenceRowHeight,
+          dataRowMaxHeight: kEvidenceRowHeight,
+          columns: evidenceReviewColumns(),
+          rows: [
+            for (final p in items)
+              DataRow(
+                color: appRowColor(theme.colorScheme),
+                cells: evidenceReviewCells(p, onReview: () => onReview(p), mutedStyle: muted),
+              ),
+          ],
+        ),
       ),
     );
   }
+}
 
-  Widget _buildTable() => AppDataTable(
-        columns: const [
-          DataColumn(label: Text('นิสิต')),
-          DataColumn(label: Text('กิจกรรม')),
-          DataColumn(label: Text('ส่งหลักฐานเมื่อ')),
-          DataColumn(label: Text('ผล OCR')),
-          DataColumn(label: Text('สถานะหลักฐาน')),
-          DataColumn(label: Text('')),
-        ],
-        rows: [
-          for (final p in _items)
-            [
-              // ชื่อยาวตัด … (ชี้ดูเต็มได้) ไม่งั้นตารางกว้างเกินการ์ดและปุ่ม "ตรวจ" ถูกตัด
-              DataCell(TruncatedCell(_studentLabel(p), maxWidth: 200)),
-              DataCell(TruncatedCell(_activityLabel(p), maxWidth: 220)),
-              DataCell(Text(_uploadedLabel(p))),
-              DataCell(_ocrCell(p)),
-              DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
-              DataCell(FilledButton.tonalIcon(
-                onPressed: () => _openReview(p),
-                icon: const Icon(Icons.fact_check_outlined, size: 18),
-                label: const Text('ตรวจ'),
-              )),
-            ],
-        ],
-      );
+/// คิวตรวจหลักฐานแบบการ์ด (จอแคบ) — กดทั้งการ์ดเพื่อเปิดหน้าตรวจ
+class EvidenceReviewCards extends StatelessWidget {
+  const EvidenceReviewCards({super.key, required this.items, required this.onReview});
 
-  Widget _buildList() => ListView.builder(
-        itemCount: _items.length,
+  final List<Participation> items;
+  final ValueChanged<Participation> onReview;
+
+  @override
+  Widget build(BuildContext context) => ListView.builder(
+        itemCount: items.length,
         itemBuilder: (context, index) {
-          final p = _items[index];
+          final p = items[index];
           return Card(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: ListTile(
-              onTap: () => _openReview(p),
-              title: Text(_studentLabel(p)),
+              onTap: () => onReview(p),
+              title: Text(evidenceStudentLabel(p)),
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Wrap(
@@ -290,9 +332,9 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
                   runSpacing: 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(_activityLabel(p)),
-                    _ocrCell(p),
-                    StatusChip.evidence(p.evidenceStatus, dense: true),
+                    Text(evidenceActivityLabel(p)),
+                    EvidenceOcrCell(p, stacked: false),
+                    StatusChip.evidence(p.evidenceStatus, dense: true, shrink: true),
                   ],
                 ),
               ),
@@ -300,5 +342,140 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
             ),
           );
         },
+      );
+}
+
+/// วันที่ส่ง (บรรทัดบน) + เวลา (บรรทัดล่าง จาง) กว้างคงที่ — เต็ม ๆ อยู่ใน tooltip
+///
+/// รูปแบบบรรทัดเดียว "15 ก.ย. 2569 20:32" กินที่จนดันปุ่ม "ตรวจ" ล้นการ์ด
+class EvidenceUploadedCell extends StatelessWidget {
+  const EvidenceUploadedCell(this.participation, {super.key, this.style});
+
+  final Participation participation;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final uploaded = participation.evidenceUploadedAt;
+    if (uploaded == null) {
+      return SizedBox(width: kThaiDateCellWidth, child: Text('-', style: style));
+    }
+    // backend เก็บ utcnow แบบไม่มีโซนเวลา — .toLocal() เฉย ๆ ไม่แปลงให้ จะเพี้ยน 7 ชม.
+    final local = serverTimeToLocal(uploaded);
+    final time = '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')} น.';
+    return Tooltip(
+      message: '${formatThaiDate(local)} $time',
+      child: SizedBox(
+        width: kThaiDateCellWidth,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(formatThaiDate(local), maxLines: 1, softWrap: false, style: style),
+            Text(
+              time,
+              maxLines: 1,
+              softWrap: false,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppColors.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// ผล OCR + ป้ายประเภทหลักฐาน (เฉพาะภาพถ่าย/อื่น ๆ ที่ต้องตรวจด้วยตา) + ป้ายไฟล์ซ้ำในตัวผล OCR
+///
+/// ทุกป้ายหดตามพื้นที่แล้วตัด … — ป้ายซ้ำ ("⚠️ ภาพคล้ายกันมาก · นิสิตคนอื่น") ยาวพอจะดัน
+/// ตารางให้ล้นได้ ตัวเต็มพร้อมคะแนนอยู่ใน tooltip
+class EvidenceOcrCell extends StatelessWidget {
+  const EvidenceOcrCell(this.participation, {super.key, this.stacked = true});
+
+  final Participation participation;
+
+  /// ตาราง: ป้ายซ้อนแนวตั้งในคอลัมน์ · การ์ดจอแคบ: เรียงต่อกันแบบ Wrap
+  final bool stacked;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = participation;
+    final status = _status();
+    // เกียรติบัตรไม่ต้องมีป้าย — ภาพถ่าย/หลักฐานอื่นไม่ถูกอนุมัติอัตโนมัติ บอกเหตุผลไว้ข้างผล OCR
+    if (!evidenceKindNeedsHumanReview(p.evidenceKind)) return status;
+    final kind = StatusChip.evidenceKind(p.evidenceKind, dense: true, compact: true, shrink: true);
+    if (!stacked) {
+      return Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [status, kind],
+      );
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [status, const SizedBox(height: 4), kind],
+    );
+  }
+
+  Widget _status() {
+    final p = participation;
+    if (!p.hasOcr || p.ocrDecision == null) {
+      return const Text(
+        'ยังไม่ประมวลผล',
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: AppColors.muted),
+      );
+    }
+    final label = ocrDecisionLabel(
+      p.ocrDecision!,
+      duplicateReason: p.ocrDuplicateReason,
+      matchKind: p.ocrMatchKind,
+    );
+    return Tooltip(
+      message: '$label\n'
+          'ความตรง ${asPercent(p.ocrMatchScore ?? 0)} · '
+          'ความมั่นใจ OCR ${asPercent(p.ocrConfidence ?? 0)}'
+          '${p.ocrDecision == 'flagged' ? ' · กด "ตรวจ" เพื่อดูว่าซ้ำกับใบไหน' : ''}',
+      child: StatusChip.ocr(
+        p.ocrDecision!,
+        duplicateReason: p.ocrDuplicateReason,
+        matchKind: p.ocrMatchKind,
+        dense: true,
+        shrink: true,
+      ),
+    );
+  }
+}
+
+/// ปุ่ม "ตรวจ" กว้าง/สูงคงที่ — คอลัมน์สุดท้ายของตารางใช้ความกว้างนี้ ปุ่มจึงไม่หลุดขอบ
+class EvidenceReviewButton extends StatelessWidget {
+  const EvidenceReviewButton({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  static const double width = 88;
+  static const double height = 32;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: width,
+        height: height,
+        child: FilledButton.tonalIcon(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            minimumSize: const Size(width, height),
+            maximumSize: const Size(width, height),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+          ),
+          icon: const Icon(Icons.fact_check_outlined, size: 16),
+          label: const Text('ตรวจ', maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
+        ),
       );
 }

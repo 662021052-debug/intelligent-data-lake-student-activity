@@ -65,6 +65,20 @@ class ThaiDateCell extends StatelessWidget {
   }
 }
 
+/// หัวคอลัมน์ของตารางที่กำหนดความกว้างคอลัมน์เอง (columnWidth) — หดและตัด … แทนการล้น
+///
+/// DataTable วางป้ายหัวคอลัมน์เป็นลูกตรงของ [Row] ที่ไม่หด ป้ายที่กว้างกว่าคอลัมน์จึงล้นทับ
+/// คอลัมน์ข้าง ๆ — เป็น [Flexible] เองจึงหดตามคอลัมน์ได้ (แนวเดียวกับหัวตารางกิจกรรม)
+class TableColumnLabel extends Flexible {
+  TableColumnLabel(this.text, {super.key})
+      : super(
+          child: Text(text, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
+        );
+
+  /// ข้อความหัวคอลัมน์ (ใช้อ้างถึงคอลัมน์ในเทส)
+  final String text;
+}
+
 /// เซลล์ตัวเลขแคบ ๆ (ชั่วโมง) — กว้างพอสำหรับเลขไม่กี่หลักเท่านั้น
 class NarrowCell extends StatelessWidget {
   const NarrowCell(this.child, {super.key, this.width = 44});

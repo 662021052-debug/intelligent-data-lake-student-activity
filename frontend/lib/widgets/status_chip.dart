@@ -17,6 +17,7 @@ class StatusChip extends StatelessWidget {
     required this.palette,
     this.icon,
     this.dense = false,
+    this.shrink = false,
   });
 
   final String label;
@@ -26,8 +27,12 @@ class StatusChip extends StatelessWidget {
   /// ใช้ในตาราง/แถวแคบ — ตัดระยะขอบลงให้แถวไม่สูงเกิน
   final bool dense;
 
+  /// หดตามพื้นที่แล้วตัดป้ายด้วย … แทนการล้น — ใช้เฉพาะในที่ที่ความกว้างมีขอบเขต (เซลล์ตาราง
+  /// ความกว้างคงที่/flex, Wrap ในการ์ด) · ในที่ที่กว้างไม่จำกัด (เช่นตารางเลื่อนแนวนอน) ต้องปิดไว้
+  final bool shrink;
+
   /// สถานะหลักฐานการเข้าร่วม (approved / pending / rejected)
-  factory StatusChip.evidence(String status, {bool dense = false}) {
+  factory StatusChip.evidence(String status, {bool dense = false, bool shrink = false}) {
     return StatusChip(
       label: evidenceLabel(status),
       palette: switch (status) {
@@ -41,6 +46,7 @@ class StatusChip extends StatelessWidget {
         _ => Icons.schedule,
       },
       dense: dense,
+      shrink: shrink,
     );
   }
 
@@ -48,11 +54,17 @@ class StatusChip extends StatelessWidget {
   ///
   /// ภาพถ่าย/อื่น ๆ เป็นสีเหลือง = ต้องตรวจด้วยตา (ไม่อนุมัติอัตโนมัติ) · เกียรติบัตรสีกลาง ๆ
   /// [compact] ใช้ป้ายสั้นสำหรับตาราง/แถวแคบ
-  factory StatusChip.evidenceKind(String? kind, {bool dense = false, bool compact = false}) {
+  factory StatusChip.evidenceKind(
+    String? kind, {
+    bool dense = false,
+    bool compact = false,
+    bool shrink = false,
+  }) {
     return StatusChip(
       label: compact ? evidenceKindShortLabel(kind) : evidenceKindReviewLabel(kind),
       palette: evidenceKindNeedsHumanReview(kind) ? StatusPalette.pending : StatusPalette.neutral,
       dense: dense,
+      shrink: shrink,
     );
   }
 
@@ -90,8 +102,10 @@ class StatusChip extends StatelessWidget {
     String? duplicateReason,
     String? matchKind,
     bool dense = false,
+    bool shrink = false,
   }) {
     return StatusChip(
+      shrink: shrink,
       label: ocrDecisionLabel(decision, duplicateReason: duplicateReason, matchKind: matchKind),
       palette: switch (decision) {
         'auto_approved' => StatusPalette.approved,
@@ -127,7 +141,18 @@ class StatusChip extends StatelessWidget {
             Icon(icon, size: 14, color: palette.foreground),
             const SizedBox(width: AppSpacing.xs),
           ],
-          Text(label, style: textStyle),
+          if (shrink)
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: textStyle,
+              ),
+            )
+          else
+            Text(label, style: textStyle),
         ],
       ),
     );
