@@ -436,6 +436,8 @@ class ParticipationRead(ParticipationBase):
     ocr_decision: Optional[OcrDecision] = None
     ocr_match_score: Optional[float] = None
     ocr_confidence: Optional[float] = None
+    # เหตุผลที่ไฟล์ซ้ำ (เฉพาะใบ flagged) — คิวตรวจแสดงป้าย/สีตามเหตุผลได้โดยไม่ต้องยิงทีละแถว
+    ocr_duplicate_reason: Optional[DuplicateReason] = None
 
 
 # ---------- Raw file (Bronze layer metadata / data lineage) ----------
@@ -509,6 +511,14 @@ class SilverEvidenceOcrRead(SQLModel):
     processed_at: datetime
     duplicate_of_participation_id: Optional[int] = None
     duplicate_reason: Optional[DuplicateReason] = None
+    # บริบทของใบต้นทาง — คำนวณตอนอ่าน ไม่ได้เก็บในตาราง ให้เจ้าหน้าที่รู้ว่าซ้ำกับใคร
+    # นิสิตเรียก GET .../ocr ของใบตัวเองได้ จึงไม่ส่งชื่อ/รหัสของคนอื่นให้ role student
+    duplicate_of_student_name: Optional[str] = None
+    duplicate_of_student_code: Optional[str] = None
+    duplicate_of_activity_name: Optional[str] = None
+    duplicate_of_evidence_status: Optional[EvidenceStatus] = None
+    # ผู้ใช้คนนี้เปิดหน้าตรวจของใบต้นทางได้ไหม (admin ได้เสมอ · staff เฉพาะกิจกรรมของตัวเอง)
+    duplicate_of_viewable: bool = False
 
 
 # ---------- User ----------

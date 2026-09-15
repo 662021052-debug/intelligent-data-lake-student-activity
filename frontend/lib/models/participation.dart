@@ -15,6 +15,7 @@ class Participation {
   final String? ocrDecision; // auto_approved | needs_review | flagged
   final double? ocrMatchScore;
   final double? ocrConfidence;
+  final String? ocrDuplicateReason; // cross_student | same_student_reuse | matches_rejected
 
   Participation({
     this.id,
@@ -32,6 +33,7 @@ class Participation {
     this.ocrDecision,
     this.ocrMatchScore,
     this.ocrConfidence,
+    this.ocrDuplicateReason,
   });
 
   factory Participation.fromJson(Map<String, dynamic> json) => Participation(
@@ -54,6 +56,7 @@ class Participation {
         ocrDecision: json['ocr_decision'] as String?,
         ocrMatchScore: (json['ocr_match_score'] as num?)?.toDouble(),
         ocrConfidence: (json['ocr_confidence'] as num?)?.toDouble(),
+        ocrDuplicateReason: json['ocr_duplicate_reason'] as String?,
       );
 
   Map<String, dynamic> toJson() => {

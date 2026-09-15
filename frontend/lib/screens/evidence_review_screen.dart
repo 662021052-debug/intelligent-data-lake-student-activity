@@ -223,8 +223,9 @@ class _EvidenceReviewScreenState extends State<EvidenceReviewScreen> {
     }
     return Tooltip(
       message: 'ความตรง ${asPercent(p.ocrMatchScore ?? 0)} · '
-          'ความมั่นใจ OCR ${asPercent(p.ocrConfidence ?? 0)}',
-      child: StatusChip.ocr(p.ocrDecision!, dense: true),
+          'ความมั่นใจ OCR ${asPercent(p.ocrConfidence ?? 0)}'
+          '${p.ocrDecision == 'flagged' ? ' · กด "ตรวจ" เพื่อดูว่าซ้ำกับใบไหน' : ''}',
+      child: StatusChip.ocr(p.ocrDecision!, duplicateReason: p.ocrDuplicateReason, dense: true),
     );
   }
 

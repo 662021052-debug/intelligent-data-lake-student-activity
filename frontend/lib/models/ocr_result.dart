@@ -17,6 +17,15 @@ class OcrResult {
   /// cross_student | same_student_reuse | matches_rejected (null เหมือนข้างบน)
   final String? duplicateReason;
 
+  // บริบทของใบต้นทาง (backend คำนวณตอนอ่าน) — null ถ้าไม่ซ้ำ / ผลรุ่นเก่า / ผู้ใช้เป็นนิสิต
+  final String? duplicateOfStudentName;
+  final String? duplicateOfStudentCode;
+  final String? duplicateOfActivityName;
+  final String? duplicateOfEvidenceStatus; // pending | approved | rejected
+
+  /// ผู้ใช้คนนี้เปิดหน้าตรวจของใบต้นทางได้ไหม (staff เฉพาะกิจกรรมของตัวเอง)
+  final bool duplicateOfViewable;
+
   OcrResult({
     required this.id,
     required this.rawFileId,
@@ -29,6 +38,11 @@ class OcrResult {
     required this.processedAt,
     this.duplicateOfParticipationId,
     this.duplicateReason,
+    this.duplicateOfStudentName,
+    this.duplicateOfStudentCode,
+    this.duplicateOfActivityName,
+    this.duplicateOfEvidenceStatus,
+    this.duplicateOfViewable = false,
   });
 
   factory OcrResult.fromJson(Map<String, dynamic> json) => OcrResult(
@@ -43,5 +57,10 @@ class OcrResult {
         processedAt: DateTime.parse(json['processed_at'] as String),
         duplicateOfParticipationId: json['duplicate_of_participation_id'] as int?,
         duplicateReason: json['duplicate_reason'] as String?,
+        duplicateOfStudentName: json['duplicate_of_student_name'] as String?,
+        duplicateOfStudentCode: json['duplicate_of_student_code'] as String?,
+        duplicateOfActivityName: json['duplicate_of_activity_name'] as String?,
+        duplicateOfEvidenceStatus: json['duplicate_of_evidence_status'] as String?,
+        duplicateOfViewable: json['duplicate_of_viewable'] as bool? ?? false,
       );
 }

@@ -117,6 +117,7 @@ def _to_read(
         ocr_decision=ocr.decision if ocr else None,
         ocr_match_score=ocr.match_score if ocr else None,
         ocr_confidence=ocr.ocr_confidence if ocr else None,
+        ocr_duplicate_reason=ocr.duplicate_reason if ocr else None,
     )
 
 
@@ -565,6 +566,35 @@ def upload_evidence(
     return _read_with_evidence(session, participation)
 
 
+def _ocr_read(
+    session: Session, row: SilverEvidenceOcr, current_user: User
+) -> SilverEvidenceOcrRead:
+    """ผล OCR + บริบทของใบต้นทางเมื่อไฟล์ซ้ำ (ชื่อ/รหัสนิสิต · กิจกรรม · สถานะ)
+
+    เจ้าหน้าที่ต้องเห็นว่าซ้ำกับใครถึงจะตัดสินใจได้ แม้ใบต้นทางอยู่ในกิจกรรมที่ตัวเองไม่ได้
+    เป็นเจ้าของ — แต่เปิดหน้าตรวจของใบนั้นได้เฉพาะเมื่อมีสิทธิ์ ([duplicate_of_viewable])
+    role student ไม่ได้บริบทนี้ เพราะเป็นข้อมูลของนิสิตคนอื่น
+    """
+    read = SilverEvidenceOcrRead(**row.model_dump())
+    original_id = row.duplicate_of_participation_id
+    if original_id is None or current_user.role == UserRole.student:
+        return read
+    original = session.get(Participation, original_id)
+    if original is None:
+        return read
+
+    student = session.get(Student, original.student_id)
+    activity = session.get(Activity, original.activity_id)
+    read.duplicate_of_student_name = student.full_name if student else None
+    read.duplicate_of_student_code = student.student_id if student else None
+    read.duplicate_of_activity_name = activity.name if activity else None
+    read.duplicate_of_evidence_status = original.evidence_status
+    read.duplicate_of_viewable = current_user.role == UserRole.admin or (
+        activity is not None and activity.created_by == current_user.id
+    )
+    return read
+
+
 @router.post("/{participation_id}/evidence/process", response_model=SilverEvidenceOcrRead)
 def process_evidence(
     participation_id: int,
@@ -591,7 +621,7 @@ def process_evidence(
     row = silver.process_participation_evidence(session, ocr, storage, participation_id)
     if row is None:
         raise HTTPException(status_code=400, detail="ยังไม่มีหลักฐานให้ประมวลผล")
-    return row
+    return _ocr_read(session, row, current_user)
 
 
 @router.get("/{participation_id}/ocr", response_model=SilverEvidenceOcrRead)
@@ -614,7 +644,7 @@ def get_ocr_result(
     ).first()
     if not row:
         raise HTTPException(status_code=404, detail="ยังไม่มีผลการประมวลผล OCR")
-    return row
+    return _ocr_read(session, row, current_user)
 
 
 @router.get("/{participation_id}/evidence")

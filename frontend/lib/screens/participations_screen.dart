@@ -14,6 +14,7 @@ import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/duplicate_notice.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
 import '../widgets/pagination_bar.dart';
@@ -395,6 +396,20 @@ class _ParticipationFormDialogState extends State<_ParticipationFormDialog> {
     if (_studentId == null || _activityId == null) {
       setState(() => _error = 'กรุณาเลือกนิสิตและกิจกรรม');
       return;
+    }
+    // เปลี่ยนใบที่ผล OCR เป็นไฟล์ซ้ำให้เป็น "อนุมัติ" ต้องรับรู้ก่อน (ทางเดียวกับหน้าตรวจหลักฐาน)
+    final existing = widget.existing;
+    if (existing != null &&
+        existing.ocrDecision == 'flagged' &&
+        existing.evidenceStatus != 'approved' &&
+        _evidenceStatus == 'approved') {
+      try {
+        final ocr = await ApiService.fetchOcrResult(existing.id!);
+        if (!mounted || !await confirmApproveIfDuplicate(context, ocr)) return;
+      } catch (e) {
+        setState(() => _error = friendlyError(e));
+        return;
+      }
     }
     setState(() {
       _saving = true;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/activity.dart';
+import '../models/ocr_result.dart';
 import '../models/participation.dart';
 import '../models/student.dart';
 import '../services/api_service.dart';
@@ -9,6 +10,7 @@ import '../utils/api_error.dart';
 import '../utils/format.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/duplicate_notice.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/evidence_actions.dart';
 import '../widgets/search_field.dart';
@@ -122,6 +124,18 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
   }
 
   Future<void> _setEvidence(Participation p, String status) async {
+    // ใบที่ผล OCR ล่าสุดเป็นไฟล์ซ้ำ ต้องรับรู้ก่อนอนุมัติ — แถวรายการไม่มีรายละเอียดว่าซ้ำกับใคร
+    // จึงดึงผล OCR มาให้ dialog บอกบริบทได้เหมือนหน้าตรวจหลักฐาน
+    if (status == 'approved' && p.ocrDecision == 'flagged') {
+      OcrResult? ocr;
+      try {
+        ocr = await ApiService.fetchOcrResult(p.id!);
+      } catch (e) {
+        if (mounted) showErrorSnackbar(context, e);
+        return;
+      }
+      if (!mounted || !await confirmApproveIfDuplicate(context, ocr)) return;
+    }
     try {
       await ApiService.update(
         '/participations/${p.id}',
@@ -223,7 +237,11 @@ class _ActivityParticipantsScreenState extends State<ActivityParticipantsScreen>
                                       runSpacing: 4,
                                       crossAxisAlignment: WrapCrossAlignment.center,
                                       children: [
-                                        StatusChip.ocr(p.ocrDecision!, dense: true),
+                                        StatusChip.ocr(
+                                          p.ocrDecision!,
+                                          duplicateReason: p.ocrDuplicateReason,
+                                          dense: true,
+                                        ),
                                         Text(
                                           'ตรง ${asPercent(p.ocrMatchScore ?? 0)} • มั่นใจ ${asPercent(p.ocrConfidence ?? 0)}',
                                           style: Theme.of(context).textTheme.bodySmall,

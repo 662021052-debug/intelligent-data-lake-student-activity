@@ -6,9 +6,9 @@ import 'package:flutter/material.dart';
 import '../models/ocr_result.dart';
 import '../models/participation.dart';
 import '../services/api_service.dart';
-import '../theme/app_theme.dart';
 import '../utils/ocr_status.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/duplicate_notice.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/evidence_preview.dart';
 import '../widgets/status_chip.dart';
@@ -68,6 +68,8 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
   }
 
   Future<void> _setStatus(String status) async {
+    // ใบที่ไฟล์ซ้ำต้องรับรู้ก่อนอนุมัติ (ไม่บล็อก — backend ยังอนุมัติได้)
+    if (status == 'approved' && !await confirmApproveIfDuplicate(context, _ocr)) return;
     try {
       await ApiService.update(
         '/participations/${widget.participationId}',
@@ -92,6 +94,22 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
     } catch (e) {
       if (mounted) showErrorSnackbar(context, e);
     }
+  }
+
+  /// เปิดหน้าตรวจของใบต้นทางซ้อนขึ้นมา — กลับมาแล้วโหลดใหม่ เผื่อสถานะใบนั้นเปลี่ยน
+  Future<void> _openOriginal(OcrResult ocr) async {
+    final name = ocr.duplicateOfStudentName ?? '#${ocr.duplicateOfParticipationId}';
+    final code = ocr.duplicateOfStudentCode;
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OcrReviewScreen(
+          participationId: ocr.duplicateOfParticipationId!,
+          studentName: code == null ? '$name (ใบต้นทาง)' : '$name ($code) — ใบต้นทาง',
+        ),
+      ),
+    );
+    if (mounted) _load();
   }
 
   @override
@@ -166,17 +184,15 @@ class _OcrReviewScreenState extends State<OcrReviewScreen> {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                StatusChip.ocr(ocr.decision),
+                StatusChip.ocr(ocr.decision, duplicateReason: ocr.duplicateReason),
                 _scorePill('ความตรง', ocr.matchScore),
                 _scorePill('ความมั่นใจ OCR', ocr.ocrConfidence),
-                if (ocr.isDuplicate)
-                  const StatusChip(
-                    label: 'ไฟล์ซ้ำ',
-                    palette: StatusPalette.rejected,
-                    icon: Icons.copy_all_outlined,
-                  ),
               ],
             ),
+            if (needsDuplicateConfirmation(ocr)) ...[
+              const SizedBox(height: 12),
+              DuplicateNotice(ocr: ocr, onOpenOriginal: () => _openOriginal(ocr)),
+            ],
             const SizedBox(height: 16),
             Text('ข้อความที่อ่านได้', style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 4),

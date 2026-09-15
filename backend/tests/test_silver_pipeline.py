@@ -292,3 +292,106 @@ def test_participation_reads_fold_in_ocr_summary(client, session, storage, token
     assert row["has_ocr"] is True
     assert row["ocr_decision"] == "auto_approved"
     assert row["has_evidence"] is True  # also fixes the previously-unpopulated flag
+    assert row["ocr_duplicate_reason"] is None
+
+
+# --------------------- เฟส 1.3: บริบทของใบต้นทางเมื่อไฟล์ซ้ำ ---------------------
+def _duplicate_pair(session, storage, original_owner, target_owner, checksum):
+    """ใบต้นทางอนุมัติแล้ว (กิจกรรมของ original_owner) + เพื่อนส่งไฟล์เดียวกัน (กิจกรรมของ target_owner)"""
+    owner = _student(session, code="77101", name="นางสาวต้นฉบับ ตัวจริง")
+    original_activity = _activity(session, original_owner, name="ตลาดนัดผู้ประกอบการ")
+    original = _participation(session, owner.id, original_activity.id, status=EvidenceStatus.approved)
+    _add_raw(session, storage, original.id, checksum)
+    borrower = _student(session, code="77102", name="นายยืมใบ เพื่อน")
+    target_activity = _activity(session, target_owner, name="ค่ายอาสา")
+    target = _participation(session, borrower.id, target_activity.id)
+    _add_raw(session, storage, target.id, checksum)
+    return original, target
+
+
+def test_ocr_read_carries_original_context_for_admin(client, session, storage, tokens):
+    original, target = _duplicate_pair(
+        session, storage, _admin_id(session), _staff_id(session), "ctx1" + "0" * 60
+    )
+    _override_ocr("ใบของคนอื่น", 0.9)
+
+    body = client.post(
+        f"/participations/{target.id}/evidence/process", headers=_admin_headers(tokens)
+    ).json()
+
+    assert body["decision"] == "flagged"
+    assert body["duplicate_reason"] == "cross_student"
+    assert body["duplicate_of_participation_id"] == original.id
+    assert body["duplicate_of_student_name"] == "นางสาวต้นฉบับ ตัวจริง"
+    assert body["duplicate_of_student_code"] == "77101"
+    assert body["duplicate_of_activity_name"] == "ตลาดนัดผู้ประกอบการ"
+    assert body["duplicate_of_evidence_status"] == "approved"
+    assert body["duplicate_of_viewable"] is True
+    fetched = client.get(f"/participations/{target.id}/ocr", headers=_admin_headers(tokens)).json()
+    assert fetched["duplicate_of_student_name"] == "นางสาวต้นฉบับ ตัวจริง"
+
+
+def test_staff_sees_who_but_cannot_open_original_outside_own_activity(client, session, storage, tokens):
+    """ต้นทางอยู่ในกิจกรรมของ admin: staff ที่ตรวจใบของตัวเองต้องรู้ว่าซ้ำกับใคร แต่ไม่มีลิงก์เปิด"""
+    original, target = _duplicate_pair(
+        session, storage, _admin_id(session), _staff_id(session), "ctx2" + "0" * 60
+    )
+    _override_ocr("ใบของคนอื่น", 0.9)
+    client.post(f"/participations/{target.id}/evidence/process", headers=_admin_headers(tokens))
+
+    body = client.get(f"/participations/{target.id}/ocr").json()  # default client = staff เจ้าของ target
+
+    assert body["duplicate_of_student_name"] == "นางสาวต้นฉบับ ตัวจริง"
+    assert body["duplicate_of_activity_name"] == "ตลาดนัดผู้ประกอบการ"
+    assert body["duplicate_of_viewable"] is False
+    assert client.get(f"/participations/{original.id}/ocr").status_code == 403
+
+
+def test_staff_owning_both_activities_can_open_original(client, session, storage, tokens):
+    _, target = _duplicate_pair(
+        session, storage, _staff_id(session), _staff_id(session), "ctx3" + "0" * 60
+    )
+    _override_ocr("ใบของคนอื่น", 0.9)
+
+    body = client.post(f"/participations/{target.id}/evidence/process").json()  # staff เจ้าของ
+
+    assert body["duplicate_of_viewable"] is True
+
+
+def test_student_role_gets_no_other_students_context(session, storage):
+    """นิสิตเรียก GET .../ocr ของใบตัวเองได้ — ต้องไม่เห็นชื่อ/รหัสของนิสิตคนอื่น"""
+    from app.models import UserRole
+    from app.routers.participations import _ocr_read
+    from app.silver import process_participation_evidence
+
+    original, target = _duplicate_pair(
+        session, storage, _staff_id(session), _staff_id(session), "ctx4" + "0" * 60
+    )
+    row = process_participation_evidence(session, FakeOcr("ใบของคนอื่น", 0.9), storage, target.id)
+
+    read = _ocr_read(session, row, User(username="s", hashed_password="x", role=UserRole.student))
+
+    assert read.duplicate_reason == "cross_student"
+    assert read.duplicate_of_participation_id == original.id
+    assert read.duplicate_of_student_name is None
+    assert read.duplicate_of_student_code is None
+    assert read.duplicate_of_activity_name is None
+    assert read.duplicate_of_viewable is False
+
+
+def test_participation_reads_carry_duplicate_reason_for_the_queue(client, session, storage, tokens):
+    _, target = _duplicate_pair(
+        session, storage, _staff_id(session), _staff_id(session), "ctx5" + "0" * 60
+    )
+    _override_ocr("ใบของคนอื่น", 0.9)
+    client.post(f"/participations/{target.id}/evidence/process", headers=_admin_headers(tokens))
+
+    detail = client.get(f"/participations/{target.id}", headers=_admin_headers(tokens)).json()
+    queue = client.get(
+        "/participations", params={"ocr_decision": "flagged", "has_evidence": "true"},
+        headers=_admin_headers(tokens),
+    ).json()["items"]
+
+    assert detail["ocr_decision"] == "flagged"
+    assert detail["ocr_duplicate_reason"] == "cross_student"
+    assert [r["ocr_duplicate_reason"] for r in queue if r["id"] == target.id] == ["cross_student"]
