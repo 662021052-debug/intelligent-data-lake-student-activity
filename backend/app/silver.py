@@ -22,6 +22,7 @@ from app.models import (
     Activity,
     DuplicateReason,
     EvidenceStatus,
+    MatchKind,
     OcrDecision,
     Participation,
     RawFile,
@@ -29,6 +30,7 @@ from app.models import (
     Student,
 )
 from app.ocr import OcrEngine
+from app.phash import phash_distance
 from app.storage import ObjectStorage
 
 logger = logging.getLogger("uvicorn.error")
@@ -45,39 +47,67 @@ def _latest_raw_file(session: Session, participation_id: int) -> Optional[RawFil
 
 @dataclass(frozen=True)
 class DuplicateMatch:
-    """ไฟล์นี้ซ้ำกับใบไหน และซ้ำแบบไหน"""
+    """ไฟล์นี้ซ้ำกับใบไหน ซ้ำแบบไหน และตรงกันแบบเป๊ะหรือแค่คล้าย"""
 
     reason: DuplicateReason
     participation_id: int
     raw_file_id: int
+    match_kind: MatchKind = MatchKind.exact
+    distance: Optional[int] = None  # Hamming distance ของ pHash (เฉพาะ near)
 
 
-def find_duplicate(session: Session, raw_file: RawFile) -> Optional[DuplicateMatch]:
-    """หาใบที่ "มาก่อน" ซึ่งใช้ไฟล์เดียวกันเป๊ะ (checksum เดียวกัน) กับ [raw_file]
+# ลำดับความสำคัญของเหตุผล — ใบที่ใช้งานมาก่อนเพราะเสี่ยงได้ชั่วโมงซ้ำจริง
+_REASON_RANK = {
+    DuplicateReason.cross_student: 0,
+    DuplicateReason.same_student_reuse: 1,
+    DuplicateReason.matches_rejected: 2,
+}
+
+
+def _reason_for(status: EvidenceStatus, other_student_id: int, current_student_id: int) -> DuplicateReason:
+    if status == EvidenceStatus.rejected:
+        return DuplicateReason.matches_rejected
+    if other_student_id != current_student_id:
+        return DuplicateReason.cross_student
+    return DuplicateReason.same_student_reuse
+
+
+def find_duplicate(
+    session: Session, raw_file: RawFile, text: Optional[str] = None
+) -> Optional[DuplicateMatch]:
+    """หาใบที่ "มาก่อน" ซึ่งเป็นไฟล์เดียวกัน (เป๊ะ) หรือภาพเกือบเหมือน (คล้าย) กับ [raw_file]
+
+    กติกาที่ใช้ทั้งสองชั้น:
 
     * เทียบกับทุกใบในระบบ ไม่ใช่แค่ใบที่อนุมัติแล้ว — สองคนส่งไฟล์เดียวกันตอนยัง
       pending ทั้งคู่ก็ต้องจับได้
     * นับเฉพาะไฟล์ที่ id น้อยกว่า: ใบหลังโดน flag ใบแรกไม่โดน และสั่งอ่านใหม่กี่รอบ
       ผลก็เหมือนเดิม (deterministic)
-    * ไฟล์เดิมในการเข้าร่วมเดียวกัน = อัปโหลดซ้ำของตัวเอง ไม่ใช่ทุจริต → ไม่นับ
+    * ไฟล์ในการเข้าร่วมเดียวกัน = อัปโหลดซ้ำของตัวเอง ไม่ใช่ทุจริต → ไม่นับ
+    * ลำดับเหตุผลเมื่อตรงหลายใบ:
 
-    ลำดับเหตุผลเมื่อตรงหลายใบ (แต่ละเหตุผลชี้ใบแรกสุดของกลุ่มนั้น):
+      1. ``cross_student`` — ใบที่ยังใช้งาน (pending/approved) ของนิสิตคนอื่น
+      2. ``same_student_reuse`` — ใบที่ยังใช้งานของคนเดิมคนละการเข้าร่วม (กิจกรรมอื่น
+         หรือลงกิจกรรมเดิมซ้ำ ซึ่งจะได้ชั่วโมงสองรอบ)
+      3. ``matches_rejected`` — ไม่ซ้ำใบที่ใช้งานเลย แต่ตรงกับใบที่เคยถูกปฏิเสธ
 
-    1. ``cross_student`` — ใบที่ยังใช้งาน (pending/approved) ของนิสิตคนอื่น
-    2. ``same_student_reuse`` — ใบที่ยังใช้งานของคนเดิมคนละการเข้าร่วม (กิจกรรมอื่น
-       หรือลงกิจกรรมเดิมซ้ำ ซึ่งจะได้ชั่วโมงสองรอบ)
-    3. ``matches_rejected`` — ไม่ซ้ำใบที่ใช้งานเลย แต่ตรงกับใบที่เคยถูกปฏิเสธ
-       (ของใครก็ได้) — ใบที่ใช้งานมาก่อนเพราะเสี่ยงได้ชั่วโมงซ้ำจริง ส่วนใบที่ถูกปฏิเสธ
-       เป็นแค่สัญญาณว่าไฟล์นี้เคยไม่ผ่าน
-
-    ค้นด้วย ``raw_file.checksum`` ที่มี index — query เดียว ไม่ scan ทั้งตาราง
+    ชั้นที่ 1 ``exact`` — checksum เดียวกัน (เฟส 1) มาก่อนเสมอ ค้นด้วย index ของ checksum
+    ชั้นที่ 2 ``near`` — ถ้าชั้นแรกไม่เจอ ดู pHash (ดู :func:`_near_duplicate`) โดยใช้ [text]
+    ข้อความ OCR ของไฟล์นี้ประกอบการ veto
     """
     if raw_file.participation_id is None:
         return None
     current = session.get(Participation, raw_file.participation_id)
     if current is None:
         return None
+    return _exact_duplicate(session, raw_file, current) or _near_duplicate(
+        session, raw_file, current, text
+    )
 
+
+def _exact_duplicate(
+    session: Session, raw_file: RawFile, current: Participation
+) -> Optional[DuplicateMatch]:
     earlier = session.exec(
         select(RawFile.id, Participation.id, Participation.student_id, Participation.evidence_status)
         .join(Participation, Participation.id == RawFile.participation_id)
@@ -88,24 +118,88 @@ def find_duplicate(session: Session, raw_file: RawFile) -> Optional[DuplicateMat
         )
         .order_by(RawFile.id)
     ).all()
+    matches = [
+        (_REASON_RANK[reason], other_raw_file_id, DuplicateMatch(reason, other_participation_id, other_raw_file_id))
+        for other_raw_file_id, other_participation_id, other_student_id, status in earlier
+        for reason in (_reason_for(status, other_student_id, current.student_id),)
+    ]
+    return min(matches)[-1] if matches else None
 
-    reuse: Optional[DuplicateMatch] = None
-    rejected: Optional[DuplicateMatch] = None
-    for other_raw_file_id, other_participation_id, other_student_id, status in earlier:
-        if status == EvidenceStatus.rejected:
-            if rejected is None:
-                rejected = DuplicateMatch(
-                    DuplicateReason.matches_rejected, other_participation_id, other_raw_file_id
-                )
-        elif other_student_id != current.student_id:
-            return DuplicateMatch(
-                DuplicateReason.cross_student, other_participation_id, other_raw_file_id
-            )
-        elif reuse is None:
-            reuse = DuplicateMatch(
-                DuplicateReason.same_student_reuse, other_participation_id, other_raw_file_id
-            )
-    return reuse or rejected
+
+def _near_duplicate(
+    session: Session, raw_file: RawFile, current: Participation, text: Optional[str]
+) -> Optional[DuplicateMatch]:
+    """ภาพเกือบเหมือน: pHash ห่าง ≤ ``settings.ocr_phash_near_bits`` และข้อความไม่ veto
+
+    * ไฟล์ที่ไม่มี pHash (PDF / ถอดภาพไม่ได้ / เข้ามาก่อนเฟส 3A) ข้ามชั้นนี้ไป
+    * text veto (:func:`text_vetoes_near_match`): ใบเกียรติบัตรเทมเพลตเดียวกันของคนละคน
+      หน้าตาคล้ายกันได้ ถ้าข้อความ OCR สองใบต่างกันชัดและอ่านออกทั้งคู่ → ไม่นับว่าซ้ำ
+    * เลือกตามลำดับเหตุผล แล้วใกล้สุด แล้วใบแรกสุด
+
+    performance: Hamming distance ใช้ index ธรรมดาไม่ได้ จึงดึงไฟล์ภาพที่มาก่อนและมี pHash
+    ทั้งหมดมาเทียบในหน่วยความจำ — O(จำนวนไฟล์ภาพในระบบ) ต่อการประมวลผลหนึ่งครั้ง
+    """
+    if not raw_file.phash:
+        return None
+    candidates = session.exec(
+        select(
+            RawFile.id,
+            RawFile.phash,
+            Participation.id,
+            Participation.student_id,
+            Participation.evidence_status,
+        )
+        .join(Participation, Participation.id == RawFile.participation_id)
+        .where(
+            RawFile.phash.is_not(None),
+            RawFile.id < raw_file.id,
+            RawFile.participation_id != current.id,
+        )
+        .order_by(RawFile.id)
+    ).all()
+
+    matches = []
+    for other_raw_file_id, other_phash, other_participation_id, other_student_id, status in candidates:
+        distance = phash_distance(raw_file.phash, other_phash)
+        if distance > settings.ocr_phash_near_bits:
+            continue
+        if text_vetoes_near_match(text, _latest_ocr_text(session, other_raw_file_id)):
+            continue
+        reason = _reason_for(status, other_student_id, current.student_id)
+        match = DuplicateMatch(
+            reason, other_participation_id, other_raw_file_id, MatchKind.near, distance
+        )
+        matches.append((_REASON_RANK[reason], distance, other_raw_file_id, match))
+    return min(matches)[-1] if matches else None
+
+
+def _latest_ocr_text(session: Session, raw_file_id: int) -> Optional[str]:
+    """ข้อความ OCR ล่าสุดของไฟล์ — None ถ้าไฟล์นั้นยังไม่เคยผ่าน OCR"""
+    return session.exec(
+        select(SilverEvidenceOcr.extracted_text)
+        .where(SilverEvidenceOcr.raw_file_id == raw_file_id)
+        .order_by(SilverEvidenceOcr.id.desc())
+    ).first()
+
+
+def text_similarity(a: Optional[str], b: Optional[str]) -> float:
+    """ความคล้ายของข้อความ OCR ทั้งใบ (0–1) หลังตัดช่องว่าง/ตัวพิมพ์
+
+    ใช้ ratio ของทั้งก้อน ไม่ใช่ partial ratio — partial ให้ 1.0 ทันทีเมื่อข้อความสั้นอยู่ใน
+    ข้อความยาว ซึ่งทำให้ veto อ่อนเกินไป (ใบที่อ่านได้ครึ่งเดียวจะดูเหมือนทุกใบ)
+    """
+    return SequenceMatcher(None, _norm(a or ""), _norm(b or "")).ratio()
+
+
+def text_vetoes_near_match(mine: Optional[str], theirs: Optional[str]) -> bool:
+    """True = ข้อความสองใบต่างกันชัดและอ่านออกทั้งคู่ → ภาพคล้ายนี้ไม่ใช่ใบซ้ำ
+
+    ใบใดอ่านไม่ออก/ว่าง/ยังไม่เคย OCR → ไม่ veto (คง flag ไว้) กัน false negative จาก OCR แย่
+    """
+    min_chars = settings.ocr_text_veto_min_chars
+    if len(_norm(mine or "")) < min_chars or len(_norm(theirs or "")) < min_chars:
+        return False
+    return text_similarity(mine, theirs) < settings.ocr_text_veto_max_similarity
 
 
 def _extract_text(ocr: OcrEngine, storage: ObjectStorage, raw_file: RawFile) -> tuple[str, float]:
@@ -251,7 +345,7 @@ def process_participation_evidence(
     activity = session.get(Activity, participation.activity_id) if participation else None
 
     text, confidence = _extract_text(ocr, storage, raw_file)
-    duplicate = find_duplicate(session, raw_file)
+    duplicate = find_duplicate(session, raw_file, text)
     match_score = compute_match_score(text, student, activity)
 
     decision = OcrDecision.needs_review
@@ -283,6 +377,7 @@ def process_participation_evidence(
         is_duplicate=duplicate is not None,
         duplicate_of_participation_id=duplicate.participation_id if duplicate else None,
         duplicate_reason=duplicate.reason if duplicate else None,
+        match_kind=duplicate.match_kind if duplicate else None,
     )
     session.add(row)
     session.commit()

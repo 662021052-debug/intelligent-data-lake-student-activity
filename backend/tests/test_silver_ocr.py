@@ -6,17 +6,25 @@ tests. Verifies the pipeline persists a complete `silver_evidence_ocr` row.
 
 from datetime import datetime
 
+from app.config import settings
 from app.models import (
     Activity,
     DuplicateReason,
     EvidenceStatus,
+    MatchKind,
     OcrDecision,
     Participation,
     RawFile,
     Student,
     StudentStatus,
 )
-from app.silver import DuplicateMatch, find_duplicate, process_participation_evidence
+from app.silver import (
+    DuplicateMatch,
+    find_duplicate,
+    process_participation_evidence,
+    text_similarity,
+    text_vetoes_near_match,
+)
 
 PNG = b"\x89PNG\r\n\x1a\nfake-bytes"
 
@@ -81,7 +89,7 @@ def _participation(session, student_id, activity_id, status=EvidenceStatus.pendi
     return p
 
 
-def _add_raw(session, storage, participation_id, checksum="a" * 64, content_type="image/png"):
+def _add_raw(session, storage, participation_id, checksum="a" * 64, content_type="image/png", phash=None):
     key = f"evidence/test/p={participation_id}/{checksum[:8]}.png"
     storage.upload_object("bronze", key, PNG, content_type)
     rf = RawFile(
@@ -91,6 +99,7 @@ def _add_raw(session, storage, participation_id, checksum="a" * 64, content_type
         content_type=content_type,
         size_bytes=len(PNG),
         checksum=checksum,
+        phash=phash,
         source_system="student_upload",
         participation_id=participation_id,
     )
@@ -351,3 +360,174 @@ def test_demo_shape_approved_original_then_friend_pending_is_cross_student(sessi
     assert find_duplicate(session, borrower_raw) == DuplicateMatch(
         DuplicateReason.cross_student, owner.id, owner_raw.id
     )
+
+
+# ---------------- เฟส 3A.2: ภาพเกือบเหมือน (pHash 256 บิต) + text veto ----------------
+
+# ข้อความ OCR ของเกียรติบัตรใบเดียวกัน (อ่านซ้ำหลังบีบอัด เพี้ยนไม่กี่ตัว) และของใบคนละเรื่อง
+CERT_TEXT = (
+    "มหาวิทยาลัยทักษิณ เกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า นางสาวกรวรรณ ยาง๊ะ "
+    "ได้เข้าร่วมกิจกรรม ตลาดนัดผู้ประกอบการรุ่นเยาว์ ครั้งที่ 5/2569 เลขที่อ้างอิง TSU-180-62162-025853"
+)
+CERT_TEXT_REREAD = (
+    "มหาวิทยาลัยทักษิณ เกียรติบัตรฉบับนี้ให้ไว้เพื่อแสดงว่า นางสาวกรวรรณ ยางะ "
+    "ได้เข้ารวมกิจกรรม ตลาดนัดผู้ประกอบการรุนเยาว์ ครั้งที่ 5/2569 เลขที่อ้างอิง TSU-180-62162-O25853"
+)
+UNRELATED_TEXT = (
+    "ใบรับรองการฝึกงานภาคฤดูร้อน บริษัทตัวอย่างการค้า จำกัด ขอรับรองว่า นายภูวดล สมหวัง "
+    "ปฏิบัติงานแผนกบัญชีและการเงิน ระยะเวลาสองเดือน ปีการศึกษา 2568"
+)
+BASE_PHASH = "0" * 64
+
+
+def _phash(bits_flipped: int) -> str:
+    """pHash 256 บิตที่ห่างจาก BASE_PHASH เท่ากับ [bits_flipped] บิตพอดี"""
+    return format((1 << bits_flipped) - 1, "064x")
+
+
+def _flagged_by(session, storage, *, first_text, second_text, distance, first_status=EvidenceStatus.pending,
+                same_student=False, process_first=True):
+    """ใบแรก (มาก่อน) + ใบที่สองที่ checksum ต่างแต่ pHash ห่าง [distance] บิต — คืน (first, second, row)"""
+    student_a = _student(session, "88701")
+    student_b = student_a if same_student else _student(session, "88702")
+    first = _participation(session, student_a.id, _activity(session, "ค่ายอาสา").id, status=first_status)
+    first_raw = _add_raw(session, storage, first.id, checksum="n1" + "0" * 62, phash=BASE_PHASH)
+    if process_first:
+        process_participation_evidence(session, FakeOcr(text=first_text, confidence=0.9), storage, first.id)
+    second = _participation(session, student_b.id, _activity(session, "อบรมดิจิทัล").id)
+    second_raw = _add_raw(session, storage, second.id, checksum="n2" + "0" * 62, phash=_phash(distance))
+    row = process_participation_evidence(session, FakeOcr(text=second_text, confidence=0.9), storage, second.id)
+    return (first, first_raw), (second, second_raw), row
+
+
+def test_texts_used_by_the_veto_tests_behave_as_measured():
+    """กันเทสข้างล่างผ่านเพราะข้อความทดสอบบังเอิญ — ใบเดียวกันคล้ายสูง ใบคนละเรื่องต่ำ"""
+    assert text_similarity(CERT_TEXT, CERT_TEXT_REREAD) >= 0.9
+    assert text_similarity(CERT_TEXT, UNRELATED_TEXT) < settings.ocr_text_veto_max_similarity
+
+
+def test_near_copy_of_other_students_certificate_is_flagged_near(session, storage):
+    (first, first_raw), (_, second_raw), row = _flagged_by(
+        session, storage, first_text=CERT_TEXT, second_text=CERT_TEXT_REREAD, distance=10
+    )
+
+    assert row.decision == OcrDecision.flagged and row.is_duplicate is True
+    assert row.duplicate_reason == DuplicateReason.cross_student
+    assert row.duplicate_of_participation_id == first.id
+    assert row.match_kind == MatchKind.near
+    assert find_duplicate(session, second_raw, CERT_TEXT_REREAD) == DuplicateMatch(
+        DuplicateReason.cross_student, first.id, first_raw.id, MatchKind.near, 10
+    )
+
+
+def test_phash_beyond_threshold_is_not_a_duplicate(session, storage):
+    _, _, row = _flagged_by(
+        session, storage, first_text=CERT_TEXT, second_text=CERT_TEXT_REREAD,
+        distance=settings.ocr_phash_near_bits + 1,
+    )
+
+    assert row.is_duplicate is False and row.match_kind is None
+    assert row.decision == OcrDecision.needs_review
+
+
+def test_similar_image_but_clearly_different_readable_text_is_vetoed(session, storage):
+    """เทมเพลตเดียวกันคนละคน: ภาพคล้าย แต่ข้อความอ่านออกทั้งคู่และต่างกันชัด → ไม่ flag"""
+    _, (_, second_raw), row = _flagged_by(
+        session, storage, first_text=CERT_TEXT, second_text=UNRELATED_TEXT, distance=4
+    )
+
+    assert row.is_duplicate is False and row.duplicate_reason is None and row.match_kind is None
+    assert find_duplicate(session, second_raw, UNRELATED_TEXT) is None
+
+
+def test_no_veto_when_this_file_is_unreadable(session, storage):
+    _, _, row = _flagged_by(session, storage, first_text=CERT_TEXT, second_text="", distance=4)
+
+    assert row.decision == OcrDecision.flagged and row.match_kind == MatchKind.near
+
+
+def test_no_veto_when_the_earlier_file_was_never_ocrd(session, storage):
+    """ใบต้นทางไม่มีผล OCR เลย (เช่นใบที่แนบเป็นอนุมัติโดยไม่ผ่าน OCR) → ไม่มีข้อความให้ veto คง flag"""
+    _, _, row = _flagged_by(
+        session, storage, first_text=CERT_TEXT, second_text=UNRELATED_TEXT, distance=4, process_first=False
+    )
+
+    assert row.decision == OcrDecision.flagged and row.match_kind == MatchKind.near
+
+
+def test_near_match_keeps_reason_rules_same_student_and_rejected(session, storage):
+    _, _, reuse = _flagged_by(
+        session, storage, first_text=CERT_TEXT, second_text=CERT_TEXT_REREAD, distance=6, same_student=True
+    )
+    assert (reuse.duplicate_reason, reuse.match_kind) == (DuplicateReason.same_student_reuse, MatchKind.near)
+
+
+def test_near_match_against_rejected_proof(session, storage):
+    _, _, row = _flagged_by(
+        session, storage, first_text=CERT_TEXT, second_text=CERT_TEXT_REREAD, distance=6,
+        first_status=EvidenceStatus.rejected,
+    )
+    assert (row.duplicate_reason, row.match_kind) == (DuplicateReason.matches_rejected, MatchKind.near)
+
+
+def test_exact_checksum_comes_first_and_is_marked_exact(session, storage):
+    """ไฟล์เดียวกันเป๊ะกับใบหนึ่ง และภาพใกล้กว่ากับอีกใบ → ใช้ checksum (exact) เสมอ"""
+    activity = _activity(session)
+    exact_owner = _participation(session, _student(session, "88801").id, activity.id)
+    exact_raw = _add_raw(session, storage, exact_owner.id, checksum=SAME, phash=_phash(12))
+    near_owner = _participation(session, _student(session, "88802").id, activity.id)
+    _add_raw(session, storage, near_owner.id, checksum="x1" + "0" * 62, phash=BASE_PHASH)
+    p = _participation(session, _student(session, "88803").id, activity.id)
+    raw = _add_raw(session, storage, p.id, checksum=SAME, phash=BASE_PHASH)
+
+    row = process_participation_evidence(session, FakeOcr(text=CERT_TEXT, confidence=0.9), storage, p.id)
+
+    assert row.match_kind == MatchKind.exact
+    assert row.duplicate_of_participation_id == exact_owner.id
+    assert find_duplicate(session, raw, CERT_TEXT) == DuplicateMatch(
+        DuplicateReason.cross_student, exact_owner.id, exact_raw.id
+    )
+
+
+def test_near_candidates_pick_reason_first_then_nearest(session, storage):
+    """rejected ใกล้สุด · คนเดิมใกล้รองลงมา · คนอื่นสองใบ (12, 8) → เลือกคนอื่นที่ห่าง 8"""
+    me = _student(session, "88901")
+    rejected = _participation(session, _student(session, "88902").id, _activity(session, "ก").id,
+                              status=EvidenceStatus.rejected)
+    _add_raw(session, storage, rejected.id, checksum="r1" + "0" * 62, phash=_phash(2))
+    mine = _participation(session, me.id, _activity(session, "ข").id)
+    _add_raw(session, storage, mine.id, checksum="r2" + "0" * 62, phash=_phash(3))
+    far_other = _participation(session, _student(session, "88903").id, _activity(session, "ค").id)
+    _add_raw(session, storage, far_other.id, checksum="r3" + "0" * 62, phash=_phash(12))
+    near_other = _participation(session, _student(session, "88904").id, _activity(session, "ง").id)
+    near_other_raw = _add_raw(session, storage, near_other.id, checksum="r4" + "0" * 62, phash=_phash(8))
+    p = _participation(session, me.id, _activity(session, "จ").id)
+    raw = _add_raw(session, storage, p.id, checksum="r5" + "0" * 62, phash=BASE_PHASH)
+
+    match = find_duplicate(session, raw, "")
+
+    assert match == DuplicateMatch(DuplicateReason.cross_student, near_other.id, near_other_raw.id, MatchKind.near, 8)
+
+
+def test_file_without_phash_skips_the_near_check(session, storage):
+    """PDF / ถอดภาพไม่ได้ / ไฟล์ก่อนเฟส 3A ไม่มี pHash → ไม่มีชั้น near (พฤติกรรมเดิม)"""
+    activity = _activity(session)
+    other = _participation(session, _student(session, "89001").id, activity.id)
+    _add_raw(session, storage, other.id, checksum="w1" + "0" * 62, phash=BASE_PHASH)
+    p = _participation(session, _student(session, "89002").id, activity.id)
+    raw = _add_raw(session, storage, p.id, checksum="w2" + "0" * 62, phash=None)
+
+    assert find_duplicate(session, raw, "") is None
+
+
+def test_thresholds_come_from_config(session, storage, monkeypatch):
+    monkeypatch.setattr(settings, "ocr_phash_near_bits", 4)
+    _, (_, raw_far), _ = _flagged_by(session, storage, first_text=CERT_TEXT, second_text=CERT_TEXT, distance=10)
+    assert find_duplicate(session, raw_far, CERT_TEXT) is None, "10 บิตเกิน threshold ที่ตั้งเป็น 4"
+
+    monkeypatch.setattr(settings, "ocr_phash_near_bits", 16)
+    monkeypatch.setattr(settings, "ocr_text_veto_max_similarity", 0.0)  # ปิด veto
+    assert text_vetoes_near_match(CERT_TEXT, UNRELATED_TEXT) is False
+    monkeypatch.setattr(settings, "ocr_text_veto_max_similarity", 0.5)
+    monkeypatch.setattr(settings, "ocr_text_veto_min_chars", 10_000)  # ไม่มีใบไหน "อ่านออก" → ไม่ veto
+    assert text_vetoes_near_match(CERT_TEXT, UNRELATED_TEXT) is False

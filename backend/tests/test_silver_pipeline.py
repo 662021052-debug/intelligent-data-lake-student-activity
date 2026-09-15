@@ -179,6 +179,7 @@ def test_duplicate_file_is_flagged_not_approved(client, session, storage, tokens
     # คนเดิมคนละการเข้าร่วม (ลงกิจกรรมเดิมซ้ำ) → same_student_reuse ชี้ใบที่อนุมัติแล้ว
     assert body["duplicate_reason"] == "same_student_reuse"
     assert body["duplicate_of_participation_id"] == approved.id
+    assert body["match_kind"] == "exact"  # checksum เดียวกัน (OCR เฟส 3A.2)
     updated = session.get(Participation, target.id)
     assert updated.evidence_status == EvidenceStatus.pending  # never auto-approved
 
