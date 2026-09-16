@@ -36,6 +36,7 @@ grep -c "gstatic.com/flutter-canvaskit" frontend/build/web/main.dart.js
   `frontend/web/flutter_bootstrap.js` ตั้ง `fontFallbackBaseUrl` มาที่นี่ — อัปเกรด Flutter แล้วต้องเก็บรายชื่อไฟล์ใหม่
   (วิธีอยู่ใน `frontend/web/fonts/gstatic/README.md`)
 
+- **อัปขึ้นเซิร์ฟเวอร์มหาลัย: ทำตาม [`deploy/DEPLOY_CHECKLIST.md`](deploy/DEPLOY_CHECKLIST.md)** (dry-run ย้ายข้อมูลเดโมผ่านแล้ว)
 - **ทั้งระบบอยู่หลัง port เดียว: `http://localhost:5052`** (nginx เสิร์ฟ Flutter web ที่ `/`
   และ proxy `/api/` ไป backend ภายใน) — เซิร์ฟเวอร์มหาลัยเปิดออกนอกได้พอร์ตเดียว
 - Postgres และ backend **ไม่ผูก host port** เลย เข้าถึงได้เฉพาะใน docker network
