@@ -24,7 +24,7 @@ docker compose up --build
 
 ### MinIO Console (Bronze layer)
 
-- เปิดที่ `http://localhost:9001` แล้ว login ด้วย `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` (ค่า default `minioadmin` / `minioadmin`)
+- เปิดที่ `http://localhost:10052` (host port ของ console ที่ map ไป 9001 ในคอนเทนเนอร์) แล้ว login ด้วย `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` (ค่า default `minioadmin` / `minioadmin`)
 - ไฟล์หลักฐานที่นิสิตอัปโหลดจะเก็บใน bucket `bronze` ภายใต้ path
   `evidence/year=<YYYY>/month=<MM>/activity_id=<A>/participation_id=<P>/<uuid>_<ชื่อไฟล์เดิม>`
 - Bronze = ชั้นข้อมูลดิบ **immutable**: อัปโหลดใหม่จะเก็บเป็น object ใหม่เสมอ ไม่ทับของเดิม และทุกไฟล์มี metadata ครบ (timestamp + source) ในตาราง `raw_file` (data lineage)

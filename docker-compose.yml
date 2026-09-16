@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: activity_lake
     ports:
-      - "5432:5432"
+      - "5052:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,8 +24,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console
+      - "9052:9000"   # S3 API
+      - "10052:9001"  # Web console
     volumes:
       - minio_data:/data
     healthcheck:
