@@ -1,0 +1,23 @@
+# เปิด host port ของ db / MinIO S3 "ชั่วคราว" สำหรับงานบนเครื่อง dev เท่านั้น
+# — สคริปต์ที่รันนอกคอนเทนเนอร์ (load_students.py, seed_participations.py,
+#   seed_activities_2567.py) และการต่อ DB ด้วย GUI
+#
+# ห้ามใช้บนเซิร์ฟเวอร์มหาลัย: ที่นั่นเปิดออกนอกได้เฉพาะ 5052
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.dev-ports.yml up -d
+#
+# เลือก 5053 / 9053 เพราะ 5052 เป็นของแอป (nginx) และ 9052 เป็น MinIO console แล้ว
+# backend เปิด 8000 ไว้ให้ `flutter run -d chrome` (hot reload) ยิง API ได้ตามค่า
+# ดีฟอลต์ใน lib/config.dart โดยไม่ต้อง build ใหม่
+services:
+  backend:
+    ports:
+      - "8000:8000"
+
+  db:
+    ports:
+      - "5053:5432"
+  minio:
+    ports:
+      - "9052:9001"   # console (เหมือน compose หลัก)
+      - "9053:9000"   # S3 API

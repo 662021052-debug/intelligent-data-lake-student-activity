@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'screens/checkin_confirm_screen.dart';
 import 'screens/home_screen.dart';
@@ -22,6 +23,10 @@ const bool _enableSemantics = bool.fromEnvironment('ENABLE_SEMANTICS');
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
   if (_enableSemantics) binding.ensureSemantics();
+  // Sarabun ฝังอยู่ใน assets/google_fonts แล้ว — ห้ามดึงจาก fonts.gstatic.com
+  // ถ้าวันหนึ่งใช้ variant ที่ไม่ได้ฝัง จะเห็น error ใน console ทันที แทนที่จะ
+  // เงียบ ๆ ไปพึ่งเน็ต แล้วพังเฉพาะบนเครือข่ายที่บล็อก Google
+  GoogleFonts.config.allowRuntimeFetching = false;
   // กู้สถานะล็อกอินก่อน build หน้าแรก — ไม่งั้นหน้า login จะแวบขึ้นมาก่อนแล้ว
   // ค่อยสลับเป็นหน้าหลัก ทุกครั้งที่ผู้ใช้กดรีเฟรช
   await authService.restore();

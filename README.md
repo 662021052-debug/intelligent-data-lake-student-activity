@@ -9,22 +9,46 @@
 - Object storage (Bronze layer): MinIO (S3-compatible) เก็บไฟล์หลักฐานดิบ
 - Frontend: Flutter Web
 - Auth: JWT + role (student / staff / admin)
-- Deploy: Docker Compose (Postgres + FastAPI + MinIO)
+- Deploy: Docker Compose (nginx + FastAPI + Postgres + MinIO) — ทางเข้าเดียวที่ port 5052
 
 ## รัน Backend ด้วย Docker Compose (แนะนำ)
 
-```bash
-docker compose up --build
+```powershell
+# PowerShell — ห้ามรันจาก Git Bash: MSYS แปลง /api เป็น C:/Program Files/Git/api แอปจะล็อกอินไม่ได้
+cd frontend
+flutter build web --dart-define=API_BASE_URL=/api --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/ --no-web-resources-cdn
+cd ..
+docker compose up -d --build
 ```
 
-- Postgres จะขึ้นที่ port `5432`, backend ที่ `http://localhost:8000`, MinIO ที่ `9000` (API) / `9001` (Console)
+ตรวจบันเดิลก่อน deploy ทุกครั้ง (ต้องได้ 0 ทั้งสองบรรทัด):
+
+```bash
+grep -c "Program Files" frontend/build/web/main.dart.js
+grep -c "gstatic.com/flutter-canvaskit" frontend/build/web/main.dart.js
+```
+
+**แอปไม่พึ่ง Google ตอน runtime** — ใช้งานได้บนเครือข่ายที่บล็อก gstatic:
+
+- CanvasKit เสิร์ฟจาก `/canvaskit/` (แฟล็กสองตัวข้างบน)
+- ฟอนต์ Sarabun ฝังใน `frontend/assets/google_fonts/` และปิด `GoogleFonts.config.allowRuntimeFetching`
+- ฟอนต์สำรองของ engine (✓ อีโมจิ ไทยนอก Sarabun) อยู่ที่ `frontend/web/fonts/gstatic/` โดย
+  `frontend/web/flutter_bootstrap.js` ตั้ง `fontFallbackBaseUrl` มาที่นี่ — อัปเกรด Flutter แล้วต้องเก็บรายชื่อไฟล์ใหม่
+  (วิธีอยู่ใน `frontend/web/fonts/gstatic/README.md`)
+
+- **ทั้งระบบอยู่หลัง port เดียว: `http://localhost:5052`** (nginx เสิร์ฟ Flutter web ที่ `/`
+  และ proxy `/api/` ไป backend ภายใน) — เซิร์ฟเวอร์มหาลัยเปิดออกนอกได้พอร์ตเดียว
+- Postgres และ backend **ไม่ผูก host port** เลย เข้าถึงได้เฉพาะใน docker network
+- MinIO Console อยู่ที่ `http://localhost:9052` (S3 API ไม่เปิดออก host)
+- `frontend/build/web` ถูก bind-mount เข้า nginx → **ต้อง `flutter build web` ก่อน**
+  `docker compose up` ทุกครั้งที่แก้โค้ดฝั่ง frontend (เซิร์ฟเวอร์ไม่ต้องมี Flutter)
 - คอนเทนเนอร์ backend จะรัน `seed.py` อัตโนมัติก่อนเปิดเซิร์ฟเวอร์ (รันซ้ำได้ ข้อมูลจะไม่ซ้ำ) และสร้าง bucket `bronze` ให้อัตโนมัติตอน startup
-- เปิด Swagger ได้ที่ `http://localhost:8000/docs`
+- เปิด Swagger ได้ที่ `http://localhost:5052/api/docs`
 - ปรับค่า `JWT_SECRET` ฯลฯ ได้ผ่าน environment variable หรือสร้างไฟล์ `.env` จาก `.env.example` ที่ root แล้ว docker compose จะอ่านมาแทนค่า default อัตโนมัติ
 
 ### MinIO Console (Bronze layer)
 
-- เปิดที่ `http://localhost:10052` (host port ของ console ที่ map ไป 9001 ในคอนเทนเนอร์) แล้ว login ด้วย `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` (ค่า default `minioadmin` / `minioadmin`)
+- เปิดที่ `http://localhost:9052` (host port ของ console ที่ map ไป 9001 ในคอนเทนเนอร์) แล้ว login ด้วย `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` (ค่า default `minioadmin` / `minioadmin`)
 - ไฟล์หลักฐานที่นิสิตอัปโหลดจะเก็บใน bucket `bronze` ภายใต้ path
   `evidence/year=<YYYY>/month=<MM>/activity_id=<A>/participation_id=<P>/<uuid>_<ชื่อไฟล์เดิม>`
 - Bronze = ชั้นข้อมูลดิบ **immutable**: อัปโหลดใหม่จะเก็บเป็น object ใหม่เสมอ ไม่ทับของเดิม และทุกไฟล์มี metadata ครบ (timestamp + source) ในตาราง `raw_file` (data lineage)
@@ -101,7 +125,11 @@ flutter pub get
 flutter run -d chrome
 ```
 
-- ค่าเริ่มต้นแอปจะเรียก backend ที่ `http://localhost:8000` (ตั้งค่าใน `lib/config.dart`)
+- ค่าเริ่มต้นแอปจะเรียก backend ที่ `http://localhost:8000` (ตั้งค่าใน `lib/config.dart`) —
+  compose หลักไม่เปิดพอร์ตนี้แล้ว ถ้าจะใช้ `flutter run` แบบ hot reload ให้ขึ้น stack ด้วย
+  `docker compose -f docker-compose.yml -f deploy/docker-compose.dev-ports.yml up -d`
+- **ตอน build เพื่อ deploy** ใช้คำสั่งเต็มในหัวข้อ "รัน Backend ด้วย Docker Compose" ข้างบน
+  (`API_BASE_URL=/api` เป็น path สัมพัทธ์ จึงวิ่งผ่าน nginx ที่ 5052 ไม่ผูกกับ host ใด ๆ)
 - ถ้า backend รันอยู่คนละ URL ให้สั่ง `flutter run -d chrome --dart-define=API_BASE_URL=https://your-api.example.com`
 - Login ด้วย user ที่ seed ไว้ (ตารางด้านบน) แล้วใช้งานเมนู นิสิต / กิจกรรม / การเข้าร่วมกิจกรรม ได้ทันที
 - รันเทส widget:
@@ -145,7 +173,7 @@ QR เก็บ **URL เต็ม** (`{PUBLIC_APP_BASE_URL}/#/checkin?c=<token>
 ### ข้อจำกัดเรื่องกล้องบนเว็บ
 
 เบราว์เซอร์เปิดกล้องให้เฉพาะหน้าเว็บที่มาจาก **HTTPS** หรือ **localhost** เท่านั้น
-เปิดแอปผ่าน IP ในวง LAN (เช่น `http://192.168.1.10:8080`) กล้องจะไม่ทำงาน — บนเซิร์ฟเวอร์
+เปิดแอปผ่าน IP ในวง LAN (เช่น `http://192.168.1.10:5052`) กล้องจะไม่ทำงาน — บนเซิร์ฟเวอร์
 มหาวิทยาลัยจึงต้องมี HTTPS ทุกกรณี แอปมีทางเลือก **"กรอกรหัสกิจกรรม"** ไว้ให้เสมอ
 โดยรหัสแสดงอยู่ใต้ QR บนจอของเจ้าหน้าที่
 
@@ -153,13 +181,13 @@ QR เก็บ **URL เต็ม** (`{PUBLIC_APP_BASE_URL}/#/checkin?c=<token>
 
 ```bash
 cd backend && uvicorn app.main:app --reload            # เทอร์มินัลที่ 1
-cd frontend && flutter run -d chrome --web-port=8080   # เทอร์มินัลที่ 2
+cd frontend && flutter run -d chrome --web-port=5052   # เทอร์มินัลที่ 2
 
 # ถ้ากิจกรรมเดโมหมดช่วงเช็กอินแล้ว (seed ไว้ตั้งแต่เมื่อวาน) ให้เลื่อนเวลาใหม่:
 cd backend && python seed.py --refresh-live
 ```
 
-> **ต้องล็อกพอร์ตให้ตรงกับ `PUBLIC_APP_BASE_URL`** (ดีฟอลต์ `http://localhost:8080`)
+> **ต้องล็อกพอร์ตให้ตรงกับ `PUBLIC_APP_BASE_URL`** (ค่าที่ใช้อยู่ `http://localhost:5052`)
 > ไม่งั้นลิงก์ใน QR จะชี้ไปคนละพอร์ตกับที่แอปรันอยู่ — `flutter run -d chrome`
 > เฉย ๆ จะสุ่มพอร์ตให้ทุกครั้ง
 
@@ -179,7 +207,7 @@ cd backend && python seed.py --refresh-live
 เปิดลิงก์ตรง ๆ ในเบราว์เซอร์ก็เหมือนกับที่กล้องมือถือทำให้ทุกอย่าง:
 
 ```
-http://localhost:8080/#/checkin?c=<token ที่แสดงใต้ QR>
+http://localhost:5052/#/checkin?c=<token ที่แสดงใต้ QR>
 ```
 
 - ยังไม่ล็อกอิน → หน้า login พร้อมแบนเนอร์บอกเหตุผล → ล็อกอินนิสิต → เด้งมาหน้ายืนยันเอง
@@ -196,8 +224,8 @@ http://localhost:8080/#/checkin?c=<token ที่แสดงใต้ QR>
 
 ```bash
 curl -OJ -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/reports/student-hours.xlsx?faculty=วิทยาศาสตร์&year_level=4"
-curl -OJ -H "Authorization: Bearer <token>" "http://localhost:8000/reports/student-hours.pdf"
+  "http://localhost:5052/api/reports/student-hours.xlsx?faculty=วิทยาศาสตร์&year_level=4"
+curl -OJ -H "Authorization: Bearer <token>" "http://localhost:5052/api/reports/student-hours.pdf"
 ```
 
 - หนึ่งแถว = นิสิตหนึ่งคน × หมวดชั่วโมงหนึ่งหมวด (grain เดียวกับ `gold_student_hours`)
@@ -214,10 +242,10 @@ curl -OJ -H "Authorization: Bearer <token>" "http://localhost:8000/reports/stude
 
 ```bash
 # ไฟล์ต้นแบบเปล่า (มีชีต "หมวดย่อยที่ใช้ได้" สร้างสดจากฐานข้อมูลแนบมาด้วย)
-curl -OJ -H "Authorization: Bearer <token>" "http://localhost:8000/activities/import/template.xlsx"
+curl -OJ -H "Authorization: Bearer <token>" "http://localhost:5052/api/activities/import/template.xlsx"
 
 # อัปโหลดแผนที่กรอกแล้ว
-curl -X POST "http://localhost:8000/activities/import" \
+curl -X POST "http://localhost:5052/api/activities/import" \
   -H "Authorization: Bearer <token>" -F "file=@plan.xlsx"
 ```
 
@@ -238,12 +266,12 @@ curl -X POST "http://localhost:8000/activities/import" \
 
 ```bash
 # 1) เตือนนิสิตที่ชั่วโมงยังไม่ถึงเกณฑ์ (อ่านจาก gold_student_hours)
-curl -X POST "http://localhost:8000/notifications/at-risk" -H "Authorization: Bearer <admin-token>"
+curl -X POST "http://localhost:5052/api/notifications/at-risk" -H "Authorization: Bearer <admin-token>"
 # กรองเฉพาะกลุ่มที่ใกล้จบ / เกณฑ์ % เองก็ได้
-curl -X POST "http://localhost:8000/notifications/at-risk?year_level=4&threshold=80" -H "Authorization: Bearer <admin-token>"
+curl -X POST "http://localhost:5052/api/notifications/at-risk?year_level=4&threshold=80" -H "Authorization: Bearer <admin-token>"
 
 # 2) ประชาสัมพันธ์กิจกรรมที่เปิดรับสมัคร ถึงนิสิตที่ยังไม่ได้สมัคร
-curl -X POST "http://localhost:8000/notifications/activity/12" -H "Authorization: Bearer <admin-token>"
+curl -X POST "http://localhost:5052/api/notifications/activity/12" -H "Authorization: Bearer <admin-token>"
 ```
 
 - ค่าเริ่มต้น `EMAIL_BACKEND=stub` คือ **ไม่ส่งจริง** (เก็บไว้ในหน่วยความจำ + เขียน log)
