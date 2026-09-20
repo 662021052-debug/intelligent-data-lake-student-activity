@@ -1,7 +1,11 @@
 """อีเมลยืนยันการสมัคร (Email Notifications เฟส 1) + กันเตือนซ้ำด้วย participation.reminder_sent_at
 
 กติกากันซ้ำ: กิจกรรมจัดภายใน "วันพรุ่งนี้" ตามเวลาไทย (ฐานเดียวกับตัวเตือน) → อีเมลยืนยันนับเป็นการเตือนแล้ว
-ตัวส่งเป็น StubEmailSender ตลอด — ไม่มีอีเมลออกจริงระหว่างรันเทสต์
+ไม่มีอีเมลออกจริงระหว่างรันเทสต์ — ใช้ตัวหลอกสองแบบ:
+* ``RecordingSmtp``  แทน SMTP ที่ *ใช้ได้* (ส่งสำเร็จ → ตั้ง reminder_sent_at)
+* ``StubEmailSender`` แทนระบบที่ยังไม่ตั้งค่า SMTP (ไม่มีอะไรถึงผู้รับ → ไม่ตั้ง reminder_sent_at)
+
+เฟส B: ทุกทางออกต้องมี log บอกเหตุผล และ reminder_sent_at ตั้งหลังส่งสำเร็จจริงเท่านั้น
 """
 
 import logging
@@ -24,12 +28,47 @@ from app.notifications import (
 from app.timeutil import format_thai_datetime, now_th_naive
 
 
+class RecordingSmtp:
+    """ตัวหลอกของ SMTP ที่ทำงานปกติ — เก็บทุกฉบับไว้ใน ``sent``
+
+    ต้องไม่ใช่ subclass ของ StubEmailSender: ตัวส่งจริงต้องแยกออกจาก stub ได้ ไม่งั้นเทสจะพิสูจน์
+    ไม่ได้ว่า "ส่งสำเร็จจริงถึงตั้ง reminder_sent_at"
+    """
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, message):
+        self.sent.append(message)
+
+
 @pytest.fixture(name="mailbox")
 def mailbox_fixture():
+    sender = RecordingSmtp()
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    yield sender
+    app.dependency_overrides.pop(get_email_sender, None)
+
+
+@pytest.fixture(name="unconfigured_mail")
+def unconfigured_mail_fixture():
+    """ระบบที่ยังไม่ตั้งค่า SMTP → ตกเป็น StubEmailSender"""
     sender = StubEmailSender()
     app.dependency_overrides[get_email_sender] = lambda: sender
     yield sender
     app.dependency_overrides.pop(get_email_sender, None)
+
+
+class BrokenSmtp:
+    def __init__(self, error=None):
+        self._error = error or ConnectionRefusedError("SMTP ล่ม")
+
+    def send(self, message):
+        raise self._error
+
+
+def _messages(caplog, level):
+    return [r.getMessage() for r in caplog.records if r.levelno == level]
 
 
 def _admin_id(session):
@@ -160,22 +199,25 @@ def test_blank_email_is_treated_as_no_email(client, session, mailbox):
 
 
 def test_email_failure_does_not_fail_registration(client, session, caplog):
-    class BrokenSmtp:
-        def send(self, message):
-            raise ConnectionRefusedError("SMTP ล่ม")
-
     app.dependency_overrides[get_email_sender] = lambda: BrokenSmtp()
     try:
         activity = _activity(session, start_at=_day(3))
         student, headers = _student_login(session, client, code="9102004")
-        with caplog.at_level(logging.WARNING, logger="app.notifications"):
+        with caplog.at_level(logging.INFO, logger="uvicorn.error"):
             body = _register(client, headers, activity)
     finally:
         app.dependency_overrides.pop(get_email_sender, None)
 
+    # สมัครสำเร็จเหมือนเดิม (ส่งอีเมลล้มต้องไม่ทำให้การสมัครล้ม)
     assert body["student_id"] == student.id
     assert _participation(session, student, activity) is not None
-    assert any("ยืนยันการสมัคร" in r.message for r in caplog.records), "ส่งล้มต้องมี log ให้ผู้ดูแลตามได้"
+    # ...แต่ต้องเห็นชัดใน log ระดับ ERROR พร้อมผู้รับ ชนิดความล้มเหลว และ stack
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert errors[0].getMessage().startswith("registration email: FAILED")
+    assert "9102004@tsu.ac.th" in errors[0].getMessage()
+    assert "connection_refused" in errors[0].getMessage()
+    assert errors[0].exc_info is not None, "ต้องมี stack trace ไม่ใช่แค่ข้อความ"
 
 
 def test_registration_email_switch_off_sends_nothing_and_marks_nothing(client, session, mailbox, monkeypatch):
@@ -192,6 +234,170 @@ def test_registration_email_switch_off_sends_nothing_and_marks_nothing(client, s
     assert _participation(session, student, activity).reminder_sent_at is None
     reminders, report = _remind_day_before(session, activity)
     assert [m.to for m in reminders.sent] == ["9102009@tsu.ac.th"]
+
+
+# --------------------------- เฟส B: log ทุกทางออก + reminder ตั้งหลังส่งจริง ---------------------------
+def test_sent_successfully_logs_info_and_marks_reminder(client, session, mailbox, caplog):
+    activity = _activity(session, start_at=_day(1))
+    student, headers = _student_login(session, client, code="9102101")
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        _register(client, headers, activity)
+
+    participation = _participation(session, student, activity)
+    sent = [m for m in _messages(caplog, logging.INFO) if m.startswith("registration email: sent to")]
+    assert len(sent) == 1
+    assert "9102101@tsu.ac.th" in sent[0]
+    assert f"activity {activity.id}" in sent[0] and f"participation {participation.id}" in sent[0]
+    assert participation.reminder_sent_at is not None, "ส่งสำเร็จ + กิจกรรมพรุ่งนี้ → นับเป็นการเตือนแล้ว"
+    assert not _messages(caplog, logging.ERROR)
+
+
+def test_smtp_failure_does_not_mark_reminder_so_daily_reminder_retries(client, session, caplog):
+    """ช่องโหว่เดิม: ตั้ง reminder_sent_at ตอนสมัครก่อนส่ง → SMTP ล้มแล้วนิสิตไม่ได้อีเมลเลยทั้งสองฉบับ"""
+    activity = _activity(session, start_at=_day(1))  # จัดพรุ่งนี้ = กรณีที่เคยถูกตั้งเครื่องหมายล่วงหน้า
+    student, headers = _student_login(session, client, code="9102102")
+
+    app.dependency_overrides[get_email_sender] = lambda: BrokenSmtp(TimeoutError("หมดเวลา"))
+    try:
+        with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+            _register(client, headers, activity)
+    finally:
+        app.dependency_overrides.pop(get_email_sender, None)
+
+    errors = _messages(caplog, logging.ERROR)
+    assert len(errors) == 1 and errors[0].startswith("registration email: FAILED")
+    assert "timeout" in errors[0]
+    assert not [m for m in _messages(caplog, logging.INFO) if "registration email: sent" in m]
+    # ส่งไม่ถึง → ต้องไม่ตั้ง
+    assert _participation(session, student, activity).reminder_sent_at is None
+
+    # ...ตัวเตือนรายวันจึงยังเตือนคนนี้ได้ (นี่คือเป้าหมายของการแก้)
+    reminders, report = _remind_day_before(session, activity)
+    assert [m.to for m in reminders.sent] == ["9102102@tsu.ac.th"]
+    assert report.sent == 1
+
+
+def test_confirmation_sent_once_then_reminder_stays_deduped(client, session, mailbox):
+    """ส่งสำเร็จแล้วต้องไม่ส่งซ้ำเหมือนเดิม — การย้ายจุดตั้งเครื่องหมายต้องไม่ทำ dedup พัง"""
+    activity = _activity(session, start_at=_day(1))
+    student, headers = _student_login(session, client, code="9102103")
+
+    _register(client, headers, activity)
+
+    assert len(mailbox.sent) == 1
+    reminders, report = _remind_day_before(session, activity)
+    assert reminders.sent == [] and report.sent == 0
+
+
+def test_activity_after_tomorrow_is_never_marked_by_registration(client, session, mailbox):
+    activity = _activity(session, start_at=_day(4))
+    student, headers = _student_login(session, client, code="9102104")
+
+    _register(client, headers, activity)
+
+    assert len(mailbox.sent) == 1
+    assert _participation(session, student, activity).reminder_sent_at is None
+
+
+def test_no_email_logs_warning_and_names_the_student(client, session, mailbox, caplog):
+    activity = _activity(session, start_at=_day(3))
+    student, headers = _student_login(session, client, code="9102105", email=None)
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        _register(client, headers, activity)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert warnings[0].getMessage().startswith(
+        f"registration email: skipped — student {student.id} has no email"
+    )
+    assert mailbox.sent == []
+
+
+def test_switch_off_logs_warning_naming_the_switch(client, session, mailbox, monkeypatch, caplog):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "notify_registration_email_enabled", False)
+    activity = _activity(session, start_at=_day(3))
+    _, headers = _student_login(session, client, code="9102106")
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        _register(client, headers, activity)
+
+    warnings = _messages(caplog, logging.WARNING)
+    assert len(warnings) == 1
+    assert "skipped — NOTIFY_REGISTRATION_EMAIL_ENABLED=false" in warnings[0]
+    assert mailbox.sent == []
+
+
+def test_stub_backend_logs_warning_and_does_not_mark_reminder(client, session, unconfigured_mail, caplog):
+    """EMAIL_BACKEND=stub (หรือ smtp ที่ SMTP_HOST ว่าง) — ไม่มีอะไรถึงผู้รับ ต้องไม่นับว่าเตือนแล้ว"""
+    activity = _activity(session, start_at=_day(1))
+    student, headers = _student_login(session, client, code="9102107")
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        _register(client, headers, activity)
+
+    warnings = _messages(caplog, logging.WARNING)
+    assert any("skipped — EMAIL_BACKEND=stub (or SMTP_HOST empty)" in m for m in warnings)
+    assert not [m for m in _messages(caplog, logging.INFO) if "registration email: sent" in m], (
+        "stub ไม่ได้ส่งจริง ห้ามล็อกว่า sent"
+    )
+    assert _participation(session, student, activity).reminder_sent_at is None
+
+
+def test_smtp_selected_but_host_empty_falls_back_to_stub_loudly(monkeypatch, caplog):
+    """email.py: เดิมตกเป็น stub เงียบสนิท — ตอนนี้ต้องบอกว่า .env อาจไปไม่ถึงคอนเทนเนอร์"""
+    from app import email as email_module
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "email_backend", "smtp")
+    monkeypatch.setattr(settings, "smtp_host", "")
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        sender = email_module._build_sender()
+
+    assert isinstance(sender, StubEmailSender)
+    assert any("EMAIL_BACKEND=smtp but SMTP_HOST is empty" in r.getMessage() for r in caplog.records)
+
+
+def test_configured_smtp_builds_real_sender_without_warning(monkeypatch, caplog):
+    from app import email as email_module
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "email_backend", "smtp")
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.test")
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        sender = email_module._build_sender()
+
+    assert isinstance(sender, email_module.SmtpEmailSender)
+    assert not caplog.records
+
+
+def test_reminder_bookkeeping_failure_is_logged_as_error_not_raised(session, caplog):
+    """อีเมลออกไปแล้วแต่บันทึกล้ม → ต้องเห็นว่าอาจเตือนซ้ำ แต่ห้ามโยน exception กลับไป"""
+    from app.notifications import send_registration_confirmation
+
+    def broken_factory():
+        raise RuntimeError("ฐานข้อมูลล่ม")
+
+    confirmation = RegistrationConfirmation(
+        to="x@tsu.ac.th",
+        student_name="ทดสอบ",
+        activity_name="งานทดสอบ",
+        start_at=datetime(2026, 9, 22, 12, 0),
+        location="ห้อง 1",
+        hours=2,
+        counts_as_reminder=True,
+    )
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        ok = send_registration_confirmation(
+            RecordingSmtp(), confirmation, participation_id=1, activity_id=1, session_factory=broken_factory
+        )
+
+    assert ok is True, "อีเมลถึงผู้รับแล้ว ผลของการส่งต้องเป็นสำเร็จ"
+    errors = _messages(caplog, logging.ERROR)
+    assert len(errors) == 1 and "could not record reminder_sent_at" in errors[0]
 
 
 # --------------------------- กันเตือนซ้ำ ---------------------------

@@ -33,7 +33,7 @@ from sqlmodel import Session, select
 
 from app.completion import progress_by_student
 from app.config import settings
-from app.email import EmailMessage, EmailSender
+from app.email import EmailMessage, EmailSender, StubEmailSender, explain_email_error
 from app.models import (
     Activity,
     ActivityRequirement,
@@ -45,7 +45,9 @@ from app.models import (
 )
 from app.timeutil import format_thai_datetime, now_th_naive
 
-logger = logging.getLogger(__name__)
+# ใช้ logger ของ uvicorn เหมือน main/silver/phash: logger ตั้งชื่อตามโมดูลไม่มี handler และ root level เป็น WARNING
+# ระดับ INFO (เช่น "registration email: sent to ...") จึงหายเงียบบน server — ต้องผ่านตัวนี้ถึงโผล่ใน docker logs
+logger = logging.getLogger("uvicorn.error")
 
 
 # --------------------------- โครงข้อมูล ---------------------------
@@ -310,13 +312,76 @@ def build_registration_confirmation_message(confirmation: RegistrationConfirmati
     )
 
 
-def send_registration_confirmation(sender: EmailSender, confirmation: RegistrationConfirmation) -> bool:
-    """งานเบื้องหลังหลังสมัคร — ส่งล้มแค่ log ไม่โยนต่อ (การสมัครสำเร็จไปแล้ว ต้องไม่กลายเป็น error)"""
+def _mark_registration_reminded(session_factory: Callable[[], Session], participation_id: int) -> None:
+    """ตั้ง ``reminder_sent_at`` ของการสมัครนี้ — เรียกหลังอีเมลยืนยัน "ออกไปจริง" เท่านั้น
+
+    บันทึกล้มแค่ log ระดับ ERROR ไม่โยนต่อ: อีเมลออกไปแล้วเรียกคืนไม่ได้ ผลที่ตามมาคือรอบเตือน
+    วันก่อนงานอาจส่งซ้ำอีกฉบับ ซึ่งผู้ดูแลควรรู้จากบรรทัด log นี้
+    """
+    try:
+        with session_factory() as session:
+            participation = session.get(Participation, participation_id)
+            # หายไป = นิสิตยกเลิกการสมัครระหว่างรอส่ง · มีค่าแล้ว = มีฉบับอื่นเตือนไปก่อน — ไม่ต้องทำอะไร
+            if participation is not None and participation.reminder_sent_at is None:
+                participation.reminder_sent_at = datetime.utcnow()
+                session.add(participation)
+                session.commit()
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "registration email: sent, but could not record reminder_sent_at for participation %s "
+            "— the daily reminder may email this student again",
+            participation_id,
+            exc_info=True,
+        )
+
+
+def send_registration_confirmation(
+    sender: EmailSender,
+    confirmation: RegistrationConfirmation,
+    *,
+    participation_id: Optional[int] = None,
+    activity_id: Optional[int] = None,
+    session_factory: Optional[Callable[[], Session]] = None,
+) -> bool:
+    """งานเบื้องหลังหลังสมัคร — บอกผลทุกทางออกด้วย log และไม่โยน exception ต่อ
+
+    การสมัครสำเร็จไปแล้วก่อนถึงตรงนี้ SMTP ล่มต้องไม่ย้อนมาทำให้การสมัครดูเหมือนล้ม แต่ต้องไม่เงียบ:
+    ส่งล้มเป็น ERROR (พร้อม stack) เพื่อให้เห็นในล็อกที่กรองระดับ WARNING ขึ้นไป
+
+    ``reminder_sent_at`` ถูกตั้ง **หลังส่งสำเร็จจริงเท่านั้น** (เมื่อ ``confirmation.counts_as_reminder``
+    และส่ง ``participation_id`` + ``session_factory`` มา) — ส่งล้มจึงไม่ตั้ง ตัวเตือนรายวันจะลองส่งให้ใหม่
+    ตัวส่งแบบ stub ก็ไม่ตั้งเช่นกัน เพราะไม่มีอะไรถึงผู้รับจริง
+
+    คืน True เมื่ออีเมลถึงเซิร์ฟเวอร์ปลายทางจริง (stub/ส่งล้ม = False)
+    """
+    context = f"activity {activity_id}, participation {participation_id}"
     try:
         sender.send(build_registration_confirmation_message(confirmation))
-    except Exception:  # noqa: BLE001 — SMTP ล่มต้องไม่ย้อนมาทำให้การสมัครดูเหมือนล้ม
-        logger.warning("ส่งอีเมลยืนยันการสมัครถึง %s ไม่สำเร็จ", confirmation.to, exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — SMTP ล่มต้องไม่ย้อนมาทำให้การสมัครดูเหมือนล้ม
+        kind, reason = explain_email_error(exc)
+        logger.error(
+            "registration email: FAILED — %s (%s): %s [to %s, %s]",
+            kind,
+            type(exc).__name__,
+            reason,
+            confirmation.to,
+            context,
+            exc_info=True,
+        )
         return False
+
+    if isinstance(sender, StubEmailSender):
+        logger.warning(
+            "registration email: skipped — EMAIL_BACKEND=stub (or SMTP_HOST empty); "
+            "nothing was delivered to %s [%s]",
+            confirmation.to,
+            context,
+        )
+        return False
+
+    logger.info("registration email: sent to %s (%s)", confirmation.to, context)
+    if confirmation.counts_as_reminder and participation_id is not None and session_factory is not None:
+        _mark_registration_reminded(session_factory, participation_id)
     return True
 
 

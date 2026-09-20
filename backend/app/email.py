@@ -21,7 +21,9 @@ from typing import Optional, Protocol, runtime_checkable
 
 from app.config import settings
 
-logger = logging.getLogger(__name__)
+# ใช้ logger ของ uvicorn เหมือน main/silver/phash: logger ตั้งชื่อตามโมดูลไม่มี handler และ root level เป็น WARNING
+# ระดับ INFO (เช่น "registration email: sent to ...") จึงหายเงียบบน server — ต้องผ่านตัวนี้ถึงโผล่ใน docker logs
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,13 @@ _sender: Optional[EmailSender] = None
 def _build_sender() -> EmailSender:
     # ไม่มี host = ตั้งค่าไม่ครบ ให้ตกกลับไปที่ stub แทนที่จะพังตอนส่ง — แบบเดียว
     # กับ llm.py ที่ไม่มี key แล้วใช้ StubLlm
+    if settings.email_backend == "smtp" and not settings.smtp_host:
+        # ตั้งใจจะส่งจริงแต่ตั้งค่าไม่ครบ — เดิมตกเป็น stub เงียบสนิท ผู้ดูแลจึงเห็นแค่ว่า "ไม่มีอีเมลออก"
+        # (บรรทัดนี้ออกครั้งเดียวตอนสร้างตัวส่งครั้งแรก · ทุกการสมัครที่ตามมามี log ของตัวเองอีกชั้น)
+        logger.warning(
+            "email: EMAIL_BACKEND=smtp but SMTP_HOST is empty — falling back to stub, "
+            "no email will be delivered (check that .env reaches the container)"
+        )
     if settings.email_backend == "smtp" and settings.smtp_host:
         return SmtpEmailSender(
             host=settings.smtp_host,

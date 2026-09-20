@@ -1,5 +1,6 @@
 import hashlib
 import io
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -45,6 +46,10 @@ from app.models import EvidenceKind
 from app.phash import compute_phash
 from app.schemas import Page, ParticipationCheckin, ParticipationRegister
 from app.storage import ObjectStorage, get_storage
+
+# ใช้ logger ของ uvicorn เหมือน main/silver/phash: logger ตั้งชื่อตามโมดูลไม่มี handler และ root level เป็น WARNING
+# ระดับ INFO (เช่น "registration email: sent to ...") จึงหายเงียบบน server — ต้องผ่านตัวนี้ถึงโผล่ใน docker logs
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(
     prefix="/participations", tags=["participations"], dependencies=[Depends(get_current_user)]
@@ -364,9 +369,25 @@ def register_self(
     # อีเมลยืนยันการสมัคร — เฉพาะนิสิตที่มีอีเมลและเปิดสวิตช์ไว้ (ไม่มีอีเมลก็สมัครได้ตามปกติ ไม่ error)
     student = session.get(Student, current_user.student_id)
     email = (student.email or "").strip() if student else ""
+    # ทุกทางที่ "ไม่ส่ง" ต้องมี log บอกเหตุผล — เดิมเงียบสนิท ผู้ดูแลเห็นแค่ว่าไม่มีอีเมลโดยไม่รู้ว่าเพราะอะไร
+    if not settings.notify_registration_email_enabled:
+        logger.warning(
+            "registration email: skipped — NOTIFY_REGISTRATION_EMAIL_ENABLED=false "
+            "(student %s, activity %s)",
+            current_user.student_id,
+            activity.id,
+        )
+    elif not email:
+        logger.warning(
+            "registration email: skipped — student %s has no email (code %s, activity %s)",
+            current_user.student_id,
+            student.student_id if student else "?",
+            activity.id,
+        )
     send_confirmation = settings.notify_registration_email_enabled and bool(email)
-    # กิจกรรมจัดภายในวันพรุ่งนี้ (เวลาไทย) → อีเมลนี้นับเป็นการเตือนแล้ว ตั้ง reminder_sent_at ในธุรกรรมเดียว
-    # กับการสมัคร ตัวเตือน 1 วันจึงข้ามแถวนี้ (ไม่ได้ส่งอีเมลยืนยัน = ไม่มีฉบับไหนเตือนแทน — ไม่ตั้ง)
+    # กิจกรรมจัดภายในวันพรุ่งนี้ (เวลาไทย) → อีเมลยืนยันนับเป็นการเตือนแล้ว (ตัวเตือน 1 วันจะข้ามแถวนี้)
+    # แต่ *ยังไม่* ตั้ง reminder_sent_at ตรงนี้: ตั้งหลังส่งสำเร็จจริงในงานเบื้องหลังเท่านั้น
+    # ไม่งั้น SMTP ล้มแล้วนิสิตจะไม่ได้อีเมลเลยทั้งฉบับยืนยันและฉบับเตือน
     covers_reminder = send_confirmation and registration_counts_as_reminder(activity.start_at)
     confirmation = (
         RegistrationConfirmation(
@@ -387,14 +408,23 @@ def register_self(
         activity_id=payload.activity_id,
         evidence_status=EvidenceStatus.pending,
         hours_earned=0,
-        reminder_sent_at=datetime.utcnow() if covers_reminder else None,
     )
     session.add(participation)
     session.commit()
     session.refresh(participation)
     if confirmation is not None:
-        # ส่งหลังตอบ response — SMTP ช้า/ล่มต้องไม่บล็อกหรือทำให้การสมัครล้ม (ตัวส่งกลืน exception + log)
-        background_tasks.add_task(send_registration_confirmation, sender, confirmation)
+        # ส่งหลังตอบ response — SMTP ช้า/ล่มต้องไม่บล็อกหรือทำให้การสมัครล้ม (ตัวส่ง log ERROR ไม่โยนต่อ)
+        # session ของ request ปิดไปก่อนงานเบื้องหลังเริ่ม จึงส่ง "วิธีเปิด session ใหม่จาก engine เดียวกัน"
+        # ไปให้ตัวส่งตั้ง reminder_sent_at เองหลังส่งสำเร็จ (ค่าที่ส่งเป็น int/engine ล้วน ไม่อ้างอ็อบเจกต์ ORM)
+        bind = session.get_bind()
+        background_tasks.add_task(
+            send_registration_confirmation,
+            sender,
+            confirmation,
+            participation_id=participation.id,
+            activity_id=activity.id,
+            session_factory=lambda: Session(bind),
+        )
     return _read_with_evidence(session, participation)
 
 
