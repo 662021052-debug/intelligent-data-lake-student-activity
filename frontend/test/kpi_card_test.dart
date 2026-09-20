@@ -21,6 +21,19 @@ void main() {
     });
   });
 
+  group('ป้ายภาคเรียนบนตัวกรองแดชบอร์ด', () {
+    test('ภาคต้น/ภาคปลาย แสดงเป็น "ภาคเรียนที่ 1/2" ส่วนภาคฤดูร้อนคงเดิม', () {
+      expect(DashboardScreen.semesterLabels[1], 'ภาคเรียนที่ 1');
+      expect(DashboardScreen.semesterLabels[2], 'ภาคเรียนที่ 2');
+      expect(DashboardScreen.semesterLabels[3], 'ภาคฤดูร้อน');
+    });
+
+    test('คีย์ยังเป็น 1/2/3 ตาม gold_dim_date.semester — เปลี่ยนได้แค่ข้อความ', () {
+      // คีย์คือค่าที่ยิงไปกับ query `semester=` ถ้าเพี้ยนเมื่อไหร่ตัวเลขทั้งหน้าจะกรองผิดภาค
+      expect(DashboardScreen.semesterLabels.keys.toList(), [1, 2, 3]);
+    });
+  });
+
   testWidgets('KpiCard: ค่าที่ต้องเตือนใช้สีเตือน ส่วนตัวเลขกลาง ๆ ใช้สีตัวอักษรปกติ',
       (tester) async {
     await tester.pumpWidget(_wrap(const KpiCard(

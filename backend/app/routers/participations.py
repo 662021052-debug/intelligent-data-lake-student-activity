@@ -19,6 +19,7 @@ from app.models import (
     Activity,
     ApprovalStatus,
     EvidenceStatus,
+    LearningUnit,
     OcrDecision,
     Participation,
     ParticipationCreate,
@@ -127,6 +128,12 @@ def _latest_ocr_map(
     return latest
 
 
+def _learning_unit_names(session: Session) -> dict[int, str]:
+    """Map learning_unit.id -> ชื่อหน่วย — taxonomy คงที่ 5 แถว โหลดทั้งตารางถูกกว่า
+    การ join ต่อแถว และฝั่งแอปจะได้ไม่ต้องยิงขอ /learning-units มาแปลชื่อเอง"""
+    return {row.id: row.name for row in session.exec(select(LearningUnit)).all()}
+
+
 def _to_read(
     participation: Participation,
     uploaded_at: Optional[datetime],
@@ -134,11 +141,13 @@ def _to_read(
     ocr: Optional[SilverEvidenceOcr] = None,
     student: Optional[tuple[str, str]] = None,
     evidence_kind: Optional[EvidenceKind] = None,
+    learning_unit_name: Optional[str] = None,
 ) -> ParticipationRead:
     return ParticipationRead(
         **participation.model_dump(),
         activity_name=activity_name,
         evidence_kind=evidence_kind,
+        learning_unit_name=learning_unit_name,
         student_name=student[0] if student else None,
         student_code=student[1] if student else None,
         has_evidence=uploaded_at is not None,
@@ -160,7 +169,16 @@ def _read_with_evidence(session: Session, participation: Participation) -> Parti
     ocr = _latest_ocr_map(session, [participation.id]).get(participation.id)
     student = _student_labels(session, [participation.student_id]).get(participation.student_id)
     kind = _latest_evidence_kind_map(session, [participation.id]).get(participation.id)
-    return _to_read(participation, uploaded_at, activity_name, ocr, student, evidence_kind=kind)
+    units = _learning_unit_names(session)
+    return _to_read(
+        participation,
+        uploaded_at,
+        activity_name,
+        ocr,
+        student,
+        evidence_kind=kind,
+        learning_unit_name=units.get(participation.learning_unit_id),
+    )
 
 
 def _get_activity_or_404(session: Session, activity_id: int) -> Activity:
@@ -265,10 +283,12 @@ def list_participations(
     ocr = _latest_ocr_map(session, [p.id for p in items])
     students = _student_labels(session, [p.student_id for p in items])
     kinds = _latest_evidence_kind_map(session, [p.id for p in items])
+    units = _learning_unit_names(session)
     reads = [
         _to_read(
             p, evidence.get(p.id), names.get(p.activity_id), ocr.get(p.id), students.get(p.student_id),
             evidence_kind=kinds.get(p.id),
+            learning_unit_name=units.get(p.learning_unit_id),
         )
         for p in items
     ]

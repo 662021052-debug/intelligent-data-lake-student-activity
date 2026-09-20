@@ -51,6 +51,15 @@ bool showsTrendLabel(int index, int pointCount) {
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
+  /// ป้ายภาคเรียนที่ผู้ใช้เห็น — คีย์คือค่าที่ส่งให้ backend (`gold_dim_date.semester`)
+  /// ซึ่งคำนวณจากเดือนของ `activity.start_at`: 1 = มิ.ย.–ต.ค., 2 = พ.ย.–มี.ค.,
+  /// 3 = เม.ย.–พ.ค. เปลี่ยนได้เฉพาะข้อความ **ห้ามเปลี่ยนคีย์** ไม่งั้นแดชบอร์ดจะกรองผิดภาค
+  static const Map<int, String> semesterLabels = {
+    1: 'ภาคเรียนที่ 1',
+    2: 'ภาคเรียนที่ 2',
+    3: 'ภาคฤดูร้อน',
+  };
+
   /// % ผ่านเกณฑ์คือตัวเลขที่ต้อง "เตือน" ได้: ต่ำกว่า 50% = แดง, ต่ำกว่า 80% = ส้ม
   static KpiTone passRateTone(double percent) {
     if (percent >= 80) return KpiTone.good;
@@ -62,7 +71,6 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-const _semesterLabels = {1: 'ภาคต้น', 2: 'ภาคปลาย', 3: 'ภาคฤดูร้อน'};
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = false;
@@ -413,7 +421,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final parts = [
       _faculty ?? 'ทุกคณะ',
       _yearLevel == null ? 'ทุกชั้นปี' : 'ปี $_yearLevel',
-      _semester == null ? 'ทุกภาคเรียน' : _semesterLabels[_semester]!,
+      _semester == null ? 'ทุกภาคเรียน' : DashboardScreen.semesterLabels[_semester]!,
     ];
     return parts.join(' • ');
   }
@@ -492,7 +500,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     decoration: const InputDecoration(labelText: 'ภาคเรียน'),
                     items: [
                       const DropdownMenuItem(value: null, child: Text('ทุกภาคเรียน')),
-                      ..._semesterLabels.entries
+                      ...DashboardScreen.semesterLabels.entries
                           .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))),
                     ],
                     onChanged: (v) {

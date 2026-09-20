@@ -13,6 +13,7 @@ import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/app_form_dialog.dart';
+import '../widgets/app_table_cells.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/duplicate_notice.dart';
 import '../widgets/empty_state.dart';
@@ -259,6 +260,25 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
   String _hoursDisplay(Participation p) =>
       p.evidenceStatus == 'approved' ? formatHours(p.hoursEarned) : '–';
 
+  /// เวลาเช็กอินเป็นเวลาไทย — `check_in_time` เก็บเป็น UTC ต้องผ่าน serverTimeToLocal ก่อน
+  ///
+  /// เดิมใช้ `DateTime.toString()` ตรง ๆ ซึ่งได้ทั้งโซนผิดและสตริงยาว
+  /// ("2026-07-10 08:57:00.000") จนดันตารางกว้างเกินจอ
+  String _checkInDisplay(Participation p) =>
+      p.checkInTime == null ? '–' : formatThaiDate(serverTimeToLocal(p.checkInTime!));
+
+  String _checkInTooltip(Participation p) =>
+      p.checkInTime == null ? 'ยังไม่ได้เช็กอิน' : formatThaiDateTime(serverTimeToLocal(p.checkInTime!));
+
+  /// รายการเกณฑ์/หน่วยการเรียนรู้ที่ชั่วโมงของรายการนี้ถูกนับเข้า
+  ///
+  /// เป็น snapshot ที่ตั้งตอนอนุมัติ รายการที่ยังไม่อนุมัติจึงยังไม่มีค่า — แสดง "–"
+  /// เหมือนคอลัมน์ชั่วโมง เพื่อไม่ให้เข้าใจผิดว่าระบบยังไม่รู้ว่าจะนับเข้าอะไร
+  String _criteriaDisplay(Participation p) {
+    final label = p.criteriaLabel;
+    return label.isEmpty ? '–' : label;
+  }
+
   Widget _emptyState(bool isStudent) {
     final filtered = _search.isNotEmpty ||
         _studentFilter != null ||
@@ -281,6 +301,8 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
         DataColumn(label: Text('นิสิต')),
         DataColumn(label: Text('กิจกรรม')),
         DataColumn(label: Text('เช็คอิน')),
+        // snapshot ของเกณฑ์ที่นับเข้า — วางติดกับชั่วโมงเพราะอ่านคู่กัน
+        DataColumn(label: Text('นับเข้าหมวด')),
         DataColumn(label: Text('ชั่วโมงที่ได้'), numeric: true),
         DataColumn(label: Text('สถานะหลักฐาน')),
         DataColumn(label: Text('')),
@@ -290,7 +312,9 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
           [
             DataCell(Text(_studentLabel(p.studentId))),
             DataCell(Text(_activityName(p))),
-            DataCell(Text(p.checkInTime == null ? '-' : p.checkInTime.toString())),
+            DataCell(ThaiDateCell(_checkInDisplay(p), tooltip: _checkInTooltip(p))),
+            // ชื่อรายการเกณฑ์ยาวได้ — ตัด … + tooltip แทนการดันตารางให้กว้างจนต้องเลื่อนไกล
+            DataCell(TruncatedCell(_criteriaDisplay(p), maxWidth: 180)),
             DataCell(Text(_hoursDisplay(p))),
             DataCell(StatusChip.evidence(p.evidenceStatus, dense: true)),
             DataCell(canWrite
@@ -318,8 +342,10 @@ class _ParticipationsScreenState extends State<ParticipationsScreen> {
           child: ListTile(
             title: Text('${_studentLabel(p.studentId)} → ${_activityName(p)}'),
             subtitle: Text(
+              'นับเข้า: ${_criteriaDisplay(p)}\n'
               'ชั่วโมง: ${_hoursDisplay(p)} • ${evidenceLabel(p.evidenceStatus)}$evidenceNote',
             ),
+            isThreeLine: true,
             trailing: canWrite
                 ? _actionButtons(p)
                 : isStudent

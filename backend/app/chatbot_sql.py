@@ -19,6 +19,7 @@ Security model (see the 🔴 section of the phase spec):
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -130,16 +131,34 @@ def answer_hours(session: Session, student_id: int) -> ChatAnswer:
 
 
 def answer_missing(session: Session, student_id: int) -> ChatAnswer:
+    """รายการเกณฑ์ที่ยังไม่ครบ พร้อมกิจกรรมที่เปิดรับซึ่งนับเข้ารายการนั้น
+
+    ยังเป็น server-authored SQL ล้วน ๆ (ไม่พึ่ง LLM) จึงทำงานได้บนเครื่องที่ตั้ง
+    ``LLM_BACKEND=stub`` เหมือนเดิม — แค่ดึงคอลัมน์ที่ ``gold_student_hours`` มีอยู่แล้ว
+    เพิ่ม แล้วต่อกิจกรรมที่ลงได้เข้าไปให้แต่ละรายการ
+    """
     rows = session.execute(
         text(
-            "SELECT category_name, required_hours, earned_hours "
+            "SELECT category_key, category_name, required_hours, earned_hours, "
+            "item_kind, is_mandatory, learning_unit_name, talent_name, criteria_set_key "
             "FROM gold_student_hours "
-            "WHERE student_key = :sid AND completed = 0 ORDER BY category_key"
+            "WHERE student_key = :sid AND completed = 0 "
+            # รายการบังคับขึ้นก่อน เพราะขาดแล้วจบไม่ได้ ส่วนรายการเลือกยังสลับตัวได้
+            "ORDER BY is_mandatory DESC, category_key"
         ),
         {"sid": student_id},
     ).mappings().all()
 
     data = [dict(r) for r in rows]
+    if data:
+        keys = [r["category_key"] for r in data]
+        criteria_set_key = data[0]["criteria_set_key"]
+        if criteria_set_key is None:
+            by_key = _open_activities_by_category(session, keys)
+        else:
+            by_key = _open_activities_by_item(session, criteria_set_key, keys)
+        for row in data:
+            row["suggestions"] = by_key.get(row["category_key"], [])
     return ChatAnswer(Intent.MISSING, fmt.missing_categories(data), data, needs_student=True)
 
 
@@ -208,6 +227,59 @@ def _open_activities_for_items(
         stmt, {"keys": item_keys, "cs": criteria_set_key, "now": now_th_naive()}
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+def _group_by_key(rows: Sequence[Mapping], key: str) -> dict[int, list[dict]]:
+    """จัดแถวเป็น {คีย์ของรายการ: [กิจกรรม…]} และตัดคอลัมน์คีย์ออกจากตัวกิจกรรมเอง
+    (ตัวจัดข้อความไม่ต้องรู้จักคีย์ภายใน และจะได้ไม่หลุดไปโผล่ในคำตอบ)"""
+    grouped: dict[int, list[dict]] = {}
+    for row in rows:
+        item = dict(row)
+        grouped.setdefault(item.pop(key), []).append(item)
+    return grouped
+
+
+def _open_activities_by_item(
+    session: Session, criteria_set_key: int, item_keys: list[int]
+) -> dict[int, list[dict]]:
+    """กิจกรรมที่ยังเปิดรับ แยกตามรายการเกณฑ์ที่มันนับเข้า (ชุดเกณฑ์เดียว)"""
+    if not item_keys:
+        return {}
+    stmt = text(
+        "SELECT ai.item_key, c.name, c.activity_type, c.hours, c.category_name, "
+        "c.subcategory_name, c.participant_count, c.max_participants "
+        "FROM gold_activity_item ai "
+        "JOIN gold_activity_catalog c ON c.activity_key = ai.activity_key "
+        "WHERE ai.criteria_set_key = :cs AND ai.item_key IN :keys "
+        "AND c.approval_status = 'approved' AND c.participant_count < c.max_participants "
+        "AND c.start_at >= :now "
+        "ORDER BY ai.item_key, c.start_at"
+    ).bindparams(bindparam("keys", expanding=True))
+    rows = session.execute(
+        stmt, {"keys": item_keys, "cs": criteria_set_key, "now": now_th_naive()}
+    ).mappings().all()
+    return _group_by_key(rows, "item_key")
+
+
+def _open_activities_by_category(
+    session: Session, category_keys: list[int]
+) -> dict[int, list[dict]]:
+    """เหมือน [_open_activities_by_item] แต่สำหรับนิสิตที่ยังไม่ผูกชุดเกณฑ์
+    (รายการที่ตรวจคือหมวดชั่วโมงเดิม)"""
+    if not category_keys:
+        return {}
+    stmt = text(
+        "SELECT category_key, name, activity_type, hours, category_name, subcategory_name, "
+        "participant_count, max_participants "
+        "FROM gold_activity_catalog "
+        "WHERE approval_status = 'approved' AND participant_count < max_participants "
+        "AND start_at >= :now AND category_key IN :keys "
+        "ORDER BY category_key, start_at"
+    ).bindparams(bindparam("keys", expanding=True))
+    rows = session.execute(
+        stmt, {"keys": category_keys, "now": now_th_naive()}
+    ).mappings().all()
+    return _group_by_key(rows, "category_key")
 
 
 def recommend_by_missing_categories(session: Session, student_id: int) -> ChatAnswer:

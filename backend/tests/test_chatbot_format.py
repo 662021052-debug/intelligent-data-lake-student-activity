@@ -142,25 +142,75 @@ def test_my_hours_with_no_rows():
 
 # ------------------------------ missing intent ------------------------------
 
-def test_missing_single_category_is_one_sentence():
-    answer = fmt.missing_categories([_hours_row("TSU รับใช้สังคม", 4, 12, 0)])
-    assert answer == (
-        "คุณยังขาดหมวดTSU รับใช้สังคม (ได้ 4/12 ชม.) — ต้องเก็บเพิ่มอีก 8 ชม. "
-        "แนะนำให้เข้าร่วมกิจกรรมในหมวดนี้"
-    )
+def _missing_row(name, earned, required, *, mandatory=False, unit=None, talent=None,
+                 suggestions=None):
+    """แถวของรายการเกณฑ์ที่ยังไม่ครบ ตามคอลัมน์จริงของ gold_student_hours"""
+    row = _hours_row(name, earned, required, 0)
+    row.update({
+        "is_mandatory": 1 if mandatory else 0,
+        "learning_unit_name": unit,
+        "talent_name": talent,
+        "suggestions": suggestions or [],
+    })
+    return row
 
 
-def test_missing_multiple_categories_is_a_numbered_list():
-    rows = [_hours_row("หมวดหนึ่ง", 2, 8, 0), _hours_row("หมวดสอง", 4, 12, 0)]
-    answer = fmt.missing_categories(rows)
-    assert answer.startswith("คุณยังเก็บชั่วโมงไม่ครบ 2 หมวด รวมต้องเก็บเพิ่มอีก 14 ชม.:")
-    assert "1. หมวดหนึ่ง — ได้ 2/8 ชม. ขาดอีก 6 ชม." in answer
-    assert "2. หมวดสอง — ได้ 4/12 ชม. ขาดอีก 8 ชม." in answer
+def test_missing_single_item_names_the_requirement_not_just_the_category():
+    answer = fmt.missing_categories([
+        _missing_row("กลุ่ม TSU Good (จิตอาสา)", 4, 12, unit="TSU รับใช้สังคม"),
+    ])
+    assert "คุณยังขาด \"กลุ่ม TSU Good (จิตอาสา)\"" in answer
+    assert "หน่วยการเรียนรู้: TSU รับใช้สังคม" in answer
+    # ตัวเลขครบสามตัวตามที่อาจารย์ขอ: ต้องการ / ได้แล้ว / ขาด
+    assert "ต้องการ 12 ชม. ได้แล้ว 4 ชม. ขาดอีก 8 ชม." in answer
     assert_no_raw_columns(answer)
 
 
+def test_missing_item_lists_open_activities_that_count_toward_it():
+    answer = fmt.missing_categories([
+        _missing_row("กลุ่ม TSU Good (จิตอาสา)", 4, 12, suggestions=[
+            _activity("ปลูกป่าชายเลน", hours=4, joined=2, cap=30),
+            _activity("Big Cleaning Day", hours=5, joined=1, cap=10),
+        ]),
+    ])
+    assert "กิจกรรมที่เปิดรับ:" in answer
+    assert "ปลูกป่าชายเลน (4 ชม. · เหลือ 28 ที่)" in answer
+    assert_no_raw_columns(answer)
+
+
+def test_missing_item_says_so_when_no_activity_counts_toward_it():
+    answer = fmt.missing_categories([_missing_row("ศิลปวัฒนธรรมอาเซียน", 0, 8)])
+    assert "ยังไม่มีกิจกรรมที่เปิดรับซึ่งนับเข้ารายการนี้" in answer
+
+
+def test_missing_marks_mandatory_items():
+    answer = fmt.missing_categories([
+        _missing_row("กิจกรรมปฐมนิเทศนิสิต", 0, 4, mandatory=True),
+        _missing_row("การบริหารจัดการตนเอง", 1, 3),
+    ])
+    assert "กิจกรรมปฐมนิเทศนิสิต (บังคับ)" in answer
+    assert "การบริหารจัดการตนเอง —" in answer
+
+
+def test_missing_multiple_items_is_a_numbered_list():
+    rows = [_missing_row("รายการหนึ่ง", 2, 8), _missing_row("รายการสอง", 4, 12)]
+    answer = fmt.missing_categories(rows)
+    assert answer.startswith("คุณยังเก็บชั่วโมงไม่ครบ 2 รายการ รวมต้องเก็บเพิ่มอีก 14 ชม.:")
+    assert "1. รายการหนึ่ง — ต้องการ 8 ชม. ได้แล้ว 2 ชม. ขาดอีก 6 ชม." in answer
+    assert "2. รายการสอง — ต้องการ 12 ชม. ได้แล้ว 4 ชม. ขาดอีก 8 ชม." in answer
+    assert_no_raw_columns(answer)
+
+
+def test_missing_does_not_repeat_the_unit_name_for_legacy_unit_items():
+    """ชุด legacy: รายการที่ตรวจ *คือ* หน่วยการเรียนรู้ จึงไม่ต้องเขียนชื่อซ้ำในวงเล็บ"""
+    answer = fmt.missing_categories([
+        _missing_row("ใฝ่เรียนรู้ตลอดชีวิต", 0, 20, unit="ใฝ่เรียนรู้ตลอดชีวิต"),
+    ])
+    assert "หน่วยการเรียนรู้:" not in answer
+
+
 def test_missing_none_congratulates():
-    assert "ครบทุกหมวดแล้ว" in fmt.missing_categories([])
+    assert "ครบทุกรายการแล้ว" in fmt.missing_categories([])
 
 
 # ------------------------------ required intent -----------------------------

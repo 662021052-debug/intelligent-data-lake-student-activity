@@ -123,37 +123,87 @@ def my_hours(rows: Sequence[dict], total_required: float) -> str:
 
 # --------------------------- intent: missing categories ---------------------
 
-def missing_categories(rows: Sequence[dict]) -> str:
-    if not rows:
-        return "ยินดีด้วย! คุณเก็บชั่วโมงครบทุกหมวดแล้ว ไม่ต้องเก็บเพิ่มอีก 🎉"
+# จำนวนกิจกรรมแนะนำต่อรายการเกณฑ์ — มากกว่านี้คำตอบยาวจนอ่านไม่ไหวบนมือถือ
+MAX_SUGGESTIONS_PER_ITEM = 2
 
-    def gap(r: dict) -> float:
-        return float(r["required_hours"]) - float(r["earned_hours"])
+
+def _missing_gap(row: dict) -> float:
+    return float(row["required_hours"]) - float(row["earned_hours"])
+
+
+def _missing_context(row: dict) -> str:
+    """คำกำกับในวงเล็บ: "บังคับ" และหน่วยการเรียนรู้/Talent ที่รายการนั้นสังกัด
+
+    ว่างได้ — แถวของชุด legacy เป็น "หน่วยการเรียนรู้" อยู่แล้ว การเขียนซ้ำว่า
+    "หน่วยการเรียนรู้: ใฝ่เรียนรู้ตลอดชีวิต" ต่อท้ายชื่อเดียวกันมีแต่ทำให้รก
+    """
+    parts: list[str] = []
+    if row.get("is_mandatory"):
+        parts.append("บังคับ")
+    unit = row.get("learning_unit_name")
+    if unit and str(unit) != str(row.get("category_name")):
+        parts.append(f"หน่วยการเรียนรู้: {unit}")
+    talent = row.get("talent_name")
+    if talent:
+        parts.append(str(talent))
+    return " · ".join(parts)
+
+
+def _missing_amounts(row: dict) -> str:
+    return (
+        f"ต้องการ {fmt_hours(row['required_hours'])} "
+        f"ได้แล้ว {fmt_hours(row['earned_hours'])} "
+        f"ขาดอีก {fmt_hours(_missing_gap(row))}"
+    )
+
+
+def _suggestion_line(row: dict) -> str:
+    """กิจกรรมที่เปิดรับและนับเข้ารายการนั้น — ไม่ซ้ำชื่อหมวดเพราะอยู่ใต้หัวข้อรายการอยู่แล้ว"""
+    suggestions = sort_by_seats(with_seats(row.get("suggestions") or []))
+    if not suggestions:
+        return "ยังไม่มีกิจกรรมที่เปิดรับซึ่งนับเข้ารายการนี้"
+    shown = suggestions[:MAX_SUGGESTIONS_PER_ITEM]
+    names = ", ".join(
+        f"{r.get('name', '-')} ({fmt_hours(r.get('hours', 0))} · เหลือ {fmt_seats(seats_left(r))})"
+        for r in shown
+    )
+    hidden = len(suggestions) - len(shown)
+    tail = f" และอีก {hidden} กิจกรรม" if hidden > 0 else ""
+    return f"กิจกรรมที่เปิดรับ: {names}{tail}"
+
+
+def missing_categories(rows: Sequence[dict]) -> str:
+    """รายการเกณฑ์ที่ยังไม่ครบ พร้อมชั่วโมงที่ขาดและกิจกรรมที่ลงได้
+
+    เดิมตอบแค่ชื่อหมวด นิสิตจึงยังต้องไปไล่หาเองว่าต้องลงอะไร — ตอนนี้บอกเจาะจงถึง
+    รายการเกณฑ์ (ชื่อ · บังคับ/เลือก · หน่วยการเรียนรู้) ตัวเลขที่ขาด และกิจกรรม
+    ที่เปิดรับซึ่งนับเข้ารายการนั้นให้เลย
+
+    คีย์ ``is_mandatory`` / ``learning_unit_name`` / ``talent_name`` / ``suggestions``
+    เป็นของเสริม ไม่มีก็ยังตอบได้ (แถวของชุด legacy ไม่มีครบทุกตัว)
+    """
+    if not rows:
+        return "ยินดีด้วย! คุณเก็บชั่วโมงครบทุกรายการแล้ว ไม่ต้องเก็บเพิ่มอีก 🎉"
 
     if len(rows) == 1:
         r = rows[0]
-        return (
-            f"คุณยังขาดหมวด{r['category_name']} "
-            f"(ได้ {fmt_num(r['earned_hours'])}/{fmt_num(r['required_hours'])} ชม.) "
-            f"— ต้องเก็บเพิ่มอีก {fmt_hours(gap(r))} "
-            "แนะนำให้เข้าร่วมกิจกรรมในหมวดนี้"
-        )
+        context = _missing_context(r)
+        headline = f"คุณยังขาด \"{r['category_name']}\""
+        if context:
+            headline += f" ({context})"
+        return "\n".join([f"{headline} — {_missing_amounts(r)}", _suggestion_line(r)])
 
-    total_gap = sum(gap(r) for r in rows)
+    total_gap = sum(_missing_gap(r) for r in rows)
     header = (
-        f"คุณยังเก็บชั่วโมงไม่ครบ {len(rows)} หมวด "
+        f"คุณยังเก็บชั่วโมงไม่ครบ {len(rows)} รายการ "
         f"รวมต้องเก็บเพิ่มอีก {fmt_hours(total_gap)}:"
     )
-    items = [
-        f"{r['category_name']} — ได้ {fmt_num(r['earned_hours'])}/{fmt_num(r['required_hours'])} ชม. "
-        f"ขาดอีก {fmt_hours(gap(r))}"
-        for r in rows
-    ]
-    return "\n".join(
-        [header]
-        + numbered(items, unit="หมวด")
-        + ['แนะนำให้เข้าร่วมกิจกรรมในหมวดเหล่านี้ — พิมพ์ "แนะนำกิจกรรม" เพื่อดูกิจกรรมที่ยังเปิดรับ']
-    )
+    items = []
+    for r in rows:
+        context = _missing_context(r)
+        title = str(r["category_name"]) + (f" ({context})" if context else "")
+        items.append(f"{title} — {_missing_amounts(r)}\n   {_suggestion_line(r)}")
+    return "\n".join([header] + numbered(items, unit="รายการ"))
 
 
 # --------------------------- intent: required activities --------------------

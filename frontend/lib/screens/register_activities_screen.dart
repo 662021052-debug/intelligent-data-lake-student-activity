@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/activity.dart';
+import '../models/criteria_set.dart';
 import '../models/hour_category.dart';
 import '../models/hour_summary.dart';
 import '../models/participation.dart';
@@ -8,6 +9,7 @@ import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/api_error.dart';
 import '../utils/format.dart';
+import '../widgets/activity_detail_dialog.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/app_card.dart';
 import '../widgets/dialogs.dart';
@@ -17,7 +19,8 @@ import '../widgets/status_chip.dart';
 import 'app_shell.dart';
 // ใช้กฎ "วันไหนถือว่าผ่านไปแล้ว" ร่วมกับหน้าจัดการกิจกรรม จะได้มีนิยามเดียว —
 // ไม่งั้นสองหน้าอาจตัดวันคนละเวลาแล้วนิสิตเห็นรายการไม่ตรงกัน
-import 'activities_screen.dart' show activityFirstSelectableDate, isBackdatedActivity;
+import 'activities_screen.dart'
+    show activityCriteriaLabel, activityFirstSelectableDate, isBackdatedActivity;
 
 /// กิจกรรมนี้ยังไม่ผ่านวันจัดใช่ไหม (เทียบระดับวัน เหมือนกฎฝั่ง backend)
 bool isUpcomingActivity(Activity a, [DateTime? now]) =>
@@ -65,6 +68,7 @@ class RegisterActivitiesScreen extends StatefulWidget {
 class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
   List<Activity> _activities = [];
   List<HourCategory> _categories = [];
+  List<CriteriaSet> _criteriaSets = [];
   List<HourCategorySummary> _myHours = [];
   Map<int, Participation> _ownParticipationByActivity = {};
   bool _loading = false;
@@ -80,6 +84,7 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     final needle = _search.toLowerCase();
     return _activities.where((a) {
       final haystack = '${a.name} ${a.activityType} ${a.location} '
+              '${activityCriteriaLabel(_categories, _criteriaSets, a)} '
               '${subcategoryPath(_categories, a.subcategoryId)}'
           .toLowerCase();
       return haystack.contains(needle);
@@ -108,6 +113,9 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       final participations = await ApiService.fetchAll('/participations', Participation.fromJson);
       // ชื่อหมวดชั่วโมง + ชั่วโมงสะสมของตัวเอง ใช้บอกว่า "สมัครแล้วได้อะไร เข้าหมวดที่ยังขาดไหม"
       final categories = await ApiService.fetchList('/hour-categories', HourCategory.fromJson);
+      // ชื่อรายการเกณฑ์ + หน่วยการเรียนรู้ ใช้บอกในหน้ารายละเอียดว่ากิจกรรมนี้นับเข้าอะไร
+      // (อ่านได้ทุก role ที่ล็อกอิน — GET /criteria-sets ไม่ได้จำกัดเฉพาะผู้ดูแล)
+      final criteriaSets = await ApiService.fetchList('/criteria-sets', CriteriaSet.fromJson);
       final myHours = await ApiService.fetchList(
         '/students/me/hours-summary',
         HourCategorySummary.fromJson,
@@ -115,6 +123,7 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
       setState(() {
         _activities = sortActivitiesForStudent(activities);
         _categories = categories;
+        _criteriaSets = criteriaSets;
         _myHours = myHours;
         _ownParticipationByActivity = {
           for (final p in participations) p.activityId: p,
@@ -142,6 +151,33 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
           '${formatHours(summary.requiredHours)} ชม. — ยังขาดอีก ${formatHours(remaining)} ชม.';
     }
     return null;
+  }
+
+  /// เปิดรายละเอียดกิจกรรม — ปุ่มในนั้นไม่ยิง API เอง แต่คืน action กลับมาให้
+  /// เส้นทางเดียวกับปุ่มบนการ์ด (ยืนยันซ้ำ + โหลดใหม่ + ข้อความ error ชุดเดียวกัน)
+  Future<void> _openDetail(Activity a) async {
+    final participation = _ownParticipationByActivity[a.id];
+    final closed = a.startAt.isBefore(DateTime.now());
+    final action = await showDialog<ActivityDetailAction>(
+      context: context,
+      builder: (_) => ActivityDetailDialog(
+        activity: a,
+        categories: _categories,
+        criteriaSets: _criteriaSets,
+        registered: participation != null,
+        evidenceStatus: participation?.evidenceStatus,
+        closed: closed,
+        categoryProgress: _categoryProgress(a),
+        countdown: countdownLabel(a.startAt),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case ActivityDetailAction.register:
+        await _register(a);
+      case ActivityDetailAction.cancel:
+        if (participation != null) await _cancel(participation, a);
+    }
   }
 
   Future<void> _register(Activity a) async {
@@ -296,6 +332,8 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
     final closed = a.startAt.isBefore(DateTime.now());
 
     return AppCard(
+      // กดที่การ์ดเพื่อดูรายละเอียดก่อนตัดสินใจ — ปุ่มท้ายการ์ดยังกดลัดได้เหมือนเดิม
+      onTap: () => _openDetail(a),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -323,7 +361,7 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
           const SizedBox(height: AppSpacing.xs),
           // นิสิตต้องรู้ก่อนกดสมัครว่าได้กี่ชั่วโมงและเข้าหมวดไหน
           Text(
-            subcategoryPath(_categories, a.subcategoryId),
+            activityCriteriaLabel(_categories, _criteriaSets, a),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(color: AppColors.muted),
@@ -341,6 +379,15 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
           ),
           const SizedBox(height: AppSpacing.lg),
           _buildAction(a, participation, closed),
+          const SizedBox(height: AppSpacing.xs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.info_outline, size: 16),
+              label: const Text('ดูรายละเอียด'),
+              onPressed: () => _openDetail(a),
+            ),
+          ),
         ],
       ),
     );

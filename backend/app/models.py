@@ -467,6 +467,10 @@ class ParticipationRead(ParticipationBase):
     ocr_match_kind: Optional[MatchKind] = None
     # ประเภทของไฟล์หลักฐานล่าสุด (null = ยังไม่ส่งไฟล์) — คิวตรวจบอกได้ว่าทำไมใบนี้ต้องตรวจด้วยตา
     evidence_kind: Optional[EvidenceKind] = None
+    # ชื่อหน่วยการเรียนรู้ของ [learning_unit_id] — snapshot เก็บไว้แค่ id ซึ่งฝั่งแอป
+    # แปลเป็นชื่อเองไม่ได้ถ้าไม่ยิงขอ /learning-units มาอีกรอบ · null = ยังไม่อนุมัติ
+    # (snapshot ตั้งตอนอนุมัติ) หรือเป็นแถวก่อนมีชุดเกณฑ์
+    learning_unit_name: Optional[str] = None
 
 
 # ---------- Raw file (Bronze layer metadata / data lineage) ----------

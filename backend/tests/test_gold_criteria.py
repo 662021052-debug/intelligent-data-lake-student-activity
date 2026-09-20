@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlmodel import select
 
 from app.auth import hash_password
-from app.chatbot_sql import recommend_by_missing_categories
+from app.chatbot_sql import Intent, answer_missing, recommend_by_missing_categories
 from app.completion import progress_by_student
 from app.gold import create_gold_layer
 from app.models import (
@@ -540,6 +540,26 @@ def test_student_hours_summary_is_grouped_by_talent(client, session, cohort):
     assert missing == [ELECTIVE]
     assert body[1]["completed"] and body[2]["completed"]
     assert len(body[2]["subcategories"]) == 2  # แนวคิด (บังคับ) + กลุ่ม Social
+
+
+def test_chatbot_missing_names_the_requirement_and_suggests_activities(client, session, cohort):
+    """ถาม "ขาดหมวดไหน" ต้องได้ชื่อรายการเกณฑ์ ตัวเลขที่ขาด และกิจกรรมที่ลงได้
+
+    เป็น structured query ล้วน ๆ (ไม่แตะ LLM) จึงต้องผ่านแม้ LLM_BACKEND=stub
+    """
+    upcoming = now_th_naive() + timedelta(days=7)
+    _activity(session, [_req(session, ELECTIVE)], 3, start_at=upcoming, name="บริหารเวลาเปิดรับ")
+    create_gold_layer(session)
+
+    answer = answer_missing(session, cohort["no_elective"].id)
+    assert answer.intent == Intent.MISSING
+    # ชื่อรายการเกณฑ์ที่ขาด ไม่ใช่แค่ชื่อหมวดกว้าง ๆ
+    assert ELECTIVE in answer.answer
+    # ตัวเลขครบสามตัว
+    assert "ต้องการ" in answer.answer and "ได้แล้ว" in answer.answer and "ขาดอีก" in answer.answer
+    # กิจกรรมที่เปิดรับซึ่งนับเข้ารายการนั้น
+    assert "บริหารเวลาเปิดรับ" in answer.answer
+    assert [r["name"] for r in answer.rows[0]["suggestions"]] == ["บริหารเวลาเปิดรับ"]
 
 
 def test_chatbot_recommends_upcoming_activities_for_missing_items(client, session, cohort):
