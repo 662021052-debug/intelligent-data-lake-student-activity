@@ -5,7 +5,8 @@ CanvasKit ไม่มีฟอนต์ระบบ เจอตัวอัก
 ซึ่งดีฟอลต์คือ `https://fonts.gstatic.com/s/` — บนเครือข่ายที่บล็อก Google
 ตัวอักษรพวกนั้นจะกลายเป็นกล่องสี่เหลี่ยม
 
-`web/flutter_bootstrap.js` ชี้ `fontFallbackBaseUrl` มาที่โฟลเดอร์นี้ (`/fonts/gstatic/`)
+`web/flutter_bootstrap.js` ชี้ `fontFallbackBaseUrl` มาที่โฟลเดอร์นี้ โดยคำนวณจาก `<base href>`
+(ใต้ `--base-href /662021052/` ได้ `/662021052/fonts/gstatic/` — ห้ามเขียนเป็น `/fonts/gstatic/` ตรง ๆ ไม่งั้น 404)
 โครง path ต้องตรงกับบน gstatic ทุกตัวอักษร เพราะ engine ต่อ path เองจากตารางภายใน
 
 ## รายการไฟล์ (เก็บจากการเปิดทุกเมนูของ admin / staff / นิสิต เมื่อ 2026-09-16)

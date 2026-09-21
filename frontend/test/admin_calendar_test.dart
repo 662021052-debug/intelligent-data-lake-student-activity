@@ -561,6 +561,49 @@ void main() {
     });
   });
 
+  group('ป้ายปุ่มในปฏิทินใช้ฟอนต์ Sarabun (ไม่พึ่ง Roboto/ฟอนต์สำรองที่โหลดตอนรัน)', () {
+    String? familyOf(WidgetTester tester, Finder label) =>
+        DefaultTextStyle.of(tester.element(label)).style.fontFamily;
+
+    testWidgets('แอดมิน: "ผู้เข้าร่วม" "แก้ไข" และปุ่ม "วันนี้" ที่หัวปฏิทิน', (tester) async {
+      _loginAs('admin');
+      await _pump(tester, [_activity(id: 1, startAt: _at(9, 30))]);
+      await _tapDay(tester, _day);
+
+      for (final label in [
+        _inPanel(find.text('ผู้เข้าร่วม')),
+        _inPanel(find.text('แก้ไข')),
+        find.widgetWithText(OutlinedButton, 'วันนี้'),
+      ]) {
+        expect(label, findsOneWidget);
+        expect(familyOf(tester, label), startsWith('Sarabun'), reason: 'ปุ่ม $label ไม่ได้ใช้ Sarabun');
+      }
+    });
+
+    testWidgets('นิสิต: "สมัครเข้าร่วม" และ "ยกเลิกการสมัคร"', (tester) async {
+      _loginAs('student');
+      await _pump(
+        tester,
+        [
+          _activity(id: 1, name: 'เปิดรับ', startAt: _at(9, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+          _activity(id: 2, name: 'สมัครแล้ว', startAt: _at(13, 0, on: _nextMonthDay), approvalStatus: 'approved'),
+        ],
+        participations: [Participation(id: 11, studentId: 1, activityId: 2)],
+      );
+      await tester.tap(find.byTooltip('เดือนถัดไป'));
+      await tester.pumpAndSettle();
+      await _tapDay(tester, _nextMonthDay);
+
+      for (final label in [
+        _inPanel(find.text('สมัครเข้าร่วม')),
+        _inPanel(find.text('ยกเลิกการสมัคร')),
+      ]) {
+        expect(label, findsOneWidget);
+        expect(familyOf(tester, label), startsWith('Sarabun'), reason: 'ปุ่ม $label ไม่ได้ใช้ Sarabun');
+      }
+    });
+  });
+
   group('การ์ดนิสิตหลังสมัคร', () {
     testWidgets('สมัครแล้ว (ยังไม่เช็กอิน) มีปุ่ม "ยกเลิกการสมัคร" · เช็กอินแล้วยกเลิกไม่ได้', (tester) async {
       _loginAs('student');

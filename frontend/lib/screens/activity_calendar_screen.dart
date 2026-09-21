@@ -543,10 +543,17 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
         minimumSize: const Size(34, 34),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.field)),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        // ต้องสืบจากธีม (Sarabun) — TextStyle ดิบไม่มี fontFamily ป้ายปุ่มจะตกไปใช้ Roboto ซึ่ง
+        // ไม่มีอักษรไทย แล้วพึ่งฟอนต์สำรองที่โหลดจากเซิร์ฟเวอร์ (ล้มเมื่อ 404 = ป้ายว่างเปล่า)
+        textStyle: _buttonLabelStyle(13),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.compact,
       );
+
+  TextStyle? _buttonLabelStyle(double size) => Theme.of(context)
+      .textTheme
+      .labelLarge
+      ?.copyWith(fontSize: size, fontWeight: FontWeight.w600);
 
   Widget _navButton(IconData icon, String tooltip, VoidCallback onPressed) => Tooltip(
         message: tooltip,
@@ -997,7 +1004,7 @@ class _ActivityCalendarScreenState extends State<ActivityCalendarScreen> {
   ButtonStyle get _cardButtonStyle => ButtonStyle(
         minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
         padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: AppSpacing.md + 2)),
-        textStyle: const WidgetStatePropertyAll(TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+        textStyle: WidgetStatePropertyAll(_buttonLabelStyle(12.5)),
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.field)),
         ),

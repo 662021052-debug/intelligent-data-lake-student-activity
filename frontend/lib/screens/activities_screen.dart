@@ -1397,7 +1397,11 @@ class ActivityCriteriaBlock extends StatelessWidget {
                 side: BorderSide(color: AppColors.blue.withValues(alpha: 0.6)),
                 minimumSize: const Size.fromHeight(38),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.field)),
-                textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                // สืบจากธีม (Sarabun) เพื่อไม่ให้ป้ายปุ่มตกไปใช้ Roboto ที่ไม่มีอักษรไทย
+                textStyle: Theme.of(context)
+                    .textTheme
+                    .labelLarge
+                    ?.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
               ),
               icon: Icon(pickerOpen ? Icons.expand_less : Icons.add, size: 18),
               label: Text(pickerOpen ? 'ซ่อนรายการเกณฑ์' : 'เพิ่มเกณฑ์ที่นับเข้า'),
@@ -1560,7 +1564,7 @@ class ActivityTypeChips extends StatelessWidget {
                         : AppColors.line,
                   ),
                   shape: const StadiumBorder(),
-                  labelStyle: TextStyle(
+                  labelStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
                     fontSize: 13,
                     fontWeight: field.value == type ? FontWeight.w600 : FontWeight.w500,
                     color: field.value == type ? AppColors.blueDark : AppColors.sub,
