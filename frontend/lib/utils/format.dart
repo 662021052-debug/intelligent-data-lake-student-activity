@@ -61,6 +61,19 @@ String formatThaiDateTime(DateTime dt) {
   return '${dt.day} ${_thaiMonthsShort[dt.month - 1]} ${dt.year + 543} เวลา $time น.';
 }
 
+/// ช่วงเวลากิจกรรม: วันเดียวกัน `1 ธ.ค. 2569 เวลา 09:00–12:00 น.` · ข้ามวัน
+/// `1 ธ.ค. 2569 เวลา 09:00 น. – 2 ธ.ค. 2569 เวลา 16:00 น.` · ไม่มีเวลาสิ้นสุด =
+/// เหมือน [formatThaiDateTime] เดิมทุกประการ
+String formatThaiDateTimeRange(DateTime start, DateTime? end) {
+  if (end == null) return formatThaiDateTime(start);
+  final sameDay = start.year == end.year && start.month == end.month && start.day == end.day;
+  if (!sameDay) return '${formatThaiDateTime(start)} – ${formatThaiDateTime(end)}';
+  String clock(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  return '${start.day} ${_thaiMonthsShort[start.month - 1]} ${start.year + 543} '
+      'เวลา ${clock(start)}–${clock(end)} น.';
+}
+
 /// วันที่อย่างเดียวแบบสั้น: `2026-12-01T09:00` → `1 ธ.ค. 2569`
 ///
 /// ใช้ในตารางที่มีหลายคอลัมน์ ซึ่งเวลาไม่ได้ช่วยตัดสินใจอะไรแต่กินความกว้าง

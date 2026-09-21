@@ -331,6 +331,9 @@ class ActivityBase(SQLModel):
     is_required: bool = False
     max_participants: int
     start_at: datetime
+    # เวลาสิ้นสุด — ไม่บังคับ · เวลาไทยแบบไม่มีโซนเหมือน start_at · ข้อมูลประกอบเท่านั้น
+    # (ชั่วโมงที่ได้ยังมาจาก `hours` และช่วงเช็กอินยังคำนวณจาก start_at + hours)
+    end_at: Optional[datetime] = None
     location: str
     # hours granted to a participant when their evidence is approved (single source
     # of truth for hours_earned; students/staff never type hours_earned by hand).
@@ -380,6 +383,8 @@ class ActivityUpdate(SQLModel):
     is_required: Optional[bool] = None
     max_participants: Optional[int] = Field(default=None, gt=0)
     start_at: Optional[datetime] = None
+    # ส่ง null มา = ล้างเวลาสิ้นสุด · ไม่ส่งคีย์ = ไม่แตะของเดิม (ตัวแก้ใช้ exclude_unset)
+    end_at: Optional[datetime] = None
     location: Optional[str] = None
     hours: Optional[float] = Field(default=None, gt=0)
     subcategory_id: Optional[int] = None

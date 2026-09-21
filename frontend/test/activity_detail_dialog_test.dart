@@ -10,6 +10,7 @@ Activity _activity({
   int taken = 10,
   int max = 50,
   bool isRequired = false,
+  DateTime? endAt,
 }) =>
     Activity(
       id: 1,
@@ -19,6 +20,7 @@ Activity _activity({
       hours: 4,
       maxParticipants: max,
       startAt: DateTime(2026, 11, 20, 9, 0),
+      endAt: endAt,
       location: 'ลานกิจกรรม',
       approvalStatus: 'approved',
       participantCount: taken,
@@ -119,6 +121,27 @@ void main() {
       expect(find.text('กลุ่ม TSU Good (จิตอาสา/บำเพ็ญประโยชน์)'), findsOneWidget);
       expect(find.text('หน่วยการเรียนรู้: TSU รับใช้สังคม'), findsOneWidget);
       expect(find.text('เลือก'), findsOneWidget);
+    });
+
+    testWidgets('มีเวลาสิ้นสุด (วันเดียวกัน) → แสดงเป็นช่วง เริ่ม–สิ้นสุด', (tester) async {
+      await _open(tester, activity: _activity(endAt: DateTime(2026, 11, 20, 12, 30)));
+
+      expect(find.text('20 พ.ย. 2569 เวลา 09:00–12:30 น.'), findsOneWidget);
+    });
+
+    testWidgets('มีเวลาสิ้นสุดข้ามวัน → แสดงวันที่ของทั้งสองปลาย', (tester) async {
+      await _open(tester, activity: _activity(endAt: DateTime(2026, 11, 22, 16, 0)));
+
+      expect(
+        find.text('20 พ.ย. 2569 เวลา 09:00 น. – 22 พ.ย. 2569 เวลา 16:00 น.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('ไม่มีเวลาสิ้นสุด → แสดงแค่เวลาเริ่มเหมือนเดิม', (tester) async {
+      await _open(tester, activity: _activity());
+
+      expect(find.text('20 พ.ย. 2569 เวลา 09:00 น.'), findsOneWidget);
     });
 
     testWidgets('กิจกรรมที่ผูกหลายรายการเกณฑ์ แสดงครบทุกรายการ', (tester) async {

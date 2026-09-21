@@ -58,12 +58,17 @@ String _twoDigits(int n) => n.toString().padLeft(2, '0');
 
 String _clock(DateTime dt) => '${_twoDigits(dt.hour)}:${_twoDigits(dt.minute)}';
 
-/// "09:00–12:00 น." — เวลาจบคิดจากชั่วโมงของกิจกรรม (ไม่มีช่องเวลาจบในข้อมูล)
+/// "09:00–12:00 น." — ใช้เวลาสิ้นสุดที่กรอกไว้ ถ้าไม่มีจึงประมาณจากชั่วโมงของกิจกรรม
 ///
 /// `start_at` เป็นเวลาไทยแบบไม่มีโซนอยู่แล้ว (ดู backend/app/timeutil.py) จึงใช้ตรง ๆ
 /// ห้ามส่งผ่าน `serverTimeToLocal()` ซึ่งมีไว้สำหรับ timestamp จาก `utcnow()` เท่านั้น
 /// ไม่งั้นทุกกิจกรรมจะเลื่อนไป 7 ชม.
 String activityTimeRange(Activity a) {
+  final end = a.endAt;
+  if (end != null && end.isAfter(a.startAt)) {
+    // ข้ามวันแสดงแค่เวลา จะได้ไม่ยาวเกินบรรทัดบนการ์ด — วันที่จบดูในรายละเอียดกิจกรรม
+    return '${_clock(a.startAt)}–${_clock(end)} น.';
+  }
   final minutes = (a.hours * 60).round();
   if (minutes <= 0) return '${_clock(a.startAt)} น.';
   return '${_clock(a.startAt)}–${_clock(a.startAt.add(Duration(minutes: minutes)))} น.';
@@ -134,6 +139,7 @@ CalendarStudentAction calendarStudentAction(
 }
 
 DateTime _endOf(Activity a) =>
+    a.endAt ??
     a.startAt.add(Duration(minutes: math.max((a.hours * 60).round(), 1)));
 
 /// กิจกรรมที่สมัครไว้แล้วซึ่งช่วงเวลาทับกับ [target] ในวันเดียวกัน (ไม่นับตัวมันเอง)

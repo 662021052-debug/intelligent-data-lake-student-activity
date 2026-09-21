@@ -127,7 +127,7 @@ class ActivityDetailDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               _block(context, 'วันเวลาและสถานที่', [
-                _row(Icons.event, formatThaiDateTime(activity.startAt)),
+                _row(Icons.event, formatThaiDateTimeRange(activity.startAt, activity.endAt)),
                 _row(Icons.place_outlined, activity.location),
               ]),
               _block(context, 'ชั่วโมงที่ได้', [

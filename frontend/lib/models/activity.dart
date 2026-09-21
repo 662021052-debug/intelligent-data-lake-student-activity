@@ -7,6 +7,10 @@ class Activity {
   final bool isRequired;
   final int maxParticipants;
   final DateTime startAt;
+
+  /// เวลาสิ้นสุด (เวลาไทยแบบไม่มีโซนเหมือน [startAt]) — null = ไม่ได้ระบุ · ข้อมูลประกอบ
+  /// สำหรับแสดงผล ชั่วโมงที่ได้ยังมาจาก [hours] เท่านั้น
+  final DateTime? endAt;
   final String location;
   final int? createdBy;
   final String approvalStatus; // pending | approved
@@ -35,6 +39,7 @@ class Activity {
     this.isRequired = false,
     required this.maxParticipants,
     required this.startAt,
+    this.endAt,
     required this.location,
     this.createdBy,
     this.approvalStatus = 'pending',
@@ -58,6 +63,7 @@ class Activity {
         isRequired: isRequired,
         maxParticipants: maxParticipants,
         startAt: startAt,
+        endAt: endAt,
         location: location,
         createdBy: createdBy,
         approvalStatus: approvalStatus ?? this.approvalStatus,
@@ -77,6 +83,7 @@ class Activity {
         isRequired: json['is_required'] as bool? ?? false,
         maxParticipants: json['max_participants'] as int,
         startAt: DateTime.parse(json['start_at'] as String),
+        endAt: json['end_at'] == null ? null : DateTime.parse(json['end_at'] as String),
         location: json['location'] as String,
         createdBy: json['created_by'] as int?,
         approvalStatus: json['approval_status'] as String? ?? 'pending',
@@ -96,6 +103,7 @@ class Activity {
         'is_required': isRequired,
         'max_participants': maxParticipants,
         'start_at': startAt.toIso8601String(),
+        'end_at': endAt?.toIso8601String(),
         'location': location,
       };
 }

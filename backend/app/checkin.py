@@ -86,8 +86,9 @@ def checkin_window(activity: Activity) -> tuple[datetime, datetime]:
     """ช่วงเวลาที่เช็กอินได้ของกิจกรรมนี้ — เวลาไทยแบบไม่มีโซน เหมือน start_at
     (ดู app/timeutil.py) จึงต้องเทียบกับ ``now_th_naive()`` ไม่ใช่ ``utcnow()``.
 
-    activity ไม่มี `end_at` ในสคีมา จึงประมาณเวลาจบจาก `activity.hours`
-    (จำนวนชั่วโมงที่กิจกรรมให้ = ความยาวกิจกรรม) แล้วบวกเวลาผ่อนผันท้ายงาน
+    ประมาณเวลาจบจาก `activity.hours` (จำนวนชั่วโมงที่กิจกรรมให้ = ความยาวกิจกรรม)
+    แล้วบวกเวลาผ่อนผันท้ายงาน — `activity.end_at` (ถ้ากรอก) เป็นข้อมูลประกอบสำหรับ
+    แสดงผลเท่านั้น จงใจไม่เอามาคำนวณช่วงเช็กอิน เพื่อไม่ให้กติกาเช็กอินเปลี่ยนเงียบ ๆ
     """
     opens_at = activity.start_at - timedelta(minutes=settings.checkin_open_before_minutes)
     duration = timedelta(hours=max(activity.hours or 0, 0))

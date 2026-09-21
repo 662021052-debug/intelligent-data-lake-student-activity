@@ -66,6 +66,26 @@ def _validate_not_backdated(start_at: datetime) -> None:
         raise HTTPException(status_code=400, detail=BACKDATED_DETAIL)
 
 
+END_BEFORE_START_DETAIL = "เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มกิจกรรม"
+
+
+def _validate_end_after_start(start_at: datetime, end_at: Optional[datetime]) -> None:
+    """ถ้าระบุเวลาสิ้นสุด ต้องอยู่หลังเวลาเริ่ม (เว้นว่างได้ผ่านเสมอ)
+
+    ตอบ 422 เพราะเป็นความสัมพันธ์ระหว่างสองฟิลด์ของ body ที่ผิดกัน (ต่างจากกันย้อนหลัง
+    ที่เป็นกติกาเรื่อง "วันนี้" จึงเป็น 400) · ค่าที่มีโซนเวลาแปลงเป็นเวลาไทยก่อนเทียบ
+    เพราะเทียบ naive กับ aware ตรง ๆ จะ error
+    """
+    if end_at is None:
+        return
+
+    def to_th_naive(dt: datetime) -> datetime:
+        return dt.astimezone(TZ_TH).replace(tzinfo=None) if dt.tzinfo else dt
+
+    if to_th_naive(end_at) <= to_th_naive(start_at):
+        raise HTTPException(status_code=422, detail=END_BEFORE_START_DETAIL)
+
+
 def _ensure_visible(activity: Activity, current_user: User) -> None:
     """Raise 403 if `current_user` isn't allowed to see/manage this activity."""
     if current_user.role == UserRole.student:
@@ -275,6 +295,7 @@ def create_activity(
     current_user: User = Depends(require_writer),
 ):
     _validate_not_backdated(payload.start_at)
+    _validate_end_after_start(payload.start_at, payload.end_at)
     requirement_ids = _validate_requirement_ids(session, payload.requirement_ids)
     activity = Activity.model_validate(payload.model_dump(exclude={"requirement_ids"}))
     activity.created_by = current_user.id
@@ -461,6 +482,12 @@ def update_activity(
         microsecond=0
     ):
         _validate_not_backdated(new_start)
+    # เทียบกับค่าที่จะเป็นหลังบันทึก: ส่งมาแค่ฝั่งเดียวก็ต้องเข้ากับอีกฝั่งที่มีอยู่เดิม
+    # (เช่น เลื่อนเวลาเริ่มไปเลยเวลาสิ้นสุดเดิม)
+    _validate_end_after_start(
+        data.get("start_at") or activity.start_at,
+        data["end_at"] if "end_at" in data else activity.end_at,
+    )
 
     for key, value in data.items():
         setattr(activity, key, value)

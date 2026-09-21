@@ -82,6 +82,7 @@ void main() {
       final seats = top(find.text('จำนวนที่รับ'));
       // เทียบกรอบของช่อง ไม่ใช่ตัว label — ช่องวันเวลามีค่าอยู่แล้ว label จึงลอยขึ้นคนละระดับกับช่องว่าง
       final date = top(find.ancestor(of: find.text('วันเวลาเริ่มกิจกรรม'), matching: find.byType(InputDecorator)).first);
+      final end = top(find.ancestor(of: find.text('เวลาสิ้นสุด (ไม่บังคับ)'), matching: find.byType(InputDecorator)).first);
       final place = top(_field('สถานที่'));
       final type = top(find.textContaining('ประเภทกิจกรรม'));
 
@@ -89,9 +90,10 @@ void main() {
       expect(block, lessThan(hours));
       expect(hours, lessThan(date));
       expect(date, lessThan(type));
-      // จอกว้าง: ชั่วโมงคู่จำนวนรับ และวันเวลาคู่สถานที่ อยู่แถวเดียวกัน
+      // จอกว้าง: ชั่วโมงคู่จำนวนรับ และเวลาเริ่มคู่เวลาสิ้นสุด อยู่แถวเดียวกัน แล้วสถานที่ตามลงมา
       expect(hours, moreOrLessEquals(seats, epsilon: 2));
-      expect(date, moreOrLessEquals(place, epsilon: 2));
+      expect(date, moreOrLessEquals(end, epsilon: 2));
+      expect(date, lessThan(place));
     });
 
     testWidgets('บล็อกเกณฑ์มีหัวข้อ + คำอธิบาย และรวมทุกทางที่ให้ชั่วโมงไว้ข้างใน', (tester) async {
@@ -244,8 +246,10 @@ void main() {
 
       expect(body.keys.toSet(), {
         'name', 'activity_type', 'subcategory_id', 'requirement_ids', 'hours',
-        'is_required', 'max_participants', 'start_at', 'location',
+        'is_required', 'max_participants', 'start_at', 'end_at', 'location',
       });
+      // ไม่ระบุเวลาสิ้นสุด = ส่ง null (โหมดแก้ไขใช้ null นี้ล้างค่าเดิม)
+      expect(body['end_at'], isNull);
       expect(body['activity_type'], 'วิชาการ');
       expect(body['requirement_ids'], [31, 32], reason: 'เรียงเหมือนเดิม');
       expect(body['start_at'], '2026-10-14T09:00:00.000');
@@ -268,5 +272,102 @@ void main() {
     expect(tester.getTopLeft(find.text('จำนวนที่รับ')).dy,
         greaterThan(tester.getTopLeft(find.text('ชั่วโมงที่ได้รับ')).dy),
         reason: 'จอแคบซ้อนเป็นแถวเดียวต่อช่อง');
+  });
+
+  group('เวลาสิ้นสุดกิจกรรม (end_at)', () {
+    Finder endBox() =>
+        find.ancestor(of: find.text('เวลาสิ้นสุด (ไม่บังคับ)'), matching: find.byType(InputDecorator)).first;
+
+    test('payload ส่ง end_at เป็น ISO เมื่อระบุ', () {
+      final body = activityFormPayload(
+        name: 'อบรม',
+        activityType: 'วิชาการ',
+        subcategoryId: null,
+        requirementIds: {31},
+        hours: 3,
+        isRequired: false,
+        maxParticipants: 50,
+        startAt: DateTime(2026, 10, 14, 9),
+        endAt: DateTime(2026, 10, 14, 12),
+        location: 'หอประชุม',
+      );
+      expect(body['end_at'], '2026-10-14T12:00:00.000');
+    });
+
+    test('กติกาตรงกับ backend: ว่างผ่าน · หลังเวลาเริ่มผ่าน · เท่ากันหรือก่อนไม่ผ่าน', () {
+      final start = DateTime(2026, 10, 14, 9);
+      expect(isEndBeforeStart(start, null), isFalse);
+      expect(isEndBeforeStart(start, DateTime(2026, 10, 14, 9, 1)), isFalse);
+      expect(isEndBeforeStart(start, DateTime(2026, 10, 15, 8)), isFalse);
+      expect(isEndBeforeStart(start, start), isTrue);
+      expect(isEndBeforeStart(start, DateTime(2026, 10, 14, 8, 59)), isTrue);
+    });
+
+    testWidgets('สร้างใหม่: มีช่องเวลาสิ้นสุด ค่าเริ่มต้น "ไม่ระบุ" และไม่มีปุ่มล้าง', (tester) async {
+      await _pump(tester);
+      expect(find.text('เวลาสิ้นสุด (ไม่บังคับ)'), findsOneWidget);
+      expect(find.descendant(of: endBox(), matching: find.text('ไม่ระบุ')), findsOneWidget);
+      expect(find.byTooltip('ล้างเวลาสิ้นสุด'), findsNothing);
+      expect(find.text(kEndBeforeStartMessage), findsNothing);
+    });
+
+    testWidgets('แก้ไข: เวลาสิ้นสุดเดิมแสดงเป็นวันเวลา และกดล้างแล้วกลับเป็น "ไม่ระบุ"', (tester) async {
+      final existing = Activity(
+        id: 9,
+        name: 'อบรม',
+        activityType: 'วิชาการ',
+        hours: 3,
+        maxParticipants: 50,
+        startAt: DateTime(2026, 12, 1, 9),
+        endAt: DateTime(2026, 12, 1, 12),
+        location: 'หอประชุม',
+        requirementIds: const [31],
+      );
+      await _pump(tester, existing: existing);
+      expect(find.descendant(of: endBox(), matching: find.text('1 ธ.ค. 2569 เวลา 12:00 น.')), findsOneWidget);
+
+      await tester.tap(find.byTooltip('ล้างเวลาสิ้นสุด'));
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: endBox(), matching: find.text('ไม่ระบุ')), findsOneWidget);
+    });
+
+    testWidgets('เวลาสิ้นสุดไม่หลังเวลาเริ่ม → เตือนใต้ช่อง และกดบันทึกแล้วไม่ยิง API', (tester) async {
+      final existing = Activity(
+        id: 9,
+        name: 'อบรม',
+        activityType: 'วิชาการ',
+        hours: 3,
+        maxParticipants: 50,
+        startAt: DateTime(2026, 12, 1, 9),
+        endAt: DateTime(2026, 12, 1, 9), // เท่ากับเวลาเริ่ม = ไม่ผ่าน
+        location: 'หอประชุม',
+        requirementIds: const [31],
+      );
+      await _pump(tester, existing: existing);
+      expect(find.text(kEndBeforeStartMessage), findsOneWidget);
+
+      // ถ้าหลุดไปยิง API จะพังด้วย binding ของเทสต์ (ไม่มีเครือข่าย) → takeException ไม่ว่าง
+      await tester.tap(find.text('บันทึก'));
+      await tester.pumpAndSettle();
+      expect(find.text(kEndBeforeStartMessage), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('จอ 360px: มีช่องเวลาสิ้นสุดพร้อมค่าและปุ่มล้าง ไม่ล้น', (tester) async {
+      final existing = Activity(
+        id: 9,
+        name: 'อบรม',
+        activityType: 'วิชาการ',
+        hours: 3,
+        maxParticipants: 50,
+        startAt: DateTime(2026, 12, 1, 9),
+        endAt: DateTime(2026, 12, 3, 16, 30),
+        location: 'หอประชุม',
+        requirementIds: const [31],
+      );
+      await _pump(tester, existing: existing, size: const Size(360, 740));
+      expect(tester.takeException(), isNull);
+      expect(find.byTooltip('ล้างเวลาสิ้นสุด'), findsOneWidget);
+    });
   });
 }

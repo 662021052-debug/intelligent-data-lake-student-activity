@@ -47,6 +47,7 @@ Map<String, dynamic> activityFormPayload({
   required bool isRequired,
   required int maxParticipants,
   required DateTime startAt,
+  DateTime? endAt,
   required String location,
 }) =>
     {
@@ -58,8 +59,18 @@ Map<String, dynamic> activityFormPayload({
       'is_required': isRequired,
       'max_participants': maxParticipants,
       'start_at': startAt.toIso8601String(),
+      // ส่งเสมอแม้ว่าง (null) — โหมดแก้ไขใช้ null นี้ล้างเวลาสิ้นสุดเดิมที่ผู้ใช้กดลบออก
+      'end_at': endAt?.toIso8601String(),
       'location': location,
     };
+
+/// ข้อความเตือนเมื่อเวลาสิ้นสุดไม่อยู่หลังเวลาเริ่ม — ถ้อยคำเดียวกับที่ backend ตอบ (422)
+const kEndBeforeStartMessage = 'เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มกิจกรรม';
+
+/// เวลาสิ้นสุดที่กรอกไว้ผิดไหม (ว่าง = ไม่ผิด) — ตัดสินตรงกับ backend: ต้อง "หลัง" เท่านั้น
+/// เท่ากันก็ไม่ผ่าน
+bool isEndBeforeStart(DateTime startAt, DateTime? endAt) =>
+    endAt != null && !endAt.isAfter(startAt);
 
 /// ชื่อรายการเกณฑ์ + เส้นทาง "ชุดเกณฑ์ › กลุ่ม" ของทุกรายการ — ใช้ทำ pill ในฟอร์มกิจกรรม
 Map<int, ({String name, String path})> requirementPaths(List<CriteriaSet> criteriaSets) => {
@@ -111,16 +122,34 @@ String activityCriteriaLabel(
   List<CriteriaSet> criteriaSets,
   Activity activity,
 ) {
+  final lines = activityCriteriaLines(categories, criteriaSets, activity);
+  if (lines.isEmpty) return '-';
+  return lines.length == 1 ? lines.first.name : '${lines.first.name} +${lines.length - 1}';
+}
+
+/// ทีละรายการที่กิจกรรมนับชั่วโมงให้ — ต้นทางเดียวของทั้งป้ายสั้นในตาราง/การ์ด
+/// ([activityCriteriaLabel]) และรายการเต็มในไดอะล็อกยืนยันการสมัคร
+///
+/// ว่าง = ยังไม่ได้กำหนดหมวด (ไม่ผูกรายการเกณฑ์และไม่มีหมวดย่อยที่หาเจอ)
+List<({String name, String? learningUnit})> activityCriteriaLines(
+  List<HourCategory> categories,
+  List<CriteriaSet> criteriaSets,
+  Activity activity,
+) {
   if (activity.requirementIds.isEmpty) {
-    return subcategoryPath(categories, activity.subcategoryId);
+    final path = subcategoryPath(categories, activity.subcategoryId);
+    return path == '-' ? const [] : [(name: path, learningUnit: null)];
   }
   final byId = requirementsById(criteriaSets);
-  final names = [
+  final lines = [
     for (final id in activity.requirementIds)
-      if (byId[id] != null) byId[id]!.name,
+      if (byId[id] != null) (name: byId[id]!.name, learningUnit: byId[id]!.learningUnitName),
   ];
-  if (names.isEmpty) return '${activity.requirementIds.length} รายการเกณฑ์';
-  return names.length == 1 ? names.first : '${names.first} +${names.length - 1}';
+  if (lines.isEmpty) {
+    // ผูกไว้แต่ชุดเกณฑ์ที่โหลดมายังไม่มีรายการนั้น (เช่น ชุดถูกปิด) — บอกจำนวนเท่าที่รู้
+    return [(name: '${activity.requirementIds.length} รายการเกณฑ์', learningUnit: null)];
+  }
+  return lines;
 }
 
 /// กิจกรรมนี้มีปุ่ม "อนุมัติ" ให้คนที่กำลังดูอยู่ไหม
@@ -935,6 +964,9 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
   Set<int> _requirementIds = {};
   bool _isRequired = false;
   late DateTime _startAt;
+
+  /// เวลาสิ้นสุด — null = ไม่ระบุ (ไม่บังคับ)
+  DateTime? _endAt;
   bool _saving = false;
   String? _error;
 
@@ -966,6 +998,7 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
             : null);
     _isRequired = e?.isRequired ?? false;
     _startAt = e?.startAt ?? DateTime.now().add(const Duration(days: 1));
+    _endAt = e?.endAt;
     // pill ของรายการเกณฑ์บอกชั่วโมงที่นิสิตจะได้ — ต้องเปลี่ยนตามช่องชั่วโมงทันที
     _hoursController.addListener(_onHoursChanged);
   }
@@ -1011,6 +1044,39 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
     });
   }
 
+  /// เลือกเวลาสิ้นสุด — เริ่มที่วันเดียวกับเวลาเริ่ม (กิจกรรมส่วนใหญ่จบวันเดียวกัน)
+  /// และเลือกย้อนไปก่อนวันเริ่มไม่ได้ · ชิ้นเวลาเริ่มต้นที่ +1 ชม. จากเวลาเริ่ม
+  /// เป็นแค่ค่าตั้งต้นของช่องพิมพ์ ไม่ผูกกับช่อง "ชั่วโมงที่ได้รับ"
+  Future<void> _pickEndDateTime() async {
+    final firstDay = DateTime(_startAt.year, _startAt.month, _startAt.day);
+    final initial = _endAt ?? _startAt.add(const Duration(hours: 1));
+    final initialDay = DateTime(initial.year, initial.month, initial.day);
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initialDay.isBefore(firstDay) ? firstDay : initialDay,
+      firstDate: firstDay,
+      lastDate: DateTime(firstDay.year + 3, firstDay.month, firstDay.day),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+      initialEntryMode: TimePickerEntryMode.inputOnly,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (time == null) return;
+    setState(() {
+      _endAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    });
+  }
+
+  /// error ใต้ช่อง "เวลาสิ้นสุด" — คำนวณสดทุกครั้งที่วาด จึงเปลี่ยนตามทันทีแม้ผู้ใช้
+  /// ไปแก้เวลาเริ่มทีหลัง
+  String? get _endError => isEndBeforeStart(_startAt, _endAt) ? kEndBeforeStartMessage : null;
+
   Future<void> _submit() async {
     // ตรวจทุกข้อพร้อมกันแล้วบอกทุกข้อที่ขาดในรอบเดียว — ไม่ให้แก้ข้อหนึ่งแล้วค่อยเจอข้อถัดไป
     final fieldsValid = _formKey.currentState!.validate();
@@ -1024,7 +1090,8 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
         _pickerOpen = true;
       });
     }
-    if (!fieldsValid || missingCriteria) return;
+    // กติกาเดียวกับ backend (422) — ข้อความขึ้นใต้ช่องเวลาสิ้นสุดอยู่แล้ว ไม่ต้องยิง API
+    if (!fieldsValid || missingCriteria || _endError != null) return;
     final hours = double.tryParse(_hoursController.text.trim());
     if (hours == null || hours <= 0) {
       setState(() => _error = 'กรุณากรอกจำนวนชั่วโมงมากกว่า 0');
@@ -1051,6 +1118,7 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
       isRequired: _isRequired,
       maxParticipants: int.parse(_maxParticipantsController.text.trim()),
       startAt: _startAt,
+      endAt: _endAt,
       location: _locationController.text.trim(),
     );
     try {
@@ -1146,12 +1214,52 @@ class _ActivityFormDialogState extends State<ActivityFormDialog> {
                 ),
               ),
             ),
-            TextFormField(
-              controller: _locationController,
-              decoration: const InputDecoration(labelText: 'สถานที่', hintText: 'เช่น หอประชุม'),
-              validator: requiredValidator,
+            InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'เวลาสิ้นสุด (ไม่บังคับ)',
+                errorText: _endError,
+                errorMaxLines: 2,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: _pickEndDateTime,
+                      child: Text(
+                        _endAt == null ? 'ไม่ระบุ' : formatThaiDateTime(_endAt!),
+                        style: _endAt == null
+                            ? Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(color: AppColors.muted)
+                            : null,
+                      ),
+                    ),
+                  ),
+                  if (_endAt != null)
+                    InkWell(
+                      onTap: () => setState(() => _endAt = null),
+                      child: const Tooltip(
+                        message: 'ล้างเวลาสิ้นสุด',
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 6),
+                          child: Icon(Icons.close, size: 18),
+                        ),
+                      ),
+                    ),
+                  InkWell(
+                    onTap: _pickEndDateTime,
+                    child: const Icon(Icons.event_available, size: 18),
+                  ),
+                ],
+              ),
             ),
           ],
+        ),
+        TextFormField(
+          controller: _locationController,
+          decoration: const InputDecoration(labelText: 'สถานที่', hintText: 'เช่น หอประชุม'),
+          validator: requiredValidator,
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,

@@ -40,6 +40,7 @@ Activity _activity({
   int participantCount = 0,
   bool isHidden = false,
   bool? canManage,
+  DateTime? endAt,
 }) =>
     Activity(
       id: id,
@@ -49,6 +50,7 @@ Activity _activity({
       maxParticipants: maxParticipants,
       participantCount: participantCount,
       startAt: startAt,
+      endAt: endAt,
       location: location,
       approvalStatus: approvalStatus,
       isHidden: isHidden,
@@ -209,6 +211,15 @@ void main() {
       expect(activityTimeRange(_activity(startAt: DateTime(2026, 9, 14, 13), hours: 1.5)),
           '13:00–14:30 น.');
       expect(activityTimeRange(_activity(startAt: DateTime(2026, 9, 14, 9), hours: 0)), '09:00 น.');
+    });
+
+    test('มีเวลาสิ้นสุด → ใช้ค่านั้นแทนที่ประมาณจากชั่วโมง', () {
+      final a = _activity(
+        startAt: DateTime(2026, 9, 14, 9),
+        endAt: DateTime(2026, 9, 14, 10, 15),
+        hours: 3,
+      );
+      expect(activityTimeRange(a), '09:00–10:15 น.');
     });
 
     test('ที่นั่ง: เหลือกี่ที่ / เต็มแล้ว', () {

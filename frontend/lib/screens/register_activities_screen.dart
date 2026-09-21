@@ -20,7 +20,11 @@ import 'app_shell.dart';
 // ใช้กฎ "วันไหนถือว่าผ่านไปแล้ว" ร่วมกับหน้าจัดการกิจกรรม จะได้มีนิยามเดียว —
 // ไม่งั้นสองหน้าอาจตัดวันคนละเวลาแล้วนิสิตเห็นรายการไม่ตรงกัน
 import 'activities_screen.dart'
-    show activityCriteriaLabel, activityFirstSelectableDate, isBackdatedActivity;
+    show
+        activityCriteriaLabel,
+        activityCriteriaLines,
+        activityFirstSelectableDate,
+        isBackdatedActivity;
 
 /// กิจกรรมนี้ยังไม่ผ่านวันจัดใช่ไหม (เทียบระดับวัน เหมือนกฎฝั่ง backend)
 bool isUpcomingActivity(Activity a, [DateTime? now]) =>
@@ -56,6 +60,33 @@ String seatsLabel(Activity a) {
   final remaining = a.maxParticipants - a.participantCount;
   if (remaining <= 0) return 'เต็มแล้ว (รับ ${a.maxParticipants} คน)';
   return 'สมัครแล้ว ${a.participantCount}/${a.maxParticipants} คน • เหลือ $remaining ที่';
+}
+
+/// จำนวนรายการเกณฑ์ที่ไดอะล็อกยืนยันแสดงเต็ม ๆ — เกินนี้สรุปเป็น "และอีก n รายการ"
+/// ไม่งั้นไดอะล็อกสูงเกินจอเล็ก (AlertDialog ของ confirmAction ไม่เลื่อน)
+const kRegisterCriteriaMaxLines = 4;
+
+/// บรรทัด "เข้าหมวด ..." ของไดอะล็อกยืนยันการสมัคร
+///
+/// ใช้รายการเดียวกับป้ายบนการ์ด ([activityCriteriaLines]) จึงตรงกันเสมอ · รายการเดียว
+/// อยู่บรรทัดเดียว หลายรายการขึ้นบรรทัดละรายการ · ไม่มีหมวดเลยไม่โชว์ "-" ลอย ๆ
+String registerCriteriaText(
+  List<HourCategory> categories,
+  List<CriteriaSet> criteriaSets,
+  Activity activity,
+) {
+  final lines = activityCriteriaLines(categories, criteriaSets, activity);
+  if (lines.isEmpty) return 'ยังไม่กำหนดหมวด';
+  String one(({String name, String? learningUnit}) l) =>
+      l.learningUnit == null ? l.name : '${l.name} (หน่วยการเรียนรู้: ${l.learningUnit})';
+  if (lines.length == 1) return 'เข้าหมวด ${one(lines.first)}';
+  final shown = lines.take(kRegisterCriteriaMaxLines).map((l) => '• ${one(l)}');
+  final hidden = lines.length - kRegisterCriteriaMaxLines;
+  return [
+    'เข้าหมวด',
+    ...shown,
+    if (hidden > 0) 'และอีก $hidden รายการ',
+  ].join('\n');
 }
 
 class RegisterActivitiesScreen extends StatefulWidget {
@@ -137,6 +168,10 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
   }
 
   /// สรุปสถานะหมวดของกิจกรรมนี้เทียบกับชั่วโมงที่นิสิตมีอยู่ (null ถ้าไม่รู้จักหมวด)
+  ///
+  /// อิงหมวดย่อยโครงเดิมเท่านั้น: `/students/me/hours-summary` สรุปตามหมวดเดิม ไม่มี
+  /// ยอดต่อรายการเกณฑ์ กิจกรรมที่ผูกแต่ requirement จึงไม่มีบรรทัดนี้ (ตั้งใจ — จะโชว์ได้
+  /// ต้องคำนวณยอดต่อรายการเกณฑ์เพิ่ม ซึ่งเป็นงานฝั่ง resolver/gold ไม่ใช่งานหน้านี้)
   String? _categoryProgress(Activity a) {
     final parent = parentCategoryOf(_categories, a.subcategoryId);
     if (parent == null) return null;
@@ -181,15 +216,14 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
   }
 
   Future<void> _register(Activity a) async {
-    final categoryPath = subcategoryPath(_categories, a.subcategoryId);
     final progress = _categoryProgress(a);
     final confirmed = await confirmAction(
       context,
       title: 'ยืนยันการสมัคร',
       message: 'สมัครเข้าร่วม "${a.name}"\n'
-          'วันเวลา ${formatThaiDateTime(a.startAt)} • ${a.location}\n\n'
+          'วันเวลา ${formatThaiDateTimeRange(a.startAt, a.endAt)} • ${a.location}\n\n'
           'ได้ ${formatHours(a.hours)} ชั่วโมง\n'
-          'เข้าหมวด $categoryPath',
+          '${registerCriteriaText(_categories, _criteriaSets, a)}',
       detail: [
         'ชั่วโมงจะถูกนับเมื่อหลักฐานผ่านการอนุมัติ',
         ?progress,
@@ -372,7 +406,7 @@ class _RegisterActivitiesScreenState extends State<RegisterActivitiesScreen> {
             runSpacing: AppSpacing.sm,
             children: [
               MetaItem(icon: Icons.schedule, label: 'ได้ ${formatHours(a.hours)} ชม.'),
-              MetaItem(icon: Icons.event, label: formatThaiDateTime(a.startAt)),
+              MetaItem(icon: Icons.event, label: formatThaiDateTimeRange(a.startAt, a.endAt)),
               MetaItem(icon: Icons.place_outlined, label: a.location),
               MetaItem(icon: Icons.groups_outlined, label: seatsLabel(a)),
             ],
