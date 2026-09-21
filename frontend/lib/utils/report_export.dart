@@ -31,15 +31,88 @@ String reportFileName(ReportFormat format, [DateTime? now]) {
   return 'รายงานชั่วโมงกิจกรรม_$stamp.${format.extension}';
 }
 
-/// ตัวกรองที่ส่งไปกับคำขอรายงาน
+/// ตัวกรองที่ส่งไปกับคำขอรายงาน — ตรงกับตัวกรองที่แสดงบนแดชบอร์ด (คณะ/ชั้นปี/ภาคเรียน)
 ///
-/// **ภาคเรียนไม่ถูกส่งไปด้วยโดยตั้งใจ** — `gold_student_hours` เป็นยอดสะสมทั้งหลักสูตร
-/// ไม่ได้แบ่งตามภาคเรียน ถ้าแอบส่งไปแล้ว backend เมิน ผู้ใช้จะเข้าใจผิดว่าไฟล์ที่ได้
-/// กรองภาคเรียนมาแล้ว
-Map<String, String> reportQuery({String? faculty, int? yearLevel}) => {
+/// **ภาคเรียนเปลี่ยนความหมายของ "ชั่วโมงที่ได้"**: นับเฉพาะชั่วโมงในภาคนั้น แต่ "ชั่วโมงที่
+/// ต้องการ" ยังเป็นของทั้งหลักสูตร (ไฟล์ที่ได้เขียนบอกไว้ที่หัวรายงานแล้ว)
+Map<String, String> reportQuery({String? faculty, int? yearLevel, int? semester}) => {
       'faculty': ?faculty,
       if (yearLevel != null) 'year_level': '$yearLevel',
+      if (semester != null) 'semester': '$semester',
     };
+
+/// รูปแบบของ PDF — Excel เป็นแบบละเอียดเสมอ (เอาไปกรอง/pivot ต่อได้)
+enum ReportMode { summary, detail }
+
+extension ReportModeInfo on ReportMode {
+  /// ค่าที่ backend รับใน query `mode`
+  String get apiValue => this == ReportMode.summary ? 'summary' : 'detail';
+
+  String get label => this == ReportMode.summary ? 'สรุปต่อคน' : 'แบบละเอียด';
+
+  String get description => this == ReportMode.summary
+      ? '1 แถวต่อนิสิต 1 คน — ชั่วโมงรวม จำนวนหมวดที่ครบ และสถานะรวม'
+      : '1 แถวต่อ 1 หมวดกิจกรรม — เห็นชั่วโมงที่ได้/ที่ต้องการของทุกหมวด';
+}
+
+/// query ของปุ่ม "ส่งออก PDF" = ตัวกรอง + รูปแบบ
+Map<String, String> pdfReportQuery({
+  String? faculty,
+  int? yearLevel,
+  int? semester,
+  ReportMode mode = ReportMode.summary,
+}) =>
+    {...reportQuery(faculty: faculty, yearLevel: yearLevel, semester: semester), 'mode': mode.apiValue};
+
+/// จำนวนแถว/หน้าโดยประมาณของแต่ละรูปแบบ (จาก `/reports/student-hours/count`)
+/// ไว้เตือนผู้ใช้ก่อนออกไฟล์ใหญ่ โดยยังไม่ต้องสร้างไฟล์
+class ReportCounts {
+  const ReportCounts({
+    required this.students,
+    required this.summaryRows,
+    required this.detailRows,
+    required this.summaryPages,
+    required this.detailPages,
+    required this.largeThreshold,
+  });
+
+  factory ReportCounts.fromJson(Map<String, dynamic> json) => ReportCounts(
+        students: json['students'] as int,
+        summaryRows: json['summary_rows'] as int,
+        detailRows: json['detail_rows'] as int,
+        summaryPages: json['summary_pages'] as int,
+        detailPages: json['detail_pages'] as int,
+        largeThreshold: json['large_threshold'] as int,
+      );
+
+  final int students;
+  final int summaryRows;
+  final int detailRows;
+  final int summaryPages;
+  final int detailPages;
+  final int largeThreshold;
+
+  int rowsFor(ReportMode mode) => mode == ReportMode.summary ? summaryRows : detailRows;
+  int pagesFor(ReportMode mode) => mode == ReportMode.summary ? summaryPages : detailPages;
+
+  /// เกินเกณฑ์ (มากกว่า ไม่ใช่เท่ากับ) ที่ควรเตือนก่อนออกไฟล์
+  bool isLarge(ReportMode mode) => rowsFor(mode) > largeThreshold;
+
+  /// ข้อความเตือนของรูปแบบนั้น (null = ไม่ต้องเตือน)
+  String? warningFor(ReportMode mode) {
+    if (!isLarge(mode)) return null;
+    final rows = _thousands(rowsFor(mode));
+    final pages = _thousands(pagesFor(mode));
+    return 'ไฟล์นี้จะมีประมาณ $rows แถว (ราว $pages หน้า) ใช้เวลาสร้างนานและไฟล์ใหญ่ '
+        'แนะนำให้กรองคณะ/ชั้นปีก่อน'
+        '${mode == ReportMode.detail ? ' หรือเลือกแบบสรุปต่อคน' : ''}';
+  }
+
+  static String _thousands(int n) => n.toString().replaceAllMapped(
+        RegExp(r'\B(?=(\d{3})+(?!\d))'),
+        (m) => ',',
+      );
+}
 
 /// ดาวน์โหลดข้อมูลดิบของ Data Lake (เฉพาะ admin) — ต่างจาก [ReportFormat] ที่เป็นรายงานสรุปจาก Gold
 ///

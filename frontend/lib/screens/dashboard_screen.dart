@@ -18,6 +18,7 @@ import '../widgets/admin_console.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/app_data_table.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/report_pdf_dialog.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/kpi_card.dart';
 import '../widgets/status_chip.dart';
@@ -214,13 +215,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _open(Widget screen) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
-  /// ดาวน์โหลดรายงานตามตัวกรองที่เลือกอยู่ (คณะ/ชั้นปี)
+  /// จำนวนแถว/หน้าของรายงานตามตัวกรองที่เลือกอยู่ — ดึงไม่ได้ก็คืน null (ยังออกไฟล์ได้ แค่ไม่มีคำเตือน)
+  Future<ReportCounts?> _fetchReportCounts() async {
+    try {
+      return await ApiService.fetchObject(
+        '/reports/student-hours/count',
+        ReportCounts.fromJson,
+        query: reportQuery(faculty: _faculty, yearLevel: _yearLevel),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// ดาวน์โหลดรายงานตามตัวกรองที่เลือกอยู่ (คณะ/ชั้นปี/ภาคเรียน)
+  ///
+  /// PDF ถามรูปแบบก่อน (สรุปต่อคน/ละเอียด) พร้อมเตือนถ้าไฟล์จะใหญ่ · Excel เป็นแบบละเอียดเสมอ
   Future<void> _export(ReportFormat format) async {
+    ReportMode? mode;
+    if (format == ReportFormat.pdf) {
+      setState(() => _exporting = format);
+      final counts = await _fetchReportCounts();
+      if (!mounted) return;
+      setState(() => _exporting = null);
+      mode = await showReportPdfDialog(context, filterSummary: _filterSummary, counts: counts);
+      if (mode == null) return; // ยกเลิก
+    }
+    if (!mounted) return;
+
     setState(() => _exporting = format);
     try {
       final bytes = await ApiService.downloadBytes(
         format.path,
-        query: reportQuery(faculty: _faculty, yearLevel: _yearLevel),
+        query: mode == null
+            ? reportQuery(faculty: _faculty, yearLevel: _yearLevel, semester: _semester)
+            : pdfReportQuery(
+                faculty: _faculty, yearLevel: _yearLevel, semester: _semester, mode: mode),
       );
       saveBytesAsFile(bytes, reportFileName(format), format.mediaType);
       if (mounted) showInfoSnackbar(context, 'ดาวน์โหลดไฟล์ ${format.displayName} เรียบร้อย');
@@ -411,12 +441,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// ปุ่มส่งออกรายงาน — อยู่มุมขวาของหัวข้อหน้าเหมือนปุ่มหลักของหน้าจัดการอื่น ๆ
   ///
-  /// ไฟล์ที่ได้ยึดตัวกรองคณะ/ชั้นปีที่เลือกอยู่ (รายงานเป็นชั่วโมง "สะสม" จึงไม่มี
-  /// ภาคเรียนให้กรอง ต่างจากตัวเลขบนหน้าจอ) — บอกไว้ใน tooltip ของปุ่ม
+  /// ไฟล์ที่ได้ยึดตัวกรองคณะ/ชั้นปี/ภาคเรียนที่เลือกอยู่ เหมือนตัวเลขบนหน้าจอ — เลือกภาคเรียนแล้ว
+  /// "ชั่วโมงที่ได้" นับเฉพาะภาคนั้น (ที่หัวรายงานเขียนบอกไว้) · บอกไว้ใน tooltip ของปุ่ม
   List<Widget> _exportButtons() => [
         for (final format in ReportFormat.values)
           Tooltip(
-            message: 'รายงานชั่วโมงสะสมตามคณะ/ชั้นปีที่เลือก',
+            message: 'รายงานชั่วโมงตามคณะ/ชั้นปี/ภาคเรียนที่เลือก',
             child: OutlinedButton.icon(
               onPressed: _anyExporting ? null : () => _export(format),
               icon: _exporting == format

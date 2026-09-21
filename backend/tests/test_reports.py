@@ -228,10 +228,10 @@ def test_pdf_embeds_a_thai_font(client, tokens, world):
 
 def test_pdf_reports_a_clear_error_when_no_thai_font(client, tokens, world, monkeypatch):
     """เครื่องที่ไม่มีฟอนต์ไทยต้องได้ error ที่บอกทางแก้ ไม่ใช่ PDF ที่อ่านไม่ออก"""
-    from app import reports as reports_module
+    from app import report_pdf as report_pdf_module
     from reportlab.pdfbase import pdfmetrics
 
-    monkeypatch.setattr(reports_module, "find_thai_font", lambda: None)
+    monkeypatch.setattr(report_pdf_module, "find_report_fonts", lambda: (None, None))
     # ฟอนต์ที่เคยลงทะเบียนไว้จากเทสต์ก่อนหน้าอยู่ในสถานะ global ของ reportlab
     monkeypatch.setattr(pdfmetrics, "getRegisteredFontNames", lambda: [])
 

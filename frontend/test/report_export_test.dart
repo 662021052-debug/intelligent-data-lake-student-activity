@@ -49,10 +49,77 @@ void main() {
       );
     });
 
-    test('ไม่มี semester ติดไปด้วย — รายงานเป็นยอดสะสม ไม่ได้แบ่งตามภาคเรียน', () {
-      expect(reportQuery(faculty: 'วิทยาศาสตร์', yearLevel: 1).keys, isNot(contains('semester')));
+    test('ภาคเรียนส่งไปด้วย — ต้องตรงกับตัวกรองที่เห็นบนแดชบอร์ด', () {
+      expect(reportQuery(semester: 2), {'semester': '2'});
+      expect(
+        reportQuery(faculty: 'วิทยาศาสตร์', yearLevel: 1, semester: 3),
+        {'faculty': 'วิทยาศาสตร์', 'year_level': '1', 'semester': '3'},
+      );
     });
   });
+
+  group('รูปแบบ PDF (สรุปต่อคน / ละเอียด)', () {
+    test('ค่าที่ส่งให้ backend ตรงกับ query `mode`', () {
+      expect(ReportMode.summary.apiValue, 'summary');
+      expect(ReportMode.detail.apiValue, 'detail');
+    });
+
+    test('query ของ PDF = ตัวกรอง + mode และค่าเริ่มต้นคือสรุปต่อคน', () {
+      expect(pdfReportQuery(), {'mode': 'summary'});
+      expect(
+        pdfReportQuery(faculty: 'คณะนิติศาสตร์', yearLevel: 2, semester: 1, mode: ReportMode.detail),
+        {'faculty': 'คณะนิติศาสตร์', 'year_level': '2', 'semester': '1', 'mode': 'detail'},
+      );
+    });
+  });
+
+  group('เตือนก่อนออกไฟล์ใหญ่', () {
+    ReportCounts counts({int students = 4078, int detail = 20390}) => ReportCounts(
+          students: students,
+          summaryRows: students,
+          detailRows: detail,
+          summaryPages: (students / 24).ceil(),
+          detailPages: (detail / 24).ceil(),
+          largeThreshold: 5000,
+        );
+
+    test('อ่านจาก JSON ของ /reports/student-hours/count', () {
+      final c = ReportCounts.fromJson({
+        'students': 2,
+        'summary_rows': 2,
+        'detail_rows': 4,
+        'summary_pages': 1,
+        'detail_pages': 1,
+        'large_threshold': 5000,
+      });
+      expect(c.rowsFor(ReportMode.summary), 2);
+      expect(c.rowsFor(ReportMode.detail), 4);
+      expect(c.largeThreshold, 5000);
+    });
+
+    test('ทั้งมหาวิทยาลัย: แบบละเอียดเตือน แบบสรุปไม่เตือน', () {
+      final c = counts();
+      expect(c.isLarge(ReportMode.summary), isFalse); // 4,078 คน ≤ 5,000
+      expect(c.warningFor(ReportMode.summary), isNull);
+      expect(c.isLarge(ReportMode.detail), isTrue); // 20,390 แถว
+      final warning = c.warningFor(ReportMode.detail)!;
+      expect(warning, contains('20,390'));
+      expect(warning, contains('กรอง'));
+      expect(warning, contains('สรุปต่อคน')); // แนะนำทางออกที่เล็กกว่า
+    });
+
+    test('เกณฑ์คือ "มากกว่า" 5,000 — เท่ากับพอดีไม่เตือน', () {
+      expect(counts(students: 5000, detail: 5000).isLarge(ReportMode.detail), isFalse);
+      expect(counts(students: 5001, detail: 5001).isLarge(ReportMode.detail), isTrue);
+    });
+
+    test('แบบสรุปที่ใหญ่เกินก็เตือน แต่ไม่แนะนำ "เลือกสรุปต่อคน" ซ้ำ', () {
+      final warning = counts(students: 6000, detail: 30000).warningFor(ReportMode.summary)!;
+      expect(warning, contains('6,000'));
+      expect(warning, isNot(contains('สรุปต่อคน')));
+    });
+  });
+
   group('ดาวน์โหลด Bronze / Silver (admin)', () {
     test('path ตรงกับ endpoint ของ backend', () {
       expect(LakeLayer.bronze.path, '/export/bronze.zip');

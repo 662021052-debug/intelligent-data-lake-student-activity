@@ -3,24 +3,30 @@
 ข้อมูลอ่านจาก ``gold_student_hours`` (Gold Layer) เท่านั้น เหมือนแดชบอร์ด —
 ตัวเลขในไฟล์ที่ส่งออกจึงตรงกับตัวเลขบนหน้าจอเสมอ ไม่ใช่คนละชุดเพราะคำนวณคนละที่
 
-หนึ่งแถว = นิสิตหนึ่งคน × หมวดชั่วโมงหนึ่งหมวด (grain เดียวกับ view ต้นทาง) แถว
-"สถานะ" จึงเป็นสถานะของหมวดนั้น ไม่ใช่ของนิสิตทั้งคน
+รายงานมี 2 รูปแบบ:
 
-``openpyxl`` และ ``reportlab`` ถูก import แบบ lazy ในฟังก์ชันที่ใช้จริง ตามแนวเดียว
-กับ minio/easyocr — โมดูลนี้ import ได้เสมอแม้เครื่องนั้นยังไม่ได้ติดตั้ง
+* **ละเอียด** — หนึ่งแถว = นิสิตหนึ่งคน × หมวดหนึ่งหมวด (grain เดียวกับ view ต้นทาง) แถว
+  "สถานะ" จึงเป็นสถานะของหมวดนั้น ไม่ใช่ของนิสิตทั้งคน (Excel ใช้รูปแบบนี้เสมอ)
+* **สรุปต่อคน** — หนึ่งแถว = นิสิตหนึ่งคน (ค่าเริ่มต้นของ PDF) ชั่วโมงรวม + จำนวนหมวดที่ครบ
+  + สถานะรวม (ครบก็ต่อเมื่อครบทุกหมวด — กติกาเดียวกับแดชบอร์ด)
+
+การจัดหน้า PDF อยู่ที่ ``report_pdf.py`` · ``openpyxl`` และ ``reportlab`` ถูก import แบบ lazy
+ในฟังก์ชันที่ใช้จริง ตามแนวเดียวกับ minio/easyocr — โมดูลนี้ import ได้เสมอ
+แม้เครื่องนั้นยังไม่ได้ติดตั้ง
 """
 
 from __future__ import annotations
 
 import io
+import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Sequence
 
 from sqlalchemy import text
 from sqlmodel import Session
 
-from app.fonts import find_thai_font
+from app.completion import ItemProgress
 from app.timeutil import format_thai_datetime, now_th_naive
 
 REPORT_TITLE = "รายงานชั่วโมงกิจกรรมสะสมของนิสิต"
@@ -36,8 +42,28 @@ COLUMN_HEADERS = [
     "สถานะ",
 ]
 
+SUMMARY_COLUMN_HEADERS = [
+    "รหัสนิสิต",
+    "ชื่อ-สกุล",
+    "คณะ",
+    "ชั้นปี",
+    "ชั่วโมงที่ได้",
+    "หมวดที่ครบ",
+    "สถานะ",
+]
+
 STATUS_COMPLETE = "ครบ"
 STATUS_INCOMPLETE = "ไม่ครบ"
+
+MODE_SUMMARY = "summary"
+MODE_DETAIL = "detail"
+
+# เกินนี้ (จำนวนแถวของรูปแบบที่เลือก) หน้าเว็บจะเตือนก่อนออกไฟล์ — 5,000 แถว ≈ 200 หน้า
+LARGE_REPORT_ROWS = 5000
+# แถวต่อหน้าโดยประมาณของ PDF (A4 แนวนอน) ไว้ประมาณจำนวนหน้าตอนเตือน — ตรวจกับไฟล์จริงในเทสต์
+PDF_ROWS_PER_PAGE = 24
+
+SEMESTER_LABELS = {1: "ภาคเรียนที่ 1", 2: "ภาคเรียนที่ 2", 3: "ภาคฤดูร้อน"}
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PDF_MEDIA_TYPE = "application/pdf"
@@ -62,23 +88,43 @@ class ReportRow:
     earned_hours: float
     required_hours: float
     completed: bool
+    student_key: int = 0  # ไว้รวมเป็นรายคน (ไม่แสดงในไฟล์)
 
     @property
     def status_text(self) -> str:
         return STATUS_COMPLETE if self.completed else STATUS_INCOMPLETE
 
 
+@dataclass(frozen=True)
+class StudentSummary:
+    """หนึ่งแถวของรายงาน "สรุปต่อคน" """
+
+    student_code: str
+    full_name: str
+    faculty: str
+    year_level: int
+    total_hours: float  # ชั่วโมงอนุมัติรวมของนิสิต (นับกิจกรรมละครั้ง ไม่ซ้ำตามหมวด)
+    completed_items: int
+    total_items: int
+
+    @property
+    def all_completed(self) -> bool:
+        return self.total_items > 0 and self.completed_items == self.total_items
+
+    @property
+    def status_text(self) -> str:
+        return STATUS_COMPLETE if self.all_completed else STATUS_INCOMPLETE
+
+    @property
+    def items_text(self) -> str:
+        return f"ครบ {self.completed_items}/{self.total_items} หมวด"
+
+
 def _format_hours(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
-def fetch_report_rows(
-    session: Session,
-    *,
-    faculty: Optional[str] = None,
-    year_level: Optional[int] = None,
-) -> list[ReportRow]:
-    """แถวของรายงานตามตัวกรอง เรียงตามรหัสนิสิต แล้วตามลำดับหมวด"""
+def _student_clauses(faculty: Optional[str], year_level: Optional[int]) -> tuple[list[str], dict]:
     clauses = ["1 = 1"]
     params: dict = {}
     if faculty:
@@ -87,11 +133,27 @@ def fetch_report_rows(
     if year_level is not None:
         clauses.append("year_level = :year_level")
         params["year_level"] = year_level
+    return clauses, params
 
+
+def fetch_report_rows(
+    session: Session,
+    *,
+    faculty: Optional[str] = None,
+    year_level: Optional[int] = None,
+    semester: Optional[int] = None,
+) -> list[ReportRow]:
+    """แถวของรายงานตามตัวกรอง เรียงตามรหัสนิสิต แล้วตามลำดับหมวด
+
+    ไม่กรองภาคเรียน = ยอดสะสมทั้งหลักสูตรจาก gold_student_hours ตรง ๆ · กรองภาคเรียน = คำนวณ
+    ชั่วโมงที่ได้ของแต่ละหมวดใหม่จากการเข้าร่วมในภาคนั้นเท่านั้น (วิธีเดียวกับแดชบอร์ด) ส่วน
+    "ชั่วโมงที่ต้องการ" ยังเป็นของทั้งหลักสูตร และสถานะเทียบสองค่านั้นด้วยกฎเดียวกับแดชบอร์ด
+    """
+    clauses, params = _student_clauses(faculty, year_level)
     rows = session.execute(
         text(
             "SELECT student_code, full_name, faculty, year_level, category_name, "
-            "earned_hours, required_hours, completed "
+            "earned_hours, required_hours, completed, student_key, category_key "
             "FROM gold_student_hours "
             f"WHERE {' AND '.join(clauses)} "
             "ORDER BY student_code, category_key"
@@ -99,30 +161,128 @@ def fetch_report_rows(
         params,
     ).all()
 
-    return [
-        ReportRow(
-            student_code=str(code),
-            full_name=str(name),
-            faculty=str(fac),
-            year_level=int(year),
-            category_name=str(category or "ไม่ระบุหมวด"),
-            earned_hours=float(earned or 0),
-            required_hours=float(required or 0),
-            completed=bool(completed),
+    semester_earned: dict[tuple[int, int], float] = {}
+    if semester is not None:
+        semester_earned = {
+            (student_key, item_key): float(hours or 0)
+            for student_key, item_key, hours in session.execute(
+                text(
+                    "SELECT f.student_key, f.item_key, SUM(f.hours_earned) "
+                    "FROM gold_fact_item_hours f "
+                    "JOIN gold_dim_date d ON d.date_key = f.date_key "
+                    "WHERE d.semester = :semester GROUP BY f.student_key, f.item_key"
+                ),
+                {"semester": semester},
+            ).all()
+        }
+
+    result = []
+    for code, name, fac, year, category, earned, required, completed, student_key, item_key in rows:
+        if semester is not None:
+            earned = semester_earned.get((student_key, item_key), 0.0)
+            completed = ItemProgress(item_key, "", float(earned), float(required or 0)).completed
+        result.append(
+            ReportRow(
+                student_code=str(code),
+                full_name=str(name),
+                faculty=str(fac),
+                year_level=int(year),
+                category_name=str(category or "ไม่ระบุหมวด"),
+                earned_hours=float(earned or 0),
+                required_hours=float(required or 0),
+                completed=bool(completed),
+                student_key=int(student_key),
+            )
         )
-        for code, name, fac, year, category, earned, required, completed in rows
+    return result
+
+
+def fetch_student_totals(session: Session, *, semester: Optional[int] = None) -> dict[int, float]:
+    """student_key → ชั่วโมงอนุมัติรวม (กิจกรรมละครั้ง) — ตัวเลขเดียวกับ "ชั่วโมงรวม" บนแดชบอร์ด
+
+    ไม่ใช้ผลรวมของแถวรายหมวด เพราะกิจกรรมหนึ่งนับเข้าได้หลายรายการเกณฑ์ (เต็มชั่วโมงทุกรายการ)
+    ผลรวมรายหมวดจึงนับซ้ำ
+    """
+    sql = "SELECT f.student_key, SUM(f.hours_earned) FROM gold_fact_participation f"
+    params: dict = {}
+    if semester is not None:
+        sql += " JOIN gold_dim_date d ON d.date_key = f.date_key WHERE d.semester = :semester"
+        params["semester"] = semester
+    sql += " GROUP BY f.student_key"
+    return {row[0]: float(row[1] or 0) for row in session.execute(text(sql), params).all()}
+
+
+def summarize_rows(rows: Sequence[ReportRow], totals: dict[int, float]) -> list[StudentSummary]:
+    """รวมแถวรายหมวดเป็นแถวเดียวต่อนิสิต (คงลำดับตามรหัสนิสิตเดิม)"""
+    grouped: dict[str, list[ReportRow]] = {}
+    for row in rows:
+        grouped.setdefault(row.student_code, []).append(row)
+    return [
+        StudentSummary(
+            student_code=code,
+            full_name=items[0].full_name,
+            faculty=items[0].faculty,
+            year_level=items[0].year_level,
+            total_hours=totals.get(items[0].student_key, 0.0),
+            completed_items=sum(1 for item in items if item.completed),
+            total_items=len(items),
+        )
+        for code, items in grouped.items()
     ]
 
 
-def describe_filters(faculty: Optional[str], year_level: Optional[int]) -> str:
+def fetch_report_summary(
+    session: Session,
+    *,
+    faculty: Optional[str] = None,
+    year_level: Optional[int] = None,
+    semester: Optional[int] = None,
+) -> list[StudentSummary]:
+    rows = fetch_report_rows(session, faculty=faculty, year_level=year_level, semester=semester)
+    return summarize_rows(rows, fetch_student_totals(session, semester=semester))
+
+
+def count_report_rows(
+    session: Session, *, faculty: Optional[str] = None, year_level: Optional[int] = None
+) -> tuple[int, int]:
+    """(จำนวนนิสิต, จำนวนแถวแบบละเอียด) ตามตัวกรอง — ภาคเรียนไม่เปลี่ยนจำนวนแถว จึงไม่รับ
+
+    ไว้เตือนผู้ใช้ก่อนออกไฟล์ใหญ่ โดยไม่ต้องดึงแถวทั้งหมดมานับ
+    """
+    clauses, params = _student_clauses(faculty, year_level)
+    students, detail_rows = session.execute(
+        text(
+            "SELECT COUNT(DISTINCT student_key), COUNT(*) FROM gold_student_hours "
+            f"WHERE {' AND '.join(clauses)}"
+        ),
+        params,
+    ).one()
+    return int(students or 0), int(detail_rows or 0)
+
+
+def estimate_pdf_pages(rows: int) -> int:
+    return max(1, math.ceil(rows / PDF_ROWS_PER_PAGE))
+
+
+def describe_filters(
+    faculty: Optional[str], year_level: Optional[int], semester: Optional[int] = None
+) -> str:
     """บรรทัดบอกเงื่อนไขที่ใช้กรอง เขียนบนหัวรายงานเพื่อไม่ให้ไฟล์ที่พิมพ์ออกมา
     กำกวมว่าเป็นข้อมูลของใครบ้าง"""
     parts = []
     if faculty:
-        parts.append(f"คณะ{faculty}")
+        # ชื่อจริงในระบบขึ้นต้นด้วย "คณะ"/"วิทยาลัย" อยู่แล้ว — เติมซ้ำจะได้ "คณะคณะ..."
+        parts.append(faculty if faculty.startswith(("คณะ", "วิทยาลัย")) else f"คณะ{faculty}")
     if year_level is not None:
         parts.append(f"ชั้นปีที่ {year_level}")
-    return " · ".join(parts) if parts else "ทุกคณะ ทุกชั้นปี"
+    note = " · ".join(parts) if parts else "ทุกคณะ ทุกชั้นปี"
+    if semester is not None:
+        # ต้องบอกให้ชัด: ผู้อ่านมักคิดว่า "ชั่วโมงที่ต้องการ" ถูกหารตามภาคด้วย
+        note += (
+            f" · {SEMESTER_LABELS.get(semester, f'ภาคเรียนที่ {semester}')} "
+            "(นับชั่วโมงที่ได้เฉพาะภาคเรียนนี้ เทียบกับชั่วโมงที่ต้องการของทั้งหลักสูตร)"
+        )
+    return note
 
 
 def report_filename(extension: str, now: Optional[datetime] = None) -> str:
@@ -180,101 +340,4 @@ def build_xlsx(rows: list[ReportRow], *, filter_note: str, generated_at: Optiona
 
     buffer = io.BytesIO()
     workbook.save(buffer)
-    return buffer.getvalue()
-
-
-# --------------------------- PDF ---------------------------
-_PDF_FONT_NAME = "ThaiReport"
-
-
-def _register_thai_font() -> str:
-    """ลงทะเบียนฟอนต์ไทยกับ reportlab แล้วคืนชื่อฟอนต์ที่ใช้อ้างอิง"""
-    from reportlab.pdfbase import pdfmetrics  # lazy
-    from reportlab.pdfbase.ttfonts import TTFont
-
-    if _PDF_FONT_NAME in pdfmetrics.getRegisteredFontNames():
-        return _PDF_FONT_NAME
-
-    font_path = find_thai_font()
-    if font_path is None:
-        raise ThaiFontMissingError(
-            "ไม่พบฟอนต์ภาษาไทยในเครื่องนี้ จึงสร้างไฟล์ PDF ไม่ได้ "
-            "(ติดตั้งแพ็กเกจ fonts-thai-tlwg แล้วลองใหม่ หรือใช้ Excel แทน)"
-        )
-    pdfmetrics.registerFont(TTFont(_PDF_FONT_NAME, font_path))
-    return _PDF_FONT_NAME
-
-
-def build_pdf(rows: list[ReportRow], *, filter_note: str, generated_at: Optional[datetime] = None) -> bytes:
-    from reportlab.lib import colors  # lazy
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-
-    font = _register_thai_font()
-    title_style = ParagraphStyle("title", fontName=font, fontSize=16, leading=20)
-    note_style = ParagraphStyle("note", fontName=font, fontSize=11, leading=15)
-
-    buffer = io.BytesIO()
-    document = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        leftMargin=12 * mm,
-        rightMargin=12 * mm,
-        topMargin=12 * mm,
-        bottomMargin=12 * mm,
-        title=REPORT_TITLE,
-    )
-
-    data = [COLUMN_HEADERS]
-    data += [
-        [
-            row.student_code,
-            row.full_name,
-            row.faculty,
-            str(row.year_level),
-            row.category_name,
-            _format_hours(row.earned_hours),
-            _format_hours(row.required_hours),
-            row.status_text,
-        ]
-        for row in rows
-    ]
-
-    table = Table(
-        data,
-        colWidths=[26 * mm, 55 * mm, 45 * mm, 16 * mm, 60 * mm, 24 * mm, 28 * mm, 20 * mm],
-        # หัวตารางซ้ำทุกหน้า — รายงานหลายร้อยแถวกินหลายหน้า ถ้าไม่ซ้ำหน้าหลัง ๆ
-        # จะอ่านไม่ออกว่าคอลัมน์ไหนคืออะไร
-        repeatRows=1,
-    )
-    table.setStyle(
-        TableStyle(
-            [
-                ("FONTNAME", (0, 0), (-1, -1), font),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EAF6")),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#9E9E9E")),
-                ("ALIGN", (3, 1), (3, -1), "CENTER"),
-                ("ALIGN", (5, 1), (7, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F5F5")]),
-            ]
-        )
-    )
-
-    story = [
-        Paragraph(REPORT_TITLE, title_style),
-        Spacer(1, 4),
-        Paragraph(f"เงื่อนไข: {filter_note}", note_style),
-        Paragraph(
-            f"ออกรายงานเมื่อ {format_thai_datetime(generated_at or now_th_naive())} "
-            f"· ทั้งหมด {len(rows)} รายการ",
-            note_style,
-        ),
-        Spacer(1, 8),
-        table,
-    ]
-    document.build(story)
     return buffer.getvalue()

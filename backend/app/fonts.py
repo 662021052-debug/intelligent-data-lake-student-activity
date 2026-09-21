@@ -22,6 +22,25 @@ FONT_CANDIDATES = [
 ]
 
 
+# Sarabun (Google Fonts, SIL OFL) ที่แนบมากับโค้ด — ฟอนต์ตัวเดียวกับที่หน้าเว็บใช้
+# รายงาน PDF ใช้ตัวนี้เป็นหลักเพื่อให้หน้าตาเหมือนกันทุกเครื่อง (เครื่อง dev, Docker, เซิร์ฟเวอร์)
+# แทนที่จะขึ้นกับว่า OS นั้นติดตั้งฟอนต์อะไรไว้ · ไม่ได้แตะ FONT_CANDIDATES เพราะ seed ใบประกาศ
+# ใช้รายการนั้นและ OCR ผูกกับหน้าตาฟอนต์เดิม
+REPORT_FONT_DIR = Path(__file__).parent / "assets" / "fonts"
+
+
+def find_report_fonts() -> tuple[Optional[str], Optional[str]]:
+    """(ฟอนต์ปกติ, ฟอนต์ตัวหนา) สำหรับรายงาน PDF — ตัวหนาเป็น None ถ้าไม่มี (หัวตารางใช้ตัวปกติแทน)
+
+    ตัวปกติเป็น None ก็ต่อเมื่อไม่มีทั้ง Sarabun ที่แนบมาและฟอนต์ไทยใด ๆ ในเครื่อง
+    """
+    regular = REPORT_FONT_DIR / "Sarabun-Regular.ttf"
+    bold = REPORT_FONT_DIR / "Sarabun-Bold.ttf"
+    if regular.exists():
+        return str(regular), (str(bold) if bold.exists() else None)
+    return find_thai_font(), None
+
+
 def find_thai_font() -> Optional[str]:
     """path ของฟอนต์ไทยตัวแรกที่เจอในเครื่อง (None ถ้าไม่มีเลย)"""
     for path in FONT_CANDIDATES:
