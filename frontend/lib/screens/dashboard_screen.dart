@@ -79,6 +79,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// รูปแบบที่กำลังส่งออกอยู่ (null = ไม่ได้กำลังส่งออก) — กันกดซ้ำระหว่างรอไฟล์
   ReportFormat? _exporting;
 
+  /// เหมือน [_exporting] แต่สำหรับปุ่มดาวน์โหลด Bronze/Silver ของ admin
+  LakeLayer? _exportingLayer;
+
   // filters
   String? _faculty;
   int? _yearLevel;
@@ -225,6 +228,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) showErrorSnackbar(context, friendlyError(e));
     } finally {
       if (mounted) setState(() => _exporting = null);
+    }
+  }
+
+  /// ดาวน์โหลดข้อมูลดิบของ layer ที่เลือก — ทั้งหมด ไม่ขึ้นกับตัวกรองบนหน้า
+  Future<void> _exportLayer(LakeLayer layer) async {
+    setState(() => _exportingLayer = layer);
+    try {
+      final bytes = await ApiService.downloadBytes(layer.path);
+      saveBytesAsFile(bytes, lakeFileName(layer), layer.mediaType);
+      if (mounted) showInfoSnackbar(context, 'ดาวน์โหลดไฟล์ ${layer.displayName} เรียบร้อย');
+    } catch (e) {
+      if (mounted) showErrorSnackbar(context, friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _exportingLayer = null);
     }
   }
 
@@ -401,7 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Tooltip(
             message: 'รายงานชั่วโมงสะสมตามคณะ/ชั้นปีที่เลือก',
             child: OutlinedButton.icon(
-              onPressed: _exporting != null ? null : () => _export(format),
+              onPressed: _anyExporting ? null : () => _export(format),
               icon: _exporting == format
                   ? const SizedBox(
                       width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -412,7 +429,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
               label: Text(format.label),
             ),
           ),
+        // ข้อมูลดิบ Bronze/Silver — admin เท่านั้น (backend ก็ตอบ 403 ให้ role อื่นอยู่แล้ว)
+        if (authService.isAdmin)
+          for (final layer in LakeLayer.values)
+            Tooltip(
+              message: 'ข้อมูลดิบทั้งหมด ไม่ขึ้นกับตัวกรองบนหน้านี้',
+              child: OutlinedButton.icon(
+                onPressed: _anyExporting ? null : () => _exportLayer(layer),
+                icon: _exportingLayer == layer
+                    ? const SizedBox(
+                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(
+                        layer == LakeLayer.bronze
+                            ? Icons.folder_zip_outlined
+                            : Icons.table_chart_outlined,
+                        size: 16,
+                      ),
+                label: Text(layer.label),
+              ),
+            ),
       ];
+
+  /// กำลังดาวน์โหลดอยู่ (รายงานหรือข้อมูลดิบ) — กันกดซ้ำ/กดข้ามปุ่มระหว่างรอไฟล์
+  bool get _anyExporting => _exporting != null || _exportingLayer != null;
 
   // --------------------------- filters ---------------------------
 

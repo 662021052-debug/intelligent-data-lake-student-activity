@@ -53,4 +53,26 @@ void main() {
       expect(reportQuery(faculty: 'วิทยาศาสตร์', yearLevel: 1).keys, isNot(contains('semester')));
     });
   });
+  group('ดาวน์โหลด Bronze / Silver (admin)', () {
+    test('path ตรงกับ endpoint ของ backend', () {
+      expect(LakeLayer.bronze.path, '/export/bronze.zip');
+      expect(LakeLayer.silver.path, '/export/silver.csv');
+    });
+
+    test('ป้ายปุ่มเป็นภาษาไทยตามสเปก', () {
+      expect(LakeLayer.bronze.label, 'ส่งออก Bronze (ZIP)');
+      expect(LakeLayer.silver.label, 'ส่งออก Silver (CSV)');
+    });
+
+    test('media type ตรงกับชนิดไฟล์', () {
+      expect(LakeLayer.bronze.mediaType, 'application/zip');
+      expect(LakeLayer.silver.mediaType, 'text/csv');
+    });
+
+    test('ชื่อไฟล์มีวันที่และนามสกุลถูกต้อง เดือน/วันเลขเดียวเติมศูนย์', () {
+      final date = DateTime(2026, 1, 9);
+      expect(lakeFileName(LakeLayer.bronze, date), 'bronze_evidence_2026-01-09.zip');
+      expect(lakeFileName(LakeLayer.silver, date), 'silver_evidence_ocr_2026-01-09.csv');
+    });
+  });
 }

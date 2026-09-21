@@ -40,3 +40,30 @@ Map<String, String> reportQuery({String? faculty, int? yearLevel}) => {
       'faculty': ?faculty,
       if (yearLevel != null) 'year_level': '$yearLevel',
     };
+
+/// ดาวน์โหลดข้อมูลดิบของ Data Lake (เฉพาะ admin) — ต่างจาก [ReportFormat] ที่เป็นรายงานสรุปจาก Gold
+///
+/// ไม่มีตัวกรองคณะ/ชั้นปี/ภาคเรียน: endpoint ฝั่ง backend กรองได้แค่ activity/student/ช่วงวันที่
+/// ปุ่มบนแดชบอร์ดจึงส่งออก "ทั้งหมด" เสมอ (บอกไว้ใน tooltip ไม่ให้เข้าใจว่ากรองตามหน้าจอ)
+enum LakeLayer { bronze, silver }
+
+extension LakeLayerInfo on LakeLayer {
+  String get extension => this == LakeLayer.bronze ? 'zip' : 'csv';
+
+  String get label => this == LakeLayer.bronze ? 'ส่งออก Bronze (ZIP)' : 'ส่งออก Silver (CSV)';
+
+  String get displayName => this == LakeLayer.bronze ? 'Bronze' : 'Silver';
+
+  String get mediaType => this == LakeLayer.bronze ? 'application/zip' : 'text/csv';
+
+  String get path => this == LakeLayer.bronze ? '/export/bronze.zip' : '/export/silver.csv';
+}
+
+/// ชื่อไฟล์พร้อมวันที่ — ฝั่งเว็บสร้างไฟล์จาก blob เอง จึงตั้งชื่อเองเหมือน [reportFileName]
+String lakeFileName(LakeLayer layer, [DateTime? now]) {
+  final date = now ?? DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  final stamp = '${date.year}-${two(date.month)}-${two(date.day)}';
+  final base = layer == LakeLayer.bronze ? 'bronze_evidence' : 'silver_evidence_ocr';
+  return '${base}_$stamp.${layer.extension}';
+}

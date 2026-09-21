@@ -8,9 +8,12 @@ tests swap in an in-memory fake without a running MinIO.
 from __future__ import annotations
 
 import io
-from typing import Optional, Protocol, runtime_checkable
+from typing import Iterator, Optional, Protocol, runtime_checkable
 
 from app.config import settings
+
+
+STREAM_CHUNK_SIZE = 64 * 1024
 
 
 @runtime_checkable
@@ -24,6 +27,9 @@ class ObjectStorage(Protocol):
         ...
 
     def get_object_bytes(self, bucket: str, object_key: str) -> bytes:
+        ...
+
+    def iter_object(self, bucket: str, object_key: str, chunk_size: int = ...) -> Iterator[bytes]:
         ...
 
     def remove_object(self, bucket: str, object_key: str) -> None:
@@ -78,6 +84,29 @@ class MinIOStorage:
                 response.close()
                 response.release_conn()
 
+    def iter_object(
+        self, bucket: str, object_key: str, chunk_size: int = STREAM_CHUNK_SIZE
+    ) -> Iterator[bytes]:
+        """Open the object now (a missing key raises FileNotFoundError here, not on the
+        first `next()`), then hand back an iterator that streams it chunk by chunk."""
+        from minio.error import S3Error
+
+        try:
+            response = self._client.get_object(bucket, object_key)
+        except S3Error as exc:
+            if exc.code in ("NoSuchKey", "NoSuchBucket"):
+                raise FileNotFoundError(object_key) from exc
+            raise
+
+        def _stream() -> Iterator[bytes]:
+            try:
+                yield from response.stream(chunk_size)
+            finally:
+                response.close()
+                response.release_conn()
+
+        return _stream()
+
     def remove_object(self, bucket: str, object_key: str) -> None:
         # MinIO's remove_object is already idempotent — a missing key is not an error
         self._client.remove_object(bucket, object_key)
@@ -104,6 +133,12 @@ class InMemoryStorage:
             return self._objects[(bucket, object_key)]
         except KeyError as exc:
             raise FileNotFoundError(object_key) from exc
+
+    def iter_object(
+        self, bucket: str, object_key: str, chunk_size: int = STREAM_CHUNK_SIZE
+    ) -> Iterator[bytes]:
+        data = self.get_object_bytes(bucket, object_key)  # FileNotFoundError if missing
+        return (data[i : i + chunk_size] for i in range(0, len(data), chunk_size))
 
     def remove_object(self, bucket: str, object_key: str) -> None:
         self._objects.pop((bucket, object_key), None)

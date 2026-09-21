@@ -14,6 +14,7 @@ from app.routers import (
     chatbot,
     criteria,
     dashboard,
+    export,
     faculties,
     gold,
     hour_categories,
@@ -102,4 +103,5 @@ app.include_router(gold.router)
 app.include_router(dashboard.router)
 app.include_router(notifications.router)
 app.include_router(reports.router)
+app.include_router(export.router)
 app.include_router(chatbot.router)
